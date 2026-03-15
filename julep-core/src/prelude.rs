@@ -24,9 +24,8 @@ pub use crate::image_registry::ImageRegistry;
 pub use crate::prop_helpers::*;
 
 // Commonly needed iced types
-pub use iced::widget::text;
-pub use iced::Element;
-pub use iced::Theme;
+pub use iced::widget::{column, container, row, text};
+pub use iced::{Color, Element, Font, Length, Padding, Pixels, Theme};
 
 // JSON (extensions parse props from serde_json::Value)
 pub use serde_json::Value;

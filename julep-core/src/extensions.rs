@@ -20,8 +20,62 @@ use crate::widgets::WidgetCaches;
 ///
 /// Extensions handle custom node types that the built-in renderer doesn't
 /// know about. The trait scales from trivial render-only widgets (implement
-/// `type_names`, `config_key`, `render`) to full custom iced Widgets with
+/// `type_names`, `config_key`, `render`) to full custom iced widgets with
 /// autonomous state (implement all methods).
+///
+/// # Lifecycle
+///
+/// Methods are called in this order:
+///
+/// 1. **Registration** -- `type_names()` and `config_key()` are queried once
+///    at startup to build the dispatch index. `config_key()` must be unique
+///    and must not contain `':'` (reserved as the cache namespace separator).
+///
+/// 2. **`init(config)`** -- called when a Settings message arrives from the
+///    host. Receives the value from `extension_config[config_key]`, or
+///    `Value::Null` if absent. Called before any `prepare()`.
+///
+/// 3. **`prepare(node, caches, theme)`** -- called in the mutable phase
+///    (during `update()`) after every tree change (Snapshot or Patch), for
+///    each node whose type matches this extension. Use this to create or
+///    update per-node state in `ExtensionCaches`. Guaranteed to run before
+///    `render()` for the same tree state.
+///
+/// 4. **`render(node, env)`** -- called in the immutable phase (`view()`)
+///    to produce an iced `Element`. Receives read-only access to caches
+///    via `WidgetEnv`. May be called multiple times per frame. Must not
+///    block or perform I/O.
+///
+/// 5. **`handle_event(node_id, family, data, caches)`** -- called when a
+///    widget event is emitted for a node owned by this extension. Return
+///    `EventResult::PassThrough` to forward the event to the host,
+///    `Consumed(events)` to suppress it, or `Observed(events)` to forward
+///    the original AND emit additional events.
+///
+/// 6. **`handle_command(node_id, op, payload, caches)`** -- called when the
+///    host sends an `ExtensionCommand` targeting a node owned by this
+///    extension. Return any events to emit back to the host.
+///
+/// 7. **`cleanup(node_id, caches)`** -- called when a node is removed from
+///    the tree (detected during `prepare_all()`). Use this to release
+///    per-node resources from `ExtensionCaches`. Not called on process
+///    exit or panic.
+///
+/// # Panic isolation
+///
+/// All mutable methods (`init`, `prepare`, `handle_event`,
+/// `handle_command`, `cleanup`) are wrapped in `catch_unwind`. A panic
+/// poisons the extension -- subsequent calls are skipped and a red
+/// placeholder is rendered. Three consecutive `render()` panics also
+/// trigger poisoning. Poison state is cleared on the next Snapshot.
+///
+/// # Cache access
+///
+/// `prepare()`, `handle_event()`, `handle_command()`, and `cleanup()`
+/// receive `&mut ExtensionCaches` for read-write access. `render()`
+/// receives read-only access via `WidgetEnv.caches`. This split matches
+/// iced's `update()`/`view()` separation -- mutation happens in `update`,
+/// reads in `view`.
 pub trait WidgetExtension: Send + Sync + 'static {
     /// Node type names this extension handles (e.g. ["sparkline", "heatmap"]).
     fn type_names(&self) -> &[&str];
@@ -194,6 +248,8 @@ pub struct WidgetEnv<'a> {
     pub images: &'a ImageRegistry,
     pub theme: &'a Theme,
     pub render_ctx: RenderContext<'a>,
+    pub default_text_size: Option<f32>,
+    pub default_font: Option<iced::Font>,
 }
 
 /// Renders child nodes through the main dispatch. Copy-able (all shared refs).
@@ -241,6 +297,14 @@ impl ExtensionDispatcher {
                 panic!(
                     "extension registered with empty config_key() \
                      (type_names: {:?})",
+                    ext.type_names()
+                );
+            }
+            if ext.config_key().contains(':') {
+                panic!(
+                    "extension config_key `{}` contains ':' (reserved as \
+                     cache namespace separator); type_names: {:?}",
+                    ext.config_key(),
                     ext.type_names()
                 );
             }
@@ -299,10 +363,14 @@ impl ExtensionDispatcher {
         self.type_name_index.contains_key(type_name)
     }
 
+    /// Maximum tree recursion depth for walk_prepare. Must match
+    /// `MAX_TREE_DEPTH` in widgets.rs.
+    const MAX_WALK_DEPTH: usize = 256;
+
     /// Called after Core::apply() on tree changes.
     pub fn prepare_all(&mut self, root: &TreeNode, caches: &mut ExtensionCaches, theme: &Theme) {
         let mut new_map = HashMap::new();
-        self.walk_prepare(root, caches, theme, &mut new_map);
+        self.walk_prepare(root, caches, theme, &mut new_map, 0);
 
         // Prune stale nodes
         for (old_id, ext_idx) in &self.node_extension_map {
@@ -356,7 +424,16 @@ impl ExtensionDispatcher {
         caches: &mut ExtensionCaches,
         theme: &Theme,
         map: &mut HashMap<String, usize>,
+        depth: usize,
     ) {
+        if depth > Self::MAX_WALK_DEPTH {
+            log::warn!(
+                "[id={}] walk_prepare depth exceeds {}, skipping subtree",
+                node.id,
+                Self::MAX_WALK_DEPTH
+            );
+            return;
+        }
         if let Some(&idx) = self.type_name_index.get(node.type_name.as_str()) {
             if !self.poisoned[idx] {
                 let result = catch_unwind(AssertUnwindSafe(|| {
@@ -374,7 +451,7 @@ impl ExtensionDispatcher {
             map.insert(node.id.clone(), idx);
         }
         for child in &node.children {
-            self.walk_prepare(child, caches, theme, map);
+            self.walk_prepare(child, caches, theme, map, depth + 1);
         }
     }
 
@@ -517,6 +594,42 @@ impl ExtensionDispatcher {
         for counter in &self.render_panic_counts {
             counter.store(0, Ordering::Relaxed);
         }
+    }
+
+    /// Call cleanup() for every node currently tracked by the dispatcher.
+    ///
+    /// Used before a full state reset (e.g. Reset message) so extensions
+    /// get a chance to release per-node resources before their cache
+    /// entries are wiped.
+    pub fn cleanup_all(&mut self, caches: &mut ExtensionCaches) {
+        for (node_id, &ext_idx) in &self.node_extension_map {
+            if self.poisoned[ext_idx] {
+                continue;
+            }
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                self.extensions[ext_idx].cleanup(node_id, caches);
+            }));
+            if let Err(panic) = result {
+                let msg = panic_message(&panic);
+                log::error!(
+                    "extension `{}` panicked in cleanup: {msg}",
+                    self.extensions[ext_idx].config_key()
+                );
+                self.poisoned[ext_idx] = true;
+            }
+        }
+    }
+
+    /// Full reset: call cleanup for all tracked nodes, clear the node map,
+    /// clear extension caches, and reset poisoned state.
+    ///
+    /// Extensions themselves (the registered trait objects) are preserved --
+    /// only per-node runtime state is wiped.
+    pub fn reset(&mut self, caches: &mut ExtensionCaches) {
+        self.cleanup_all(caches);
+        self.node_extension_map.clear();
+        caches.clear();
+        self.clear_poisoned();
     }
 
     /// Check if any extensions are registered.
@@ -748,6 +861,15 @@ mod tests {
     #[should_panic(expected = "empty config_key()")]
     fn empty_config_key_panics() {
         let ext = TestExtension::new(vec!["widget"], "");
+        ExtensionDispatcher::new(vec![Box::new(ext)]);
+    }
+
+    // -- Colon in config_key validation -----------------------------------------
+
+    #[test]
+    #[should_panic(expected = "contains ':'")]
+    fn config_key_with_colon_panics() {
+        let ext = TestExtension::new(vec!["widget"], "bad:key");
         ExtensionDispatcher::new(vec![Box::new(ext)]);
     }
 
@@ -1063,5 +1185,125 @@ mod tests {
 
         // Extension should also be poisoned.
         assert!(dispatcher.is_poisoned(0));
+    }
+
+    // -- cleanup_all ----------------------------------------------------------
+
+    /// Extension that tracks cleanup calls.
+    struct CleanupTracker {
+        cleaned_ids: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl CleanupTracker {
+        fn new(tracker: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Self {
+            Self {
+                cleaned_ids: tracker,
+            }
+        }
+    }
+
+    impl WidgetExtension for CleanupTracker {
+        fn type_names(&self) -> &[&str] {
+            &["tracked"]
+        }
+        fn config_key(&self) -> &str {
+            "tracker"
+        }
+        fn render<'a>(&self, _node: &'a TreeNode, _env: &WidgetEnv<'a>) -> Element<'a, Message> {
+            use iced::widget::text;
+            text("tracked").into()
+        }
+        fn cleanup(&mut self, node_id: &str, _caches: &mut ExtensionCaches) {
+            self.cleaned_ids.lock().unwrap().push(node_id.to_string());
+        }
+    }
+
+    #[test]
+    fn cleanup_all_calls_cleanup_for_tracked_nodes() {
+        let tracker = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let ext = CleanupTracker::new(tracker.clone());
+        let mut dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let mut caches = ExtensionCaches::new();
+
+        // Register two nodes via prepare_all.
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("t1", "tracked"));
+        root.children.push(make_node("t2", "tracked"));
+        dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
+
+        // cleanup_all should fire cleanup for both tracked nodes.
+        dispatcher.cleanup_all(&mut caches);
+        let cleaned = tracker.lock().unwrap();
+        assert!(cleaned.contains(&"t1".to_string()));
+        assert!(cleaned.contains(&"t2".to_string()));
+        assert_eq!(cleaned.len(), 2);
+    }
+
+    #[test]
+    fn cleanup_all_skips_poisoned_extensions() {
+        let tracker = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let ext = CleanupTracker::new(tracker.clone());
+        let mut dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let mut caches = ExtensionCaches::new();
+
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("t1", "tracked"));
+        dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
+
+        // Poison the extension via render panics.
+        for _ in 0..RENDER_PANIC_THRESHOLD {
+            dispatcher.record_render_panic("tracked");
+        }
+        dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
+        assert!(dispatcher.is_poisoned(0));
+
+        // cleanup_all should skip poisoned extensions.
+        dispatcher.cleanup_all(&mut caches);
+        assert!(tracker.lock().unwrap().is_empty());
+    }
+
+    // -- reset ----------------------------------------------------------------
+
+    #[test]
+    fn reset_clears_node_map_and_caches() {
+        let ext = TestExtension::new(vec!["sparkline"], "charts");
+        let mut dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let mut caches = ExtensionCaches::new();
+
+        // Register a node and insert cache data.
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("s1", "sparkline"));
+        dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
+        caches.insert("charts", "s1".to_string(), 42u32);
+        assert!(caches.contains("charts", "s1"));
+
+        // reset() should clean up everything.
+        dispatcher.reset(&mut caches);
+
+        assert!(!caches.contains("charts", "s1"));
+        assert!(!dispatcher.is_poisoned(0));
+        // After reset, the dispatcher should not track any nodes.
+        // Verify by checking that handle_event returns PassThrough.
+        let result = dispatcher.handle_event("s1", "click", &Value::Null, &mut caches);
+        assert!(matches!(result, EventResult::PassThrough));
+    }
+
+    #[test]
+    fn reset_clears_poisoned_state() {
+        let ext = TestExtension::new(vec!["sparkline"], "charts");
+        let mut dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let mut caches = ExtensionCaches::new();
+
+        // Poison the extension.
+        for _ in 0..RENDER_PANIC_THRESHOLD {
+            dispatcher.record_render_panic("sparkline");
+        }
+        let root = make_node("root", "column");
+        dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
+        assert!(dispatcher.is_poisoned(0));
+
+        // reset() should clear poisoned state.
+        dispatcher.reset(&mut caches);
+        assert!(!dispatcher.is_poisoned(0));
     }
 }

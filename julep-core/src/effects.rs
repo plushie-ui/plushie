@@ -2,6 +2,21 @@ use serde_json::{json, Value};
 
 use crate::protocol::EffectResponse;
 
+/// Convert a file path to a JSON string value, logging a warning if the path
+/// contains non-UTF-8 bytes and lossy conversion is required.
+fn path_to_json_string(path: &std::path::Path) -> String {
+    match path.to_str() {
+        Some(s) => s.to_string(),
+        None => {
+            log::warn!(
+                "file path contains non-UTF-8 bytes, using lossy conversion: {}",
+                path.display()
+            );
+            path.to_string_lossy().into_owned()
+        }
+    }
+}
+
 /// Returns true for effect kinds that should run asynchronously (file dialogs).
 pub fn is_async_effect(kind: &str) -> bool {
     matches!(kind, "file_open" | "file_save" | "directory_select")
@@ -55,7 +70,7 @@ fn handle_file_open(id: String, payload: &Value) -> EffectResponse {
     }
 
     match dialog.pick_file() {
-        Some(path) => EffectResponse::ok(id, json!({"path": path.to_string_lossy()})),
+        Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
         None => EffectResponse::error(id, "cancelled".to_string()),
     }
 }
@@ -95,7 +110,7 @@ fn handle_file_save(id: String, payload: &Value) -> EffectResponse {
     }
 
     match dialog.save_file() {
-        Some(path) => EffectResponse::ok(id, json!({"path": path.to_string_lossy()})),
+        Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
         None => EffectResponse::error(id, "cancelled".to_string()),
     }
 }
@@ -115,7 +130,7 @@ fn handle_directory_select(id: String, payload: &Value) -> EffectResponse {
     let dialog = rfd::FileDialog::new().set_title(title);
 
     match dialog.pick_folder() {
-        Some(path) => EffectResponse::ok(id, json!({"path": path.to_string_lossy()})),
+        Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
         None => EffectResponse::error(id, "cancelled".to_string()),
     }
 }
@@ -332,7 +347,7 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
 
             match dialog.pick_file().await {
                 Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": handle.path().to_string_lossy()}))
+                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
                 }
                 None => EffectResponse::error(id, "cancelled".to_string()),
             }
@@ -367,7 +382,7 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
 
             match dialog.save_file().await {
                 Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": handle.path().to_string_lossy()}))
+                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
                 }
                 None => EffectResponse::error(id, "cancelled".to_string()),
             }
@@ -382,7 +397,7 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
 
             match dialog.pick_folder().await {
                 Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": handle.path().to_string_lossy()}))
+                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
                 }
                 None => EffectResponse::error(id, "cancelled".to_string()),
             }

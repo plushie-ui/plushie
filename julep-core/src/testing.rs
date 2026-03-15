@@ -99,6 +99,8 @@ pub fn widget_env_with<'a>(
             theme,
             extensions: dispatcher,
         },
+        default_text_size: widget_caches.default_text_size,
+        default_font: widget_caches.default_font,
     }
 }
 
@@ -192,6 +194,28 @@ mod tests {
         // Verify env fields are accessible and point to our instances
         assert!(!env.caches.contains("test", "anything"));
         assert!(env.render_ctx.extensions.is_empty());
+        // Default text size and font should be None when WidgetCaches are fresh.
+        assert!(env.default_text_size.is_none());
+        assert!(env.default_font.is_none());
+    }
+
+    #[test]
+    fn test_widget_env_inherits_text_defaults() {
+        use iced::{Font, Theme};
+
+        let mut wc = widget_caches();
+        wc.default_text_size = Some(18.0);
+        wc.default_font = Some(Font::MONOSPACE);
+
+        let ec = ext_caches();
+        let images = image_registry();
+        let theme = Theme::Dark;
+        let disp = dispatcher();
+
+        let env = widget_env_with(&ec, &wc, &images, &theme, &disp);
+
+        assert_eq!(env.default_text_size, Some(18.0));
+        assert_eq!(env.default_font, Some(Font::MONOSPACE));
     }
 
     #[test]

@@ -43,8 +43,8 @@ pub enum Message {
     Toggle(String, bool),
     /// A slider value changed (id, value).
     Slide(String, f64),
-    /// A slider was released (id, value).
-    SlideRelease(String, f64),
+    /// A slider was released (id).
+    SlideRelease(String),
     /// A pick_list/combo_box/radio selection (id, value).
     Select(String, String),
     /// A text editor action (id, action).

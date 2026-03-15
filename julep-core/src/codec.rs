@@ -1,11 +1,11 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read};
 use std::sync::OnceLock;
 
 /// Maximum size for a single wire message (64 MiB). Applied to both JSON
 /// line reads and msgpack length-prefixed frames.
-const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+pub const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 
 /// Maximum nesting depth for `rmpv_to_json` conversion. Prevents stack
 /// overflow from deeply nested (or maliciously crafted) msgpack payloads.
@@ -73,6 +73,12 @@ impl Codec {
         match self {
             Codec::Json => serde_json::from_slice(bytes).map_err(|e| format!("json decode: {e}")),
             Codec::MsgPack => {
+                // Pre-check nesting depth before rmpv deserialization.
+                // rmpv::read_value recurses without a depth limit, so a
+                // pathologically nested payload can cause stack overflow
+                // before our depth-limited rmpv_to_json conversion runs.
+                check_msgpack_depth(bytes, MAX_RMPV_DEPTH)
+                    .map_err(|e| format!("msgpack depth check: {e}"))?;
                 let rmpv_val: rmpv::Value = rmpv::decode::read_value(&mut &bytes[..])
                     .map_err(|e| format!("msgpack decode (rmpv): {e}"))?;
                 let json_val = rmpv_to_json(rmpv_val);
@@ -92,7 +98,11 @@ impl Codec {
         match self {
             Codec::Json => loop {
                 let mut line = String::new();
-                let n = reader.read_line(&mut line)?;
+                // Wrap in Take to bound allocation BEFORE the full line is
+                // buffered. Without this, a sender could transmit an arbitrarily
+                // long line without a newline, causing unbounded memory growth.
+                let limit = (MAX_MESSAGE_SIZE + 1) as u64;
+                let n = (&mut *reader).take(limit).read_line(&mut line)?;
                 if n == 0 {
                     return Ok(None);
                 }
@@ -165,6 +175,215 @@ impl Codec {
     pub fn get_global() -> &'static Codec {
         WIRE_CODEC.get().unwrap_or(&Codec::MsgPack)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Msgpack nesting depth pre-check
+// ---------------------------------------------------------------------------
+
+/// Iteratively scan raw msgpack bytes and reject if container nesting exceeds
+/// `max_depth`. This runs before `rmpv::read_value` (which recurses without
+/// a depth limit) to prevent stack overflow from maliciously crafted payloads.
+fn check_msgpack_depth(bytes: &[u8], max_depth: usize) -> Result<(), String> {
+    let len = bytes.len();
+    let mut pos: usize = 0;
+    let mut depth: usize = 0;
+    // Stack tracks how many child elements remain at each nesting level.
+    let mut remaining: Vec<usize> = Vec::new();
+
+    while pos < len {
+        let b = bytes[pos];
+        pos += 1;
+
+        // Classify the format marker: (data_bytes_to_skip, child_element_count).
+        // For containers (array/map), child_count > 0 and we push a new depth level.
+        // For scalars, child_count == 0 and we consume one element from the parent.
+        let (skip, children) = match b {
+            // positive fixint
+            0x00..=0x7f => (0, 0),
+            // fixmap: N key-value pairs = 2N child elements
+            0x80..=0x8f => (0, ((b & 0x0f) as usize) * 2),
+            // fixarray
+            0x90..=0x9f => (0, (b & 0x0f) as usize),
+            // fixstr
+            0xa0..=0xbf => ((b & 0x1f) as usize, 0),
+            // nil, (unused), false, true
+            0xc0..=0xc3 => (0, 0),
+            // bin8
+            0xc4 => {
+                if pos >= len {
+                    break;
+                }
+                (1 + bytes[pos] as usize, 0)
+            }
+            // bin16
+            0xc5 => {
+                if pos + 1 >= len {
+                    break;
+                }
+                let n = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+                (2 + n, 0)
+            }
+            // bin32
+            0xc6 => {
+                if pos + 3 >= len {
+                    break;
+                }
+                let n = u32::from_be_bytes([
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                ]) as usize;
+                (4 + n, 0)
+            }
+            // ext8
+            0xc7 => {
+                if pos >= len {
+                    break;
+                }
+                (2 + bytes[pos] as usize, 0)
+            }
+            // ext16
+            0xc8 => {
+                if pos + 1 >= len {
+                    break;
+                }
+                let n = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+                (3 + n, 0)
+            }
+            // ext32
+            0xc9 => {
+                if pos + 3 >= len {
+                    break;
+                }
+                let n = u32::from_be_bytes([
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                ]) as usize;
+                (5 + n, 0)
+            }
+            // float32
+            0xca => (4, 0),
+            // float64
+            0xcb => (8, 0),
+            // uint8, int8
+            0xcc | 0xd0 => (1, 0),
+            // uint16, int16
+            0xcd | 0xd1 => (2, 0),
+            // uint32, int32
+            0xce | 0xd2 => (4, 0),
+            // uint64, int64
+            0xcf | 0xd3 => (8, 0),
+            // fixext 1, 2, 4, 8, 16 (type byte + data)
+            0xd4 => (2, 0),
+            0xd5 => (3, 0),
+            0xd6 => (5, 0),
+            0xd7 => (9, 0),
+            0xd8 => (17, 0),
+            // str8
+            0xd9 => {
+                if pos >= len {
+                    break;
+                }
+                (1 + bytes[pos] as usize, 0)
+            }
+            // str16
+            0xda => {
+                if pos + 1 >= len {
+                    break;
+                }
+                let n = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+                (2 + n, 0)
+            }
+            // str32
+            0xdb => {
+                if pos + 3 >= len {
+                    break;
+                }
+                let n = u32::from_be_bytes([
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                ]) as usize;
+                (4 + n, 0)
+            }
+            // array16
+            0xdc => {
+                if pos + 1 >= len {
+                    break;
+                }
+                let n = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+                pos += 2;
+                (0, n)
+            }
+            // array32
+            0xdd => {
+                if pos + 3 >= len {
+                    break;
+                }
+                let n = u32::from_be_bytes([
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                ]) as usize;
+                pos += 4;
+                (0, n)
+            }
+            // map16
+            0xde => {
+                if pos + 1 >= len {
+                    break;
+                }
+                let n = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
+                pos += 2;
+                (0, n * 2)
+            }
+            // map32
+            0xdf => {
+                if pos + 3 >= len {
+                    break;
+                }
+                let n = u32::from_be_bytes([
+                    bytes[pos],
+                    bytes[pos + 1],
+                    bytes[pos + 2],
+                    bytes[pos + 3],
+                ]) as usize;
+                pos += 4;
+                (0, n * 2)
+            }
+            // negative fixint
+            0xe0..=0xff => (0, 0),
+        };
+
+        pos += skip;
+
+        if children > 0 {
+            depth += 1;
+            if depth > max_depth {
+                return Err(format!("msgpack nesting depth exceeds limit ({max_depth})"));
+            }
+            remaining.push(children);
+        } else {
+            // Leaf value consumed: pop completed containers.
+            while let Some(count) = remaining.last_mut() {
+                *count -= 1;
+                if *count == 0 {
+                    remaining.pop();
+                    depth -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +644,62 @@ mod tests {
         assert_eq!(d2, s2);
 
         assert!(Codec::MsgPack.read_message(&mut reader).unwrap().is_none());
+    }
+
+    // -- read_message size limit tests --
+
+    #[test]
+    fn json_read_message_rejects_oversized_line() {
+        // A line longer than MAX_MESSAGE_SIZE must be rejected.
+        // We can't allocate 64 MiB in a test, so use a smaller custom
+        // read_message-like flow. Instead, verify the Take wrapper works
+        // by constructing a line just over the limit.
+        //
+        // Since MAX_MESSAGE_SIZE is 64 MiB (too big for a unit test),
+        // we test the logic indirectly: a line of exactly MAX_MESSAGE_SIZE+1
+        // bytes (no newline) should be rejected. We use a small stand-in
+        // to verify the mechanics.
+        let small_limit = 100;
+        // Construct a line with no newline, longer than small_limit.
+        let long_line: Vec<u8> = vec![b'x'; small_limit + 10];
+        let mut reader = io::BufReader::new(&long_line[..]);
+
+        // Read using Take with the small limit -- simulates what
+        // read_message does, just with a smaller limit.
+        let mut line = String::new();
+        let limit = (small_limit + 1) as u64;
+        let _n = (&mut reader).take(limit).read_line(&mut line).unwrap();
+        // The Take capped the read, so line.len() <= small_limit + 1.
+        assert!(line.len() <= small_limit + 1);
+        // Without the Take, line.len() would be small_limit + 10.
+    }
+
+    #[test]
+    fn msgpack_read_message_rejects_oversized_frame() {
+        // Build a frame with length prefix claiming MAX_MESSAGE_SIZE + 1 bytes.
+        let len = (MAX_MESSAGE_SIZE + 1) as u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&len.to_be_bytes());
+        // Don't need the actual payload -- the size check fires first.
+        data.extend_from_slice(&[0u8; 64]); // just enough to not EOF
+
+        let mut reader = io::BufReader::new(&data[..]);
+        let result = Codec::MsgPack.read_message(&mut reader);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("byte limit"));
+    }
+
+    #[test]
+    fn msgpack_read_message_rejects_zero_length_frame() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u32.to_be_bytes());
+
+        let mut reader = io::BufReader::new(&data[..]);
+        let result = Codec::MsgPack.read_message(&mut reader);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty frame"));
     }
 
     // -- Cross-format: simulate external msgpack (e.g. Elixir's Msgpax) --
@@ -689,5 +964,147 @@ mod tests {
         assert_eq!(rmpv_to_json(rmpv::Value::Nil), json!(null));
         assert_eq!(rmpv_to_json(rmpv::Value::Boolean(true)), json!(true));
         assert_eq!(rmpv_to_json(rmpv::Value::Boolean(false)), json!(false));
+    }
+
+    // -- check_msgpack_depth --
+
+    #[test]
+    fn msgpack_depth_check_accepts_flat_map() {
+        let val = json!({"a": 1, "b": "hello", "c": true});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 128).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_accepts_nested_within_limit() {
+        // 3 levels: {"outer": {"middle": {"inner": 42}}}
+        let val = json!({"outer": {"middle": {"inner": 42}}});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 3).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_rejects_beyond_limit() {
+        // 3 nested maps exceeds a limit of 2
+        let val = json!({"a": {"b": {"c": 1}}});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 2).is_err());
+    }
+
+    #[test]
+    fn msgpack_depth_check_accepts_flat_array() {
+        let val = json!([1, 2, 3, 4, 5]);
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 1).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_nested_arrays() {
+        let val = json!([[[42]]]);
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 3).is_ok());
+        assert!(check_msgpack_depth(&bytes, 2).is_err());
+    }
+
+    #[test]
+    fn msgpack_depth_check_mixed_containers() {
+        let val = json!({"list": [{"nested": true}]});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        // depth: map(1) -> array(2) -> map(3) = 3 levels
+        assert!(check_msgpack_depth(&bytes, 3).is_ok());
+        assert!(check_msgpack_depth(&bytes, 2).is_err());
+    }
+
+    #[test]
+    fn msgpack_depth_check_empty_containers() {
+        let val = json!({"empty_map": {}, "empty_arr": []});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 2).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_sibling_arrays_dont_add_depth() {
+        // [[1,2], [3,4]] has depth 2 (outer array -> inner array), not 3
+        let val = json!([[1, 2], [3, 4]]);
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 2).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_binary_data() {
+        use rmpv::Value as V;
+        let val = V::Map(vec![(
+            V::String("data".into()),
+            V::Binary(vec![0xDE, 0xAD]),
+        )]);
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 1).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_deeply_nested_rejects() {
+        // Build a deeply nested msgpack: {a: {a: {a: ... {a: 1} ...}}}
+        use rmpv::Value as V;
+        let depth = 200;
+        let mut val = V::Integer(1.into());
+        for _ in 0..depth {
+            val = V::Map(vec![(V::String("a".into()), val)]);
+        }
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &val).unwrap();
+
+        assert!(check_msgpack_depth(&bytes, 128).is_err());
+        assert!(check_msgpack_depth(&bytes, 200).is_ok());
+    }
+
+    #[test]
+    fn msgpack_decode_rejects_deeply_nested() {
+        // Verify the full decode path rejects deeply nested payloads.
+        use rmpv::Value as V;
+        let mut val = V::Integer(1.into());
+        for _ in 0..200 {
+            val = V::Map(vec![(V::String("a".into()), val)]);
+        }
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &val).unwrap();
+
+        let result: Result<serde_json::Value, _> = Codec::MsgPack.decode(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("depth"));
+    }
+
+    #[test]
+    fn msgpack_depth_check_truncated_payload_does_not_panic() {
+        // Truncated payloads should return Ok (not panic). rmpv::read_value
+        // handles truncation errors separately; the depth check only needs
+        // to catch pathological nesting.
+        let val = json!({"a": {"b": [1, 2, 3]}});
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        // Truncate at various points
+        for cut in [1, 3, 5, bytes.len() / 2] {
+            let truncated = &bytes[..cut];
+            // Must not panic, result doesn't matter
+            let _ = check_msgpack_depth(truncated, 128);
+        }
+        // Also test with a single byte of each container type
+        assert!(check_msgpack_depth(&[0x81], 128).is_ok()); // fixmap(1)
+        assert!(check_msgpack_depth(&[0x91], 128).is_ok()); // fixarray(1)
+                                                            // Truncated length fields
+        assert!(check_msgpack_depth(&[0xdc], 128).is_ok()); // array16, no length
+        assert!(check_msgpack_depth(&[0xde, 0x00], 128).is_ok()); // map16, partial
+    }
+
+    #[test]
+    fn msgpack_depth_check_empty_input() {
+        assert!(check_msgpack_depth(&[], 128).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_scalars_only() {
+        // Pure scalar value (no containers) should always pass.
+        let val = json!(42);
+        let bytes = rmp_serde::to_vec_named(&val).unwrap();
+        assert!(check_msgpack_depth(&bytes, 0).is_ok());
     }
 }

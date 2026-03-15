@@ -1,0 +1,502 @@
+// test_protocol.rs -- Shared protocol helpers for headless and test modes.
+//
+// Both --headless and --test modes handle Query/Interact/Reset/SnapshotCapture
+// messages from stdin. The logic is identical; only the surrounding event loop
+// differs. This module contains the canonical implementations so the two modes
+// stay in sync.
+
+use std::io::{self, Write};
+
+use serde_json::Value;
+
+use julep_core::codec::Codec;
+use julep_core::engine::Core;
+use julep_core::protocol::{InteractResponse, QueryResponse, ResetResponse, TreeNode};
+
+/// Maximum tree search recursion depth (matches MAX_TREE_DEPTH in widgets.rs).
+const MAX_SEARCH_DEPTH: usize = 256;
+
+// ---------------------------------------------------------------------------
+// Selector
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub enum Selector {
+    Id(String),
+    Text(String),
+}
+
+pub fn parse_selector(selector: &Value) -> Option<Selector> {
+    let by = selector.get("by")?.as_str()?;
+    let value = selector.get("value")?.as_str()?.to_string();
+    match by {
+        "id" => Some(Selector::Id(value)),
+        "text" => Some(Selector::Text(value)),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key / modifier parsing
+// ---------------------------------------------------------------------------
+
+/// Parse key and modifiers from an interact payload.
+///
+/// Supports two formats:
+/// 1. Explicit modifiers map: `{"key": "s", "modifiers": {"ctrl": true, ...}}`
+/// 2. Combined key string: `{"key": "ctrl+s"}` -- splits on `+` and extracts
+///    modifier prefixes (ctrl/command, shift, alt, logo/super/meta).
+pub fn parse_key_and_modifiers(
+    payload: Option<&serde_json::Map<String, Value>>,
+) -> (String, Value) {
+    let empty_map = serde_json::Map::new();
+    let map = payload.unwrap_or(&empty_map);
+
+    let raw_key = map
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Explicit modifiers map takes priority
+    if let Some(mods) = map.get("modifiers").and_then(|v| v.as_object()) {
+        let modifiers = serde_json::json!({
+            "shift": mods.get("shift").and_then(|v| v.as_bool()).unwrap_or(false),
+            "ctrl": mods.get("ctrl").and_then(|v| v.as_bool()).unwrap_or(false),
+            "alt": mods.get("alt").and_then(|v| v.as_bool()).unwrap_or(false),
+            "logo": mods.get("logo").and_then(|v| v.as_bool()).unwrap_or(false),
+        });
+        return (raw_key, modifiers);
+    }
+
+    // Parse "ctrl+s" style combined key strings
+    let parts: Vec<&str> = raw_key.split('+').collect();
+    if parts.len() > 1 {
+        let key = parts.last().unwrap().to_string();
+        let mut shift = false;
+        let mut ctrl = false;
+        let mut alt = false;
+        let mut logo = false;
+        for &part in &parts[..parts.len() - 1] {
+            match part {
+                "ctrl" | "command" => ctrl = true,
+                "shift" => shift = true,
+                "alt" => alt = true,
+                "logo" | "super" | "meta" => logo = true,
+                _ => {}
+            }
+        }
+        let modifiers = serde_json::json!({
+            "shift": shift, "ctrl": ctrl, "alt": alt, "logo": logo,
+        });
+        (key, modifiers)
+    } else {
+        let modifiers = serde_json::json!({
+            "shift": false, "ctrl": false, "alt": false, "logo": false,
+        });
+        (raw_key, modifiers)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wire I/O
+// ---------------------------------------------------------------------------
+
+/// Write a serialized response to stdout using the negotiated wire codec.
+pub fn emit_wire<T: serde::Serialize>(value: &T) {
+    let codec = Codec::get_global();
+    match codec.encode(value) {
+        Ok(bytes) => {
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            if let Err(e) = handle.write_all(&bytes) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    log::error!("stdout broken pipe -- shutting down");
+                    std::process::exit(0);
+                }
+                log::error!("stdout write error: {e}");
+                return;
+            }
+            if let Err(e) = handle.flush() {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    log::error!("stdout broken pipe on flush -- shutting down");
+                    std::process::exit(0);
+                }
+                log::error!("stdout flush error: {e}");
+            }
+        }
+        Err(e) => log::error!("encode error: {e}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tree search helpers
+// ---------------------------------------------------------------------------
+
+pub fn find_node_by_id(core: &Core, widget_id: &str) -> Value {
+    match core.tree.root() {
+        Some(root) => search_by_id(root, widget_id, 0).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+pub fn find_node_by_text(core: &Core, text: &str) -> Value {
+    match core.tree.root() {
+        Some(root) => search_by_text(root, text, 0).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+fn search_by_id(node: &TreeNode, id: &str, depth: usize) -> Option<Value> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    if node.id == id {
+        return serde_json::to_value(node).ok();
+    }
+    for child in &node.children {
+        if let Some(found) = search_by_id(child, id, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn search_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<Value> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    for key in &["content", "label", "value", "placeholder"] {
+        if let Some(val) = node.props.get(*key) {
+            if val.as_str() == Some(text) {
+                return serde_json::to_value(node).ok();
+            }
+        }
+    }
+    for child in &node.children {
+        if let Some(found) = search_by_text(child, text, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    for key in &["content", "label", "value", "placeholder"] {
+        if let Some(val) = node.props.get(*key) {
+            if val.as_str() == Some(text) {
+                return Some(node.id.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        if let Some(found) = find_id_by_text(child, text, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Message handlers
+// ---------------------------------------------------------------------------
+
+/// Handle a Query message: serialize tree or find a widget by selector.
+pub fn handle_query(core: &Core, id: String, target: String, selector: Value) {
+    let data = match target.as_str() {
+        "tree" => match core.tree.root() {
+            Some(root) => serde_json::to_value(root).unwrap_or(Value::Null),
+            None => Value::Null,
+        },
+        "find" => match parse_selector(&selector) {
+            Some(Selector::Id(widget_id)) => find_node_by_id(core, &widget_id),
+            Some(Selector::Text(text)) => find_node_by_text(core, &text),
+            None => Value::Null,
+        },
+        _ => {
+            log::warn!("unknown query target: {target}");
+            Value::Null
+        }
+    };
+
+    emit_wire(&QueryResponse::new(id, target, data));
+}
+
+/// Handle an Interact message: resolve widget ID from selector, build
+/// synthetic events for the requested action.
+pub fn handle_interact(core: &Core, id: String, action: String, selector: Value, payload: Value) {
+    let widget_id = match parse_selector(&selector) {
+        Some(Selector::Id(wid)) => Some(wid),
+        Some(Selector::Text(text)) => core
+            .tree
+            .root()
+            .and_then(|root| find_id_by_text(root, &text, 0)),
+        None => None,
+    };
+
+    let events = match (action.as_str(), widget_id) {
+        ("click", Some(wid)) => {
+            vec![serde_json::json!({"type": "event", "event": "click", "id": wid})]
+        }
+        ("type_text", Some(wid)) => {
+            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            vec![serde_json::json!({"type": "event", "event": "input", "id": wid, "value": text})]
+        }
+        ("submit", Some(wid)) => {
+            let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            vec![serde_json::json!({"type": "event", "event": "submit", "id": wid, "value": value})]
+        }
+        ("toggle", Some(wid)) => {
+            let value = payload
+                .get("value")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            vec![serde_json::json!({"type": "event", "event": "toggle", "id": wid, "value": value})]
+        }
+        ("select", Some(wid)) => {
+            let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            vec![serde_json::json!({"type": "event", "event": "select", "id": wid, "value": value})]
+        }
+        ("slide", Some(wid)) => {
+            let value = payload.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            vec![serde_json::json!({"type": "event", "event": "slide", "id": wid, "value": value})]
+        }
+        ("press", _) => {
+            let payload_map = payload.as_object();
+            let (key, modifiers) = parse_key_and_modifiers(payload_map);
+            vec![serde_json::json!({
+                "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
+            })]
+        }
+        ("release", _) => {
+            let payload_map = payload.as_object();
+            let (key, modifiers) = parse_key_and_modifiers(payload_map);
+            vec![serde_json::json!({
+                "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
+            })]
+        }
+        ("move_to", _) => {
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            vec![serde_json::json!({
+                "type": "event", "event": "cursor_moved", "id": "", "x": x, "y": y
+            })]
+        }
+        ("type_key", _) => {
+            let payload_map = payload.as_object();
+            let (key, modifiers) = parse_key_and_modifiers(payload_map);
+            vec![
+                serde_json::json!({
+                    "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
+                }),
+                serde_json::json!({
+                    "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
+                }),
+            ]
+        }
+        _ => {
+            log::warn!("unknown action '{action}' or widget not found");
+            vec![]
+        }
+    };
+
+    emit_wire(&InteractResponse::new(id, events));
+}
+
+/// Reset core to a blank state and emit the response.
+pub fn handle_reset(core: &mut Core, id: String) {
+    *core = Core::new();
+    emit_wire(&ResetResponse::ok(id));
+}
+
+/// Hash the current tree and emit a SnapshotCaptureResponse.
+#[cfg(any(feature = "headless", feature = "test-mode"))]
+pub fn handle_snapshot_capture(core: &Core, id: String, name: String) {
+    use julep_core::protocol::SnapshotCaptureResponse;
+    use sha2::{Digest, Sha256};
+
+    let tree_json = match core.tree.root() {
+        Some(root) => serde_json::to_string(root).unwrap_or_default(),
+        None => "null".to_string(),
+    };
+
+    let mut hasher = Sha256::new();
+    hasher.update(tree_json.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    emit_wire(&SnapshotCaptureResponse::new(id, name, hash, 0, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use julep_core::protocol::TreeNode;
+    use serde_json::json;
+
+    fn make_node(id: &str, type_name: &str) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: type_name.to_string(),
+            props: json!({}),
+            children: vec![],
+        }
+    }
+
+    fn make_text_node(id: &str, content: &str) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: "text".to_string(),
+            props: json!({"content": content}),
+            children: vec![],
+        }
+    }
+
+    // -- parse_selector --
+
+    #[test]
+    fn parse_selector_by_id() {
+        let sel = json!({"by": "id", "value": "btn-1"});
+        match parse_selector(&sel) {
+            Some(Selector::Id(id)) => assert_eq!(id, "btn-1"),
+            other => panic!("expected Id, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_by_text() {
+        let sel = json!({"by": "text", "value": "Click me"});
+        match parse_selector(&sel) {
+            Some(Selector::Text(t)) => assert_eq!(t, "Click me"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_unknown_by() {
+        let sel = json!({"by": "css", "value": ".foo"});
+        assert!(parse_selector(&sel).is_none());
+    }
+
+    #[test]
+    fn parse_selector_missing_fields() {
+        assert!(parse_selector(&json!({})).is_none());
+        assert!(parse_selector(&json!({"by": "id"})).is_none());
+        assert!(parse_selector(&Value::Null).is_none());
+    }
+
+    // -- parse_key_and_modifiers --
+
+    #[test]
+    fn parse_key_plain() {
+        let (key, mods) = parse_key_and_modifiers(None);
+        assert_eq!(key, "");
+        assert_eq!(mods["ctrl"], false);
+    }
+
+    #[test]
+    fn parse_key_combined_string() {
+        let map: serde_json::Map<String, Value> =
+            serde_json::from_value(json!({"key": "ctrl+shift+s"})).unwrap();
+        let (key, mods) = parse_key_and_modifiers(Some(&map));
+        assert_eq!(key, "s");
+        assert_eq!(mods["ctrl"], true);
+        assert_eq!(mods["shift"], true);
+        assert_eq!(mods["alt"], false);
+    }
+
+    #[test]
+    fn parse_key_explicit_modifiers() {
+        let map: serde_json::Map<String, Value> =
+            serde_json::from_value(json!({"key": "a", "modifiers": {"alt": true}})).unwrap();
+        let (key, mods) = parse_key_and_modifiers(Some(&map));
+        assert_eq!(key, "a");
+        assert_eq!(mods["alt"], true);
+        assert_eq!(mods["ctrl"], false);
+    }
+
+    #[test]
+    fn parse_key_logo_aliases() {
+        for alias in &["logo", "super", "meta"] {
+            let combo = format!("{alias}+x");
+            let map: serde_json::Map<String, Value> =
+                serde_json::from_value(json!({"key": combo})).unwrap();
+            let (key, mods) = parse_key_and_modifiers(Some(&map));
+            assert_eq!(key, "x");
+            assert_eq!(mods["logo"], true, "alias '{alias}' should set logo=true");
+        }
+    }
+
+    // -- tree search --
+
+    #[test]
+    fn search_by_id_finds_root() {
+        let root = make_node("root", "column");
+        let result = search_by_id(&root, "root", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "root");
+    }
+
+    #[test]
+    fn search_by_id_finds_child() {
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("child", "button"));
+        let result = search_by_id(&root, "child", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "child");
+    }
+
+    #[test]
+    fn search_by_id_not_found() {
+        let root = make_node("root", "column");
+        assert!(search_by_id(&root, "missing", 0).is_none());
+    }
+
+    #[test]
+    fn search_by_text_finds_node() {
+        let mut root = make_node("root", "column");
+        root.children.push(make_text_node("lbl", "Hello World"));
+        let result = search_by_text(&root, "Hello World", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "lbl");
+    }
+
+    #[test]
+    fn search_by_text_not_found() {
+        let root = make_text_node("lbl", "Hello");
+        assert!(search_by_text(&root, "Goodbye", 0).is_none());
+    }
+
+    #[test]
+    fn find_id_by_text_returns_id() {
+        let mut root = make_node("root", "column");
+        root.children.push(make_text_node("btn", "Submit"));
+        assert_eq!(find_id_by_text(&root, "Submit", 0), Some("btn".to_string()));
+    }
+
+    #[test]
+    fn find_id_by_text_not_found() {
+        let root = make_node("root", "column");
+        assert_eq!(find_id_by_text(&root, "nope", 0), None);
+    }
+
+    // -- find_node_by_* with Core --
+
+    #[test]
+    fn find_node_by_id_empty_tree() {
+        let core = Core::new();
+        assert_eq!(find_node_by_id(&core, "anything"), Value::Null);
+    }
+
+    #[test]
+    fn find_node_by_text_empty_tree() {
+        let core = Core::new();
+        assert_eq!(find_node_by_text(&core, "anything"), Value::Null);
+    }
+}

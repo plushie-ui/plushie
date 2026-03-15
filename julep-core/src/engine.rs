@@ -119,7 +119,10 @@ impl Core {
                     self.resolve_and_cache_theme(theme_val, &mut effects);
                 }
                 self.tree.snapshot(tree);
-                self.caches.clear();
+                // Clear built-in caches but NOT extension caches. Extension
+                // cleanup callbacks run later via prepare_all() in the host,
+                // which needs the old cache entries to still be accessible.
+                self.caches.clear_builtin();
                 if let Some(root) = self.tree.root() {
                     widgets::ensure_caches(root, &mut self.caches);
                 }
@@ -183,14 +186,14 @@ impl Core {
                 // Protocol version check
                 if let Some(v) = settings.get("protocol_version").and_then(|v| v.as_u64()) {
                     if v != u64::from(crate::protocol::PROTOCOL_VERSION) {
-                        log::warn!(
+                        log::error!(
                             "protocol version mismatch: expected {}, got {}",
                             crate::protocol::PROTOCOL_VERSION,
                             v
                         );
                     }
                 } else {
-                    log::warn!("no protocol_version in Settings, assuming compatible");
+                    log::error!("no protocol_version in Settings, assuming compatible");
                 }
 
                 self.default_text_size = settings
@@ -492,6 +495,52 @@ mod tests {
         };
         let effects = core.apply(msg);
         assert!(effects.is_empty());
+    }
+
+    // -- Snapshot preserves extension caches for prepare_all --
+
+    #[test]
+    fn snapshot_preserves_extension_caches() {
+        let mut core = Core::new();
+
+        // Simulate extension storing data in extension caches.
+        core.caches
+            .extension
+            .insert("ext", "node-1".to_string(), 42u32);
+
+        // Snapshot replaces the tree.
+        let msg = IncomingMessage::Snapshot {
+            tree: make_node("root", "column"),
+        };
+        core.apply(msg);
+
+        // Extension caches must survive -- clear_builtin() must NOT
+        // wipe them. The host calls prepare_all() after apply() to
+        // handle extension cleanup properly.
+        assert_eq!(core.caches.extension.get::<u32>("ext", "node-1"), Some(&42));
+    }
+
+    #[test]
+    fn snapshot_clears_builtin_caches() {
+        let mut core = Core::new();
+
+        // Populate a built-in cache by applying a snapshot with a text_editor.
+        let editor_node = make_node_with_props(
+            "ed1",
+            "text_editor",
+            serde_json::json!({"content": "hello"}),
+        );
+        let mut root = make_node("root", "column");
+        root.children.push(editor_node);
+        core.apply(IncomingMessage::Snapshot { tree: root });
+        assert!(core.caches.editor_contents.contains_key("ed1"));
+
+        // Second snapshot without the editor -- built-in caches should
+        // be cleared and repopulated (without the editor).
+        core.apply(IncomingMessage::Snapshot {
+            tree: make_node("root2", "column"),
+        });
+        assert!(!core.caches.editor_contents.contains_key("ed1"));
     }
 }
 

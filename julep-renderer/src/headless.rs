@@ -1,21 +1,21 @@
 #[cfg(feature = "headless")]
 pub mod headless_mode {
-    use std::io::{self, BufRead, Write};
+    use std::io::{self, BufRead};
 
     use iced::Theme;
     use serde_json::Value;
 
     use julep_core::codec::Codec;
     use julep_core::engine::Core;
-    use julep_core::protocol::{
-        IncomingMessage, InteractResponse, QueryResponse, ResetResponse, ScreenshotResponseEmpty,
-        SnapshotCaptureResponse,
-    };
+    use julep_core::protocol::{IncomingMessage, ScreenshotResponseEmpty};
 
     /// Default screenshot width when not specified by the caller.
     const DEFAULT_SCREENSHOT_WIDTH: u32 = 1024;
     /// Default screenshot height when not specified by the caller.
     const DEFAULT_SCREENSHOT_HEIGHT: u32 = 768;
+    /// Maximum screenshot dimension (width or height). Matches ImageRegistry::MAX_DIMENSION.
+    /// Prevents untrusted input from triggering a multi-GiB RGBA allocation.
+    const MAX_SCREENSHOT_DIMENSION: u32 = 16384;
 
     use julep_core::extensions::{ExtensionCaches, ExtensionDispatcher};
 
@@ -131,26 +131,26 @@ pub mod headless_mode {
                 for effect in effects {
                     match effect {
                         julep_core::engine::CoreEffect::EmitEvent(event) => {
-                            emit_wire(&event);
+                            crate::test_protocol::emit_wire(&event);
                         }
                         julep_core::engine::CoreEffect::EmitEffectResponse(response) => {
-                            emit_wire(&response);
+                            crate::test_protocol::emit_wire(&response);
                         }
                         julep_core::engine::CoreEffect::SpawnAsyncEffect {
                             request_id,
                             effect_type,
                             ..
                         } => {
-                            // Headless has no display for file dialogs --
-                            // return cancelled immediately.
                             log::debug!(
                                 "headless: async effect {effect_type} returning cancelled \
                                  (no display)"
                             );
-                            emit_wire(&julep_core::protocol::EffectResponse::error(
-                                request_id,
-                                "cancelled".to_string(),
-                            ));
+                            crate::test_protocol::emit_wire(
+                                &julep_core::protocol::EffectResponse::error(
+                                    request_id,
+                                    "cancelled".to_string(),
+                                ),
+                            );
                         }
                         julep_core::engine::CoreEffect::ThemeChanged(t) => {
                             *theme = t;
@@ -161,8 +161,6 @@ pub mod headless_mode {
 
                 // Prepare extensions after tree changes (Snapshot/Patch).
                 if is_tree_change {
-                    // On Snapshot, give previously-poisoned extensions a
-                    // fresh chance (same as Reset does).
                     if is_snapshot {
                         dispatcher.clear_poisoned();
                     }
@@ -172,13 +170,13 @@ pub mod headless_mode {
                 }
             }
 
-            // Test-specific messages
+            // Test protocol messages -- dispatched to shared module.
             IncomingMessage::Query {
                 id,
                 target,
                 selector,
             } => {
-                handle_query(core, id, target, selector);
+                crate::test_protocol::handle_query(core, id, target, selector);
             }
             IncomingMessage::Interact {
                 id,
@@ -186,10 +184,10 @@ pub mod headless_mode {
                 selector,
                 payload,
             } => {
-                handle_interact(core, id, action, selector, payload);
+                crate::test_protocol::handle_interact(core, id, action, selector, payload);
             }
             IncomingMessage::SnapshotCapture { id, name, .. } => {
-                handle_snapshot_capture(core, id, name);
+                crate::test_protocol::handle_snapshot_capture(core, id, name);
             }
             IncomingMessage::ScreenshotCapture {
                 id,
@@ -197,13 +195,21 @@ pub mod headless_mode {
                 width,
                 height,
             } => {
-                let w = width.unwrap_or(DEFAULT_SCREENSHOT_WIDTH).max(1);
-                let h = height.unwrap_or(DEFAULT_SCREENSHOT_HEIGHT).max(1);
+                let w = width
+                    .unwrap_or(DEFAULT_SCREENSHOT_WIDTH)
+                    .max(1)
+                    .min(MAX_SCREENSHOT_DIMENSION);
+                let h = height
+                    .unwrap_or(DEFAULT_SCREENSHOT_HEIGHT)
+                    .max(1)
+                    .min(MAX_SCREENSHOT_DIMENSION);
                 handle_screenshot_capture(core, theme, dispatcher, id, name, w, h);
             }
             IncomingMessage::Reset { id } => {
-                handle_reset(core, id);
-                dispatcher.clear_poisoned();
+                // Clean up extension state before wiping core.
+                dispatcher.reset(ext_caches);
+                *theme = Theme::Dark;
+                crate::test_protocol::handle_reset(core, id);
             }
             IncomingMessage::ExtensionCommand {
                 node_id,
@@ -212,7 +218,7 @@ pub mod headless_mode {
             } => {
                 let events = dispatcher.handle_command(&node_id, &op, &payload, ext_caches);
                 for event in events {
-                    emit_wire(&event);
+                    crate::test_protocol::emit_wire(&event);
                 }
             }
             IncomingMessage::ExtensionCommandBatch { commands } => {
@@ -220,212 +226,11 @@ pub mod headless_mode {
                     let events =
                         dispatcher.handle_command(&cmd.node_id, &cmd.op, &cmd.payload, ext_caches);
                     for event in events {
-                        emit_wire(&event);
+                        crate::test_protocol::emit_wire(&event);
                     }
                 }
             }
         }
-    }
-
-    fn handle_query(core: &Core, id: String, target: String, selector: Value) {
-        let data = match target.as_str() {
-            "tree" => {
-                // Serialize the entire tree
-                match core.tree.root() {
-                    Some(root) => serde_json::to_value(root).unwrap_or(Value::Null),
-                    None => Value::Null,
-                }
-            }
-            "find" => {
-                // Find a widget by selector in the tree
-                match parse_selector(&selector) {
-                    Some(Selector::Id(widget_id)) => find_node_by_id(core, &widget_id),
-                    Some(Selector::Text(text)) => find_node_by_text(core, &text),
-                    None => Value::Null,
-                }
-            }
-            _ => {
-                log::warn!("unknown query target: {target}");
-                Value::Null
-            }
-        };
-
-        emit_wire(&QueryResponse::new(id, target, data));
-    }
-
-    fn handle_interact(
-        core: &mut Core,
-        id: String,
-        action: String,
-        selector: Value,
-        payload: Value,
-    ) {
-        // Find the target widget ID from selector
-        let widget_id = match parse_selector(&selector) {
-            Some(Selector::Id(wid)) => Some(wid),
-            Some(Selector::Text(text)) => {
-                // Walk the tree to find a node with this text
-                core.tree
-                    .root()
-                    .and_then(|root| find_id_by_text(root, &text))
-            }
-            None => None,
-        };
-
-        let events = match (action.as_str(), widget_id) {
-            ("click", Some(wid)) => {
-                vec![serde_json::json!({"type": "event", "event": "click", "id": wid})]
-            }
-            ("type_text", Some(wid)) => {
-                let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                vec![
-                    serde_json::json!({"type": "event", "event": "input", "id": wid, "value": text}),
-                ]
-            }
-            ("submit", Some(wid)) => {
-                let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                vec![
-                    serde_json::json!({"type": "event", "event": "submit", "id": wid, "value": value}),
-                ]
-            }
-            ("toggle", Some(wid)) => {
-                let value = payload
-                    .get("value")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                vec![
-                    serde_json::json!({"type": "event", "event": "toggle", "id": wid, "value": value}),
-                ]
-            }
-            ("select", Some(wid)) => {
-                let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                vec![
-                    serde_json::json!({"type": "event", "event": "select", "id": wid, "value": value}),
-                ]
-            }
-            ("slide", Some(wid)) => {
-                let value = payload.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                vec![
-                    serde_json::json!({"type": "event", "event": "slide", "id": wid, "value": value}),
-                ]
-            }
-            ("press", _) => {
-                let payload_map = payload.as_object();
-                let (key, modifiers) = parse_key_and_modifiers(payload_map);
-                vec![serde_json::json!({
-                    "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
-                })]
-            }
-            ("release", _) => {
-                let payload_map = payload.as_object();
-                let (key, modifiers) = parse_key_and_modifiers(payload_map);
-                vec![serde_json::json!({
-                    "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
-                })]
-            }
-            ("move_to", _) => {
-                let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                vec![serde_json::json!({
-                    "type": "event", "event": "cursor_moved", "id": "", "x": x, "y": y
-                })]
-            }
-            ("type_key", _) => {
-                let payload_map = payload.as_object();
-                let (key, modifiers) = parse_key_and_modifiers(payload_map);
-                vec![
-                    serde_json::json!({
-                        "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
-                    }),
-                    serde_json::json!({
-                        "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
-                    }),
-                ]
-            }
-            _ => {
-                log::warn!("unknown action '{action}' or widget not found");
-                vec![]
-            }
-        };
-
-        emit_wire(&InteractResponse::new(id, events));
-    }
-
-    /// Parse key and modifiers from an interact payload.
-    ///
-    /// Supports two formats:
-    /// 1. Explicit modifiers map: `{"key": "s", "modifiers": {"ctrl": true, ...}}`
-    /// 2. Combined key string: `{"key": "ctrl+s"}` -- splits on `+` and extracts
-    ///    modifier prefixes (ctrl/command, shift, alt, logo/super/meta).
-    fn parse_key_and_modifiers(
-        payload: Option<&serde_json::Map<String, serde_json::Value>>,
-    ) -> (String, serde_json::Value) {
-        let empty_map = serde_json::Map::new();
-        let map = payload.unwrap_or(&empty_map);
-
-        let raw_key = map
-            .get("key")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        // Explicit modifiers map takes priority
-        if let Some(mods) = map.get("modifiers").and_then(|v| v.as_object()) {
-            let modifiers = serde_json::json!({
-                "shift": mods.get("shift").and_then(|v| v.as_bool()).unwrap_or(false),
-                "ctrl": mods.get("ctrl").and_then(|v| v.as_bool()).unwrap_or(false),
-                "alt": mods.get("alt").and_then(|v| v.as_bool()).unwrap_or(false),
-                "logo": mods.get("logo").and_then(|v| v.as_bool()).unwrap_or(false),
-            });
-            return (raw_key, modifiers);
-        }
-
-        // Parse "ctrl+s" style combined key strings
-        let parts: Vec<&str> = raw_key.split('+').collect();
-        if parts.len() > 1 {
-            let key = parts.last().unwrap().to_string();
-            let mut shift = false;
-            let mut ctrl = false;
-            let mut alt = false;
-            let mut logo = false;
-            for &part in &parts[..parts.len() - 1] {
-                match part {
-                    "ctrl" | "command" => ctrl = true,
-                    "shift" => shift = true,
-                    "alt" => alt = true,
-                    "logo" | "super" | "meta" => logo = true,
-                    _ => {}
-                }
-            }
-            let modifiers = serde_json::json!({
-                "shift": shift, "ctrl": ctrl, "alt": alt, "logo": logo,
-            });
-            (key, modifiers)
-        } else {
-            let modifiers = serde_json::json!({
-                "shift": false, "ctrl": false, "alt": false, "logo": false,
-            });
-            (raw_key, modifiers)
-        }
-    }
-
-    fn handle_snapshot_capture(core: &Core, id: String, name: String) {
-        // In headless mode without the full iced_test Simulator rendering,
-        // we return a hash of the serialized tree as a placeholder.
-        // Real pixel snapshots require building iced Elements and using tiny-skia.
-        let tree_json = match core.tree.root() {
-            Some(root) => serde_json::to_string(root).unwrap_or_default(),
-            None => "null".to_string(),
-        };
-
-        let hash = {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(tree_json.as_bytes());
-            format!("{:x}", hasher.finalize())
-        };
-
-        emit_wire(&SnapshotCaptureResponse::new(id, name, hash, 0, 0));
     }
 
     /// Handle a ScreenshotCapture message in headless mode.
@@ -450,7 +255,7 @@ pub mod headless_mode {
         let root = match core.tree.root() {
             Some(r) => r,
             None => {
-                emit_wire(&ScreenshotResponseEmpty::new(id, name));
+                crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
                 return;
             }
         };
@@ -470,7 +275,7 @@ pub mod headless_mode {
             Some(r) => r,
             None => {
                 log::error!("failed to create headless renderer");
-                emit_wire(&ScreenshotResponseEmpty::new(id, name));
+                crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
                 return;
             }
         };
@@ -503,251 +308,5 @@ pub mod headless_mode {
         };
 
         julep_core::protocol::emit_screenshot_response(&id, &name, &hash, width, height, &rgba);
-    }
-
-    fn handle_reset(core: &mut Core, id: String) {
-        *core = Core::new();
-        emit_wire(&ResetResponse::ok(id));
-    }
-
-    // -- Selector parsing --
-
-    enum Selector {
-        Id(String),
-        Text(String),
-    }
-
-    fn parse_selector(selector: &Value) -> Option<Selector> {
-        let by = selector.get("by")?.as_str()?;
-        let value = selector.get("value")?.as_str()?.to_string();
-        match by {
-            "id" => Some(Selector::Id(value)),
-            "text" => Some(Selector::Text(value)),
-            _ => None,
-        }
-    }
-
-    // -- Tree search helpers --
-
-    fn find_node_by_id(core: &Core, widget_id: &str) -> Value {
-        match core.tree.root() {
-            Some(root) => search_by_id(root, widget_id).unwrap_or(Value::Null),
-            None => Value::Null,
-        }
-    }
-
-    fn search_by_id(node: &julep_core::protocol::TreeNode, id: &str) -> Option<Value> {
-        if node.id == id {
-            return serde_json::to_value(node).ok();
-        }
-        for child in &node.children {
-            if let Some(found) = search_by_id(child, id) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    fn find_node_by_text(core: &Core, text: &str) -> Value {
-        match core.tree.root() {
-            Some(root) => search_by_text(root, text).unwrap_or(Value::Null),
-            None => Value::Null,
-        }
-    }
-
-    fn search_by_text(node: &julep_core::protocol::TreeNode, text: &str) -> Option<Value> {
-        // Check common text props
-        for key in &["content", "label", "value", "placeholder"] {
-            if let Some(val) = node.props.get(*key) {
-                if val.as_str() == Some(text) {
-                    return serde_json::to_value(node).ok();
-                }
-            }
-        }
-        for child in &node.children {
-            if let Some(found) = search_by_text(child, text) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    fn find_id_by_text(node: &julep_core::protocol::TreeNode, text: &str) -> Option<String> {
-        for key in &["content", "label", "value", "placeholder"] {
-            if let Some(val) = node.props.get(*key) {
-                if val.as_str() == Some(text) {
-                    return Some(node.id.clone());
-                }
-            }
-        }
-        for child in &node.children {
-            if let Some(found) = find_id_by_text(child, text) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    /// Write a serialized response to stdout using the negotiated wire codec.
-    fn emit_wire<T: serde::Serialize>(value: &T) {
-        let codec = Codec::get_global();
-        match codec.encode(value) {
-            Ok(bytes) => {
-                let stdout = io::stdout();
-                let mut handle = stdout.lock();
-                if let Err(e) = handle.write_all(&bytes) {
-                    log::error!("write error: {e}");
-                }
-                let _ = handle.flush();
-            }
-            Err(e) => log::error!("encode error: {e}"),
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use serde_json::Value;
-
-        use super::*;
-        use julep_core::engine::Core;
-        use julep_core::protocol::TreeNode;
-
-        fn make_node(id: &str, type_name: &str) -> TreeNode {
-            TreeNode {
-                id: id.to_string(),
-                type_name: type_name.to_string(),
-                props: serde_json::json!({}),
-                children: vec![],
-            }
-        }
-
-        fn make_node_with_props(id: &str, type_name: &str, props: Value) -> TreeNode {
-            TreeNode {
-                id: id.to_string(),
-                type_name: type_name.to_string(),
-                props,
-                children: vec![],
-            }
-        }
-
-        fn core_with_tree(root: TreeNode) -> Core {
-            let mut core = Core::new();
-            core.tree.snapshot(root);
-            core
-        }
-
-        // -- find_node_by_id / search_by_id --
-
-        #[test]
-        fn find_in_tree_by_id_finds_root() {
-            let core = core_with_tree(make_node("root", "column"));
-            let result = find_node_by_id(&core, "root");
-            assert!(!result.is_null());
-            assert_eq!(result.get("id").and_then(|v| v.as_str()), Some("root"));
-        }
-
-        #[test]
-        fn find_in_tree_by_id_finds_nested_child() {
-            let child = make_node("btn1", "button");
-            let mut root = make_node("root", "column");
-            root.children.push(child);
-
-            let core = core_with_tree(root);
-            let result = find_node_by_id(&core, "btn1");
-            assert!(!result.is_null());
-            assert_eq!(result.get("id").and_then(|v| v.as_str()), Some("btn1"));
-        }
-
-        #[test]
-        fn find_in_tree_by_id_returns_null_when_not_found() {
-            let core = core_with_tree(make_node("root", "column"));
-            let result = find_node_by_id(&core, "nonexistent");
-            assert!(result.is_null());
-        }
-
-        #[test]
-        fn find_in_tree_by_id_returns_null_when_tree_empty() {
-            let core = Core::new();
-            let result = find_node_by_id(&core, "any");
-            assert!(result.is_null());
-        }
-
-        // -- find_node_by_text / search_by_text --
-
-        #[test]
-        fn find_in_tree_by_text_matches_content_prop() {
-            let node = make_node_with_props(
-                "txt1",
-                "text",
-                serde_json::json!({"content": "Hello world"}),
-            );
-            let core = core_with_tree(node);
-            let result = find_node_by_text(&core, "Hello world");
-            assert!(!result.is_null());
-            assert_eq!(result.get("id").and_then(|v| v.as_str()), Some("txt1"));
-        }
-
-        #[test]
-        fn find_in_tree_by_text_matches_label_prop() {
-            let node =
-                make_node_with_props("btn1", "button", serde_json::json!({"label": "Click me"}));
-            let core = core_with_tree(node);
-            let result = find_node_by_text(&core, "Click me");
-            assert!(!result.is_null());
-            assert_eq!(result.get("id").and_then(|v| v.as_str()), Some("btn1"));
-        }
-
-        #[test]
-        fn find_in_tree_by_text_returns_null_when_not_found() {
-            let node =
-                make_node_with_props("txt1", "text", serde_json::json!({"content": "Something"}));
-            let core = core_with_tree(node);
-            let result = find_node_by_text(&core, "Nonexistent");
-            assert!(result.is_null());
-        }
-
-        #[test]
-        fn find_in_tree_by_text_returns_null_when_tree_empty() {
-            let core = Core::new();
-            let result = find_node_by_text(&core, "any text");
-            assert!(result.is_null());
-        }
-
-        // -- parse_selector --
-
-        #[test]
-        fn parse_selector_returns_id_selector() {
-            let sel = serde_json::json!({"by": "id", "value": "my-widget"});
-            let result = parse_selector(&sel);
-            assert!(matches!(result, Some(Selector::Id(ref s)) if s == "my-widget"));
-        }
-
-        #[test]
-        fn parse_selector_returns_text_selector() {
-            let sel = serde_json::json!({"by": "text", "value": "Click me"});
-            let result = parse_selector(&sel);
-            assert!(matches!(result, Some(Selector::Text(ref s)) if s == "Click me"));
-        }
-
-        #[test]
-        fn parse_selector_returns_none_for_unknown_by() {
-            let sel = serde_json::json!({"by": "point", "value": "10,20"});
-            let result = parse_selector(&sel);
-            assert!(result.is_none());
-        }
-
-        #[test]
-        fn parse_selector_returns_none_for_missing_by() {
-            let sel = serde_json::json!({"value": "my-widget"});
-            let result = parse_selector(&sel);
-            assert!(result.is_none());
-        }
-
-        #[test]
-        fn parse_selector_returns_none_for_missing_value() {
-            let sel = serde_json::json!({"by": "id"});
-            let result = parse_selector(&sel);
-            assert!(result.is_none());
-        }
     }
 }

@@ -46,8 +46,13 @@ struct App {
     theme_follows_system: bool,
     /// Global scale factor multiplier (1.0 = follow OS DPI).
     scale_factor: f32,
+    /// Last slider value per widget ID, for correct on_release events.
+    last_slide_values: HashMap<String, f64>,
     /// Extension dispatcher for custom widget types.
     dispatcher: ExtensionDispatcher,
+    /// Per-window resolved theme cache. Populated during apply() when the tree
+    /// changes (mutable context), read during theme_for_window() (immutable).
+    window_theme_cache: HashMap<String, Theme>,
 }
 
 impl App {
@@ -66,7 +71,9 @@ impl App {
             system_theme: Theme::Dark,
             theme_follows_system: false,
             scale_factor: 1.0,
+            last_slide_values: HashMap::new(),
             dispatcher,
+            window_theme_cache: HashMap::new(),
         }
     }
 
@@ -83,11 +90,8 @@ impl App {
 
     fn theme_for_window(&self, window_id: window::Id) -> Theme {
         if let Some(julep_id) = self.reverse_window_map.get(&window_id) {
-            if let Some(node) = self.core.tree.find_window(julep_id) {
-                if let Some(theme_val) = node.props.get("theme") {
-                    return julep_core::theming::resolve_theme_only(theme_val)
-                        .unwrap_or_else(|| self.system_theme.clone());
-                }
+            if let Some(cached) = self.window_theme_cache.get(julep_id) {
+                return cached.clone();
             }
         }
         if self.theme_follows_system {
@@ -120,93 +124,27 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Stdin(event) => match event {
-                StdinEvent::Message(incoming) => {
-                    // In test mode, handle test-specific messages directly
-                    // instead of passing them to Core::apply.
-                    if self.test_mode && crate::test_mode::test_helpers::is_test_message(&incoming)
-                    {
-                        match incoming {
-                            IncomingMessage::Query {
-                                id,
-                                target,
-                                selector,
-                            } => {
-                                crate::test_mode::test_helpers::handle_query(
-                                    &self.core, id, target, selector,
-                                );
-                                return Task::none();
-                            }
-                            IncomingMessage::Interact {
-                                id,
-                                action,
-                                selector,
-                                payload,
-                            } => {
-                                crate::test_mode::test_helpers::handle_interact(
-                                    &self.core, id, action, selector, payload,
-                                );
-                                return Task::none();
-                            }
-                            IncomingMessage::Reset { id } => {
-                                crate::test_mode::test_helpers::handle_reset(&mut self.core, id);
-                                return Task::none();
-                            }
-                            #[cfg(feature = "test-mode")]
-                            IncomingMessage::SnapshotCapture { id, name, .. } => {
-                                crate::test_mode::test_helpers::handle_snapshot_capture(
-                                    &self.core, id, name,
-                                );
-                                return Task::none();
-                            }
-                            #[cfg(feature = "test-mode")]
-                            IncomingMessage::ScreenshotCapture { id, name, .. } => {
-                                // Capture real GPU-rendered pixels via iced
-                                if let Some((_, &iced_id)) = self.window_map.iter().next() {
-                                    return window::screenshot(iced_id).map(move |shot| {
-                                        use sha2::{Digest, Sha256};
-                                        let rgba: &[u8] = &shot.rgba;
-                                        let mut hasher = Sha256::new();
-                                        hasher.update(rgba);
-                                        let hash = format!("{:x}", hasher.finalize());
-                                        let w = shot.size.width;
-                                        let h = shot.size.height;
-                                        emit_screenshot_response(&id, &name, &hash, w, h, rgba);
-                                        Message::NoOp
-                                    });
-                                }
-                                // No windows open -- return empty screenshot
-                                emit_screenshot_response(&id, &name, "", 0, 0, &[]);
-                                return Task::none();
-                            }
-                            _ => return Task::none(),
-                        }
-                    }
-                    self.apply(incoming);
-                    let tasks: Vec<Task<Message>> = self.pending_tasks.drain(..).collect();
-                    Task::batch(tasks)
-                }
-                StdinEvent::Warning(msg) => {
-                    log::warn!("stdin warning: {msg}");
-                    Task::none()
-                }
-                StdinEvent::Closed => {
-                    log::info!("stdin closed -- exiting");
-                    iced::exit()
-                }
-            },
+            Message::Stdin(event) => self.handle_stdin(event),
             Message::NoOp => Task::none(),
             // Simple widget events: map through message_to_event and emit.
             ref msg @ (Message::Click(_)
             | Message::Input(..)
             | Message::Submit(..)
             | Message::Toggle(..)
-            | Message::Slide(..)
-            | Message::SlideRelease(..)
             | Message::Select(..)) => {
                 if let Some(event) = message_to_event(msg) {
                     emit_event(event);
                 }
+                Task::none()
+            }
+            Message::Slide(ref id, value) => {
+                self.last_slide_values.insert(id.clone(), value);
+                emit_event(OutgoingEvent::slide(id.clone(), value));
+                Task::none()
+            }
+            Message::SlideRelease(ref id) => {
+                let value = self.last_slide_values.remove(id).unwrap_or(0.0);
+                emit_event(OutgoingEvent::slide_release(id.clone(), value));
                 Task::none()
             }
             // Generic extension-aware events: route through dispatcher first.
@@ -278,209 +216,29 @@ impl App {
             }
 
             // -- Keyboard events --
-            Message::KeyPressed(data) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_key_press")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::key_press(tag.clone(), &data));
-                }
-                Task::none()
-            }
-            Message::KeyReleased(data) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_key_release")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::key_release(tag.clone(), &data));
-                }
-                Task::none()
-            }
-            Message::ModifiersChanged(mods) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_modifiers_changed")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::modifiers_changed(
-                        tag.clone(),
-                        serialize_modifiers(mods),
-                    ));
-                }
-                Task::none()
-            }
+            Message::KeyPressed(data) => self.handle_key_pressed(data),
+            Message::KeyReleased(data) => self.handle_key_released(data),
+            Message::ModifiersChanged(mods) => self.handle_modifiers_changed(mods),
 
             // -- Mouse events --
-            Message::CursorMoved(pos, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_move")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::cursor_moved(tag.clone(), pos.x, pos.y));
-                }
-                Task::none()
-            }
-            Message::CursorEntered(_win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_move")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::cursor_entered(tag.clone()));
-                }
-                Task::none()
-            }
-            Message::CursorLeft(_win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_move")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::cursor_left(tag.clone()));
-                }
-                Task::none()
-            }
-            Message::MouseButtonPressed(button, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_button")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::button_pressed(
-                        tag.clone(),
-                        serialize_mouse_button(&button),
-                    ));
-                }
-                Task::none()
-            }
-            Message::MouseButtonReleased(button, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_button")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::button_released(
-                        tag.clone(),
-                        serialize_mouse_button(&button),
-                    ));
-                }
-                Task::none()
-            }
-            Message::WheelScrolled(delta, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_mouse_scroll")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    let (dx, dy, unit) = serialize_scroll_delta(&delta);
-                    emit_event(OutgoingEvent::wheel_scrolled(tag.clone(), dx, dy, unit));
-                }
-                Task::none()
-            }
+            Message::CursorMoved(pos, _win) => self.handle_cursor_moved(pos),
+            Message::CursorEntered(_win) => self.handle_cursor_entered(),
+            Message::CursorLeft(_win) => self.handle_cursor_left(),
+            Message::MouseButtonPressed(button, _win) => self.handle_mouse_button_pressed(button),
+            Message::MouseButtonReleased(button, _win) => self.handle_mouse_button_released(button),
+            Message::WheelScrolled(delta, _win) => self.handle_wheel_scrolled(delta),
 
             // -- Touch events --
-            Message::FingerPressed(finger, pos, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_touch")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::finger_pressed(
-                        tag.clone(),
-                        finger.0,
-                        pos.x,
-                        pos.y,
-                    ));
-                }
-                Task::none()
-            }
-            Message::FingerMoved(finger, pos, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_touch")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::finger_moved(
-                        tag.clone(),
-                        finger.0,
-                        pos.x,
-                        pos.y,
-                    ));
-                }
-                Task::none()
-            }
-            Message::FingerLifted(finger, pos, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_touch")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::finger_lifted(
-                        tag.clone(),
-                        finger.0,
-                        pos.x,
-                        pos.y,
-                    ));
-                }
-                Task::none()
-            }
-            Message::FingerLost(finger, pos, _win) => {
-                let tag = self
-                    .core
-                    .active_subscriptions
-                    .get("on_touch")
-                    .or_else(|| self.core.active_subscriptions.get("on_event"));
-                if let Some(tag) = tag {
-                    emit_event(OutgoingEvent::finger_lost(
-                        tag.clone(),
-                        finger.0,
-                        pos.x,
-                        pos.y,
-                    ));
-                }
-                Task::none()
-            }
+            Message::FingerPressed(finger, pos, _win) => self.handle_finger_pressed(finger, pos),
+            Message::FingerMoved(finger, pos, _win) => self.handle_finger_moved(finger, pos),
+            Message::FingerLifted(finger, pos, _win) => self.handle_finger_lifted(finger, pos),
+            Message::FingerLost(finger, pos, _win) => self.handle_finger_lost(finger, pos),
 
             // -- IME events --
-            Message::ImeOpened => {
-                if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
-                    emit_event(OutgoingEvent::ime_opened(tag.clone()));
-                }
-                Task::none()
-            }
-            Message::ImePreedit(text, cursor) => {
-                if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
-                    emit_event(OutgoingEvent::ime_preedit(tag.clone(), text, cursor));
-                }
-                Task::none()
-            }
-            Message::ImeCommit(text) => {
-                if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
-                    emit_event(OutgoingEvent::ime_commit(tag.clone(), text));
-                }
-                Task::none()
-            }
-            Message::ImeClosed => {
-                if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
-                    emit_event(OutgoingEvent::ime_closed(tag.clone()));
-                }
-                Task::none()
-            }
+            Message::ImeOpened => self.handle_ime_opened(),
+            Message::ImePreedit(text, cursor) => self.handle_ime_preedit(text, cursor),
+            Message::ImeCommit(text) => self.handle_ime_commit(text),
+            Message::ImeClosed => self.handle_ime_closed(),
 
             // -- Window lifecycle events --
             Message::WindowCloseRequested(window_id) => {
@@ -503,8 +261,11 @@ impl App {
                     }
                     log::info!("window closed: {julep_id}");
                 }
-                // All managed windows gone -- exit cleanly.
-                if self.window_map.is_empty() {
+                // All managed windows gone AND tree has content -- exit cleanly.
+                // The tree check prevents exit after a Reset (which empties
+                // both the maps and the tree). iced::daemon stays alive with
+                // no windows so it can receive the next Snapshot.
+                if self.window_map.is_empty() && self.core.tree.root().is_some() {
                     log::info!("all windows closed -- exiting");
                     iced::exit()
                 } else {
@@ -517,135 +278,7 @@ impl App {
                 self.reverse_window_map.insert(iced_id, julep_id);
                 Task::none()
             }
-            Message::WindowEvent(iced_id, evt) => {
-                let julep_id = self.julep_id_for(&iced_id);
-                match evt {
-                    window::Event::Opened { position, size } => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            let pos = position.map(|p| (p.x, p.y));
-                            emit_event(OutgoingEvent::window_opened(
-                                tag.clone(),
-                                julep_id.clone(),
-                                pos,
-                                size.width,
-                                size.height,
-                            ));
-                        }
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_open") {
-                            let pos = position.map(|p| (p.x, p.y));
-                            emit_event(OutgoingEvent::window_opened(
-                                tag.clone(),
-                                julep_id,
-                                pos,
-                                size.width,
-                                size.height,
-                            ));
-                        }
-                    }
-                    window::Event::Closed => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_closed(tag.clone(), julep_id));
-                        }
-                    }
-                    window::Event::Moved(point) => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_moved(
-                                tag.clone(),
-                                julep_id.clone(),
-                                point.x,
-                                point.y,
-                            ));
-                        }
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_move") {
-                            emit_event(OutgoingEvent::window_moved(
-                                tag.clone(),
-                                julep_id,
-                                point.x,
-                                point.y,
-                            ));
-                        }
-                    }
-                    window::Event::Resized(size) => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_resized(
-                                tag.clone(),
-                                julep_id.clone(),
-                                size.width,
-                                size.height,
-                            ));
-                        }
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_resize") {
-                            emit_event(OutgoingEvent::window_resized(
-                                tag.clone(),
-                                julep_id,
-                                size.width,
-                                size.height,
-                            ));
-                        }
-                    }
-                    window::Event::Rescaled(factor) => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_rescaled(
-                                tag.clone(),
-                                julep_id,
-                                factor,
-                            ));
-                        }
-                    }
-                    window::Event::Focused => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_focused(
-                                tag.clone(),
-                                julep_id.clone(),
-                            ));
-                        }
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_focus") {
-                            emit_event(OutgoingEvent::window_focused(tag.clone(), julep_id));
-                        }
-                    }
-                    window::Event::Unfocused => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                            emit_event(OutgoingEvent::window_unfocused(
-                                tag.clone(),
-                                julep_id.clone(),
-                            ));
-                        }
-                        if let Some(tag) = self.core.active_subscriptions.get("on_window_unfocus") {
-                            emit_event(OutgoingEvent::window_unfocused(tag.clone(), julep_id));
-                        }
-                    }
-                    window::Event::FileHovered(path) => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
-                            emit_event(OutgoingEvent::file_hovered(
-                                tag.clone(),
-                                julep_id,
-                                path.to_string_lossy().to_string(),
-                            ));
-                        }
-                    }
-                    window::Event::FileDropped(path) => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
-                            emit_event(OutgoingEvent::file_dropped(
-                                tag.clone(),
-                                julep_id,
-                                path.to_string_lossy().to_string(),
-                            ));
-                        }
-                    }
-                    window::Event::FilesHoveredLeft => {
-                        if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
-                            emit_event(OutgoingEvent::files_hovered_left(tag.clone(), julep_id));
-                        }
-                    }
-                    window::Event::CloseRequested => {
-                        // Handled via close_requests() subscription separately.
-                    }
-                    window::Event::RedrawRequested(_) => {
-                        // Handled via animation_frame subscription separately.
-                    }
-                }
-                Task::none()
-            }
+            Message::WindowEvent(iced_id, evt) => self.handle_window_event(iced_id, evt),
 
             // -- System / animation --
             Message::AnimationFrame(instant) => {
@@ -698,41 +331,9 @@ impl App {
                 emit_event(OutgoingEvent::canvas_scroll(id, cx, cy, dx, dy));
                 Task::none()
             }
-            Message::PaneResized(grid_id, evt) => {
-                if let Some(state) = self.core.caches.pane_grid_states.get_mut(&grid_id) {
-                    state.resize(evt.split, evt.ratio);
-                }
-                emit_event(OutgoingEvent::pane_resized(
-                    grid_id,
-                    format!("{:?}", evt.split),
-                    evt.ratio,
-                ));
-                Task::none()
-            }
-            Message::PaneDragged(grid_id, evt) => {
-                if let pane_grid::DragEvent::Dropped { pane, target } = evt {
-                    if let Some(state) = self.core.caches.pane_grid_states.get_mut(&grid_id) {
-                        // Look up julep IDs for the panes before swapping
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        let target_pane = match target {
-                            pane_grid::Target::Edge(_) => "edge".to_string(),
-                            pane_grid::Target::Pane(p, _) => {
-                                state.get(p).cloned().unwrap_or_default()
-                            }
-                        };
-                        state.drop(pane, target);
-                        emit_event(OutgoingEvent::pane_dragged(grid_id, pane_id, target_pane));
-                    }
-                }
-                Task::none()
-            }
-            Message::PaneClicked(grid_id, pane) => {
-                if let Some(state) = self.core.caches.pane_grid_states.get(&grid_id) {
-                    let pane_id = state.get(pane).cloned().unwrap_or_default();
-                    emit_event(OutgoingEvent::pane_clicked(grid_id, pane_id));
-                }
-                Task::none()
-            }
+            Message::PaneResized(grid_id, evt) => self.handle_pane_resized(grid_id, evt),
+            Message::PaneDragged(grid_id, evt) => self.handle_pane_dragged(grid_id, evt),
+            Message::PaneClicked(grid_id, pane) => self.handle_pane_clicked(grid_id, pane),
             Message::ScrollEvent(
                 id,
                 abs_x,
@@ -780,6 +381,503 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Extracted sub-dispatch methods for update()
+    // -----------------------------------------------------------------------
+
+    fn handle_stdin(&mut self, event: StdinEvent) -> Task<Message> {
+        match event {
+            StdinEvent::Message(incoming) => {
+                // In test mode, handle test-specific messages directly
+                // instead of passing them to Core::apply.
+                if self.test_mode && crate::test_mode::test_helpers::is_test_message(&incoming) {
+                    match incoming {
+                        IncomingMessage::Query {
+                            id,
+                            target,
+                            selector,
+                        } => {
+                            crate::test_protocol::handle_query(&self.core, id, target, selector);
+                            return Task::none();
+                        }
+                        IncomingMessage::Interact {
+                            id,
+                            action,
+                            selector,
+                            payload,
+                        } => {
+                            crate::test_protocol::handle_interact(
+                                &self.core, id, action, selector, payload,
+                            );
+                            return Task::none();
+                        }
+                        IncomingMessage::Reset { id } => {
+                            // Clean up extension state before wiping core.
+                            self.dispatcher.reset(&mut self.core.caches.extension);
+
+                            // Reset core and emit the response.
+                            crate::test_protocol::handle_reset(&mut self.core, id);
+
+                            // Close all open windows and clear maps.
+                            let close_tasks: Vec<Task<Message>> = self
+                                .window_map
+                                .values()
+                                .map(|&iced_id| window::close(iced_id))
+                                .collect();
+                            self.window_map.clear();
+                            self.reverse_window_map.clear();
+
+                            // Reset remaining App-level state.
+                            self.image_registry = julep_core::image_registry::ImageRegistry::new();
+                            self.theme = Theme::Dark;
+                            self.theme_follows_system = false;
+                            self.scale_factor = 1.0;
+                            self.last_slide_values.clear();
+                            self.pending_tasks.clear();
+                            self.window_theme_cache.clear();
+
+                            return Task::batch(close_tasks);
+                        }
+                        #[cfg(feature = "test-mode")]
+                        IncomingMessage::SnapshotCapture { id, name, .. } => {
+                            crate::test_protocol::handle_snapshot_capture(&self.core, id, name);
+                            return Task::none();
+                        }
+                        #[cfg(feature = "test-mode")]
+                        IncomingMessage::ScreenshotCapture { id, name, .. } => {
+                            // Capture real GPU-rendered pixels via iced
+                            if let Some((_, &iced_id)) = self.window_map.iter().next() {
+                                return window::screenshot(iced_id).map(move |shot| {
+                                    use sha2::{Digest, Sha256};
+                                    let rgba: &[u8] = &shot.rgba;
+                                    let mut hasher = Sha256::new();
+                                    hasher.update(rgba);
+                                    let hash = format!("{:x}", hasher.finalize());
+                                    let w = shot.size.width;
+                                    let h = shot.size.height;
+                                    emit_screenshot_response(&id, &name, &hash, w, h, rgba);
+                                    Message::NoOp
+                                });
+                            }
+                            // No windows open -- return empty screenshot
+                            emit_screenshot_response(&id, &name, "", 0, 0, &[]);
+                            return Task::none();
+                        }
+                        _ => return Task::none(),
+                    }
+                }
+                self.apply(incoming);
+                let tasks: Vec<Task<Message>> = self.pending_tasks.drain(..).collect();
+                Task::batch(tasks)
+            }
+            StdinEvent::Warning(msg) => {
+                log::warn!("stdin warning: {msg}");
+                Task::none()
+            }
+            StdinEvent::Closed => {
+                log::info!("stdin closed -- exiting");
+                iced::exit()
+            }
+        }
+    }
+
+    fn handle_key_pressed(&self, data: KeyEventData) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_key_press")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::key_press(tag.clone(), &data));
+        }
+        Task::none()
+    }
+
+    fn handle_key_released(&self, data: KeyEventData) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_key_release")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::key_release(tag.clone(), &data));
+        }
+        Task::none()
+    }
+
+    fn handle_modifiers_changed(&self, mods: iced::keyboard::Modifiers) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_modifiers_changed")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::modifiers_changed(
+                tag.clone(),
+                serialize_modifiers(mods),
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_cursor_moved(&self, pos: Point) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_move")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::cursor_moved(tag.clone(), pos.x, pos.y));
+        }
+        Task::none()
+    }
+
+    fn handle_cursor_entered(&self) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_move")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::cursor_entered(tag.clone()));
+        }
+        Task::none()
+    }
+
+    fn handle_cursor_left(&self) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_move")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::cursor_left(tag.clone()));
+        }
+        Task::none()
+    }
+
+    fn handle_mouse_button_pressed(&self, button: iced::mouse::Button) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_button")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::button_pressed(
+                tag.clone(),
+                serialize_mouse_button(&button),
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_mouse_button_released(&self, button: iced::mouse::Button) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_button")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::button_released(
+                tag.clone(),
+                serialize_mouse_button(&button),
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_wheel_scrolled(&self, delta: iced::mouse::ScrollDelta) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_mouse_scroll")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            let (dx, dy, unit) = serialize_scroll_delta(&delta);
+            emit_event(OutgoingEvent::wheel_scrolled(tag.clone(), dx, dy, unit));
+        }
+        Task::none()
+    }
+
+    fn handle_finger_pressed(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_touch")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::finger_pressed(
+                tag.clone(),
+                finger.0,
+                pos.x,
+                pos.y,
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_finger_moved(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_touch")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::finger_moved(
+                tag.clone(),
+                finger.0,
+                pos.x,
+                pos.y,
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_finger_lifted(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_touch")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::finger_lifted(
+                tag.clone(),
+                finger.0,
+                pos.x,
+                pos.y,
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_finger_lost(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+        let tag = self
+            .core
+            .active_subscriptions
+            .get("on_touch")
+            .or_else(|| self.core.active_subscriptions.get("on_event"));
+        if let Some(tag) = tag {
+            emit_event(OutgoingEvent::finger_lost(
+                tag.clone(),
+                finger.0,
+                pos.x,
+                pos.y,
+            ));
+        }
+        Task::none()
+    }
+
+    fn handle_ime_opened(&self) -> Task<Message> {
+        if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
+            emit_event(OutgoingEvent::ime_opened(tag.clone()));
+        }
+        Task::none()
+    }
+
+    fn handle_ime_preedit(
+        &self,
+        text: String,
+        cursor: Option<std::ops::Range<usize>>,
+    ) -> Task<Message> {
+        if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
+            emit_event(OutgoingEvent::ime_preedit(tag.clone(), text, cursor));
+        }
+        Task::none()
+    }
+
+    fn handle_ime_commit(&self, text: String) -> Task<Message> {
+        if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
+            emit_event(OutgoingEvent::ime_commit(tag.clone(), text));
+        }
+        Task::none()
+    }
+
+    fn handle_ime_closed(&self) -> Task<Message> {
+        if let Some(tag) = self.core.active_subscriptions.get("on_ime") {
+            emit_event(OutgoingEvent::ime_closed(tag.clone()));
+        }
+        Task::none()
+    }
+
+    fn handle_window_event(&self, iced_id: window::Id, evt: window::Event) -> Task<Message> {
+        let julep_id = self.julep_id_for(&iced_id);
+        match evt {
+            window::Event::Opened { position, size } => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    let pos = position.map(|p| (p.x, p.y));
+                    emit_event(OutgoingEvent::window_opened(
+                        tag.clone(),
+                        julep_id.clone(),
+                        pos,
+                        size.width,
+                        size.height,
+                    ));
+                }
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_open") {
+                    let pos = position.map(|p| (p.x, p.y));
+                    emit_event(OutgoingEvent::window_opened(
+                        tag.clone(),
+                        julep_id,
+                        pos,
+                        size.width,
+                        size.height,
+                    ));
+                }
+            }
+            window::Event::Closed => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_closed(tag.clone(), julep_id));
+                }
+            }
+            window::Event::Moved(point) => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_moved(
+                        tag.clone(),
+                        julep_id.clone(),
+                        point.x,
+                        point.y,
+                    ));
+                }
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_move") {
+                    emit_event(OutgoingEvent::window_moved(
+                        tag.clone(),
+                        julep_id,
+                        point.x,
+                        point.y,
+                    ));
+                }
+            }
+            window::Event::Resized(size) => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_resized(
+                        tag.clone(),
+                        julep_id.clone(),
+                        size.width,
+                        size.height,
+                    ));
+                }
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_resize") {
+                    emit_event(OutgoingEvent::window_resized(
+                        tag.clone(),
+                        julep_id,
+                        size.width,
+                        size.height,
+                    ));
+                }
+            }
+            window::Event::Rescaled(factor) => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_rescaled(
+                        tag.clone(),
+                        julep_id,
+                        factor,
+                    ));
+                }
+            }
+            window::Event::Focused => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_focused(tag.clone(), julep_id.clone()));
+                }
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_focus") {
+                    emit_event(OutgoingEvent::window_focused(tag.clone(), julep_id));
+                }
+            }
+            window::Event::Unfocused => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    emit_event(OutgoingEvent::window_unfocused(
+                        tag.clone(),
+                        julep_id.clone(),
+                    ));
+                }
+                if let Some(tag) = self.core.active_subscriptions.get("on_window_unfocus") {
+                    emit_event(OutgoingEvent::window_unfocused(tag.clone(), julep_id));
+                }
+            }
+            window::Event::FileHovered(path) => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
+                    let path_str = match path.to_str() {
+                        Some(s) => s.to_string(),
+                        None => {
+                            log::warn!(
+                                "file path contains non-UTF-8 bytes, using lossy conversion: {}",
+                                path.display()
+                            );
+                            path.to_string_lossy().into_owned()
+                        }
+                    };
+                    emit_event(OutgoingEvent::file_hovered(tag.clone(), julep_id, path_str));
+                }
+            }
+            window::Event::FileDropped(path) => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
+                    let path_str = match path.to_str() {
+                        Some(s) => s.to_string(),
+                        None => {
+                            log::warn!(
+                                "file path contains non-UTF-8 bytes, using lossy conversion: {}",
+                                path.display()
+                            );
+                            path.to_string_lossy().into_owned()
+                        }
+                    };
+                    emit_event(OutgoingEvent::file_dropped(tag.clone(), julep_id, path_str));
+                }
+            }
+            window::Event::FilesHoveredLeft => {
+                if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
+                    emit_event(OutgoingEvent::files_hovered_left(tag.clone(), julep_id));
+                }
+            }
+            window::Event::CloseRequested => {
+                // Handled via close_requests() subscription separately.
+            }
+            window::Event::RedrawRequested(_) => {
+                // Handled via animation_frame subscription separately.
+            }
+        }
+        Task::none()
+    }
+
+    fn handle_pane_resized(
+        &mut self,
+        grid_id: String,
+        evt: pane_grid::ResizeEvent,
+    ) -> Task<Message> {
+        if let Some(state) = self.core.caches.pane_grid_states.get_mut(&grid_id) {
+            state.resize(evt.split, evt.ratio);
+        }
+        emit_event(OutgoingEvent::pane_resized(
+            grid_id,
+            format!("{:?}", evt.split),
+            evt.ratio,
+        ));
+        Task::none()
+    }
+
+    fn handle_pane_dragged(&mut self, grid_id: String, evt: pane_grid::DragEvent) -> Task<Message> {
+        if let pane_grid::DragEvent::Dropped { pane, target } = evt {
+            if let Some(state) = self.core.caches.pane_grid_states.get_mut(&grid_id) {
+                // Look up julep IDs for the panes before swapping
+                let pane_id = state.get(pane).cloned().unwrap_or_default();
+                let target_pane = match target {
+                    pane_grid::Target::Edge(_) => "edge".to_string(),
+                    pane_grid::Target::Pane(p, _) => state.get(p).cloned().unwrap_or_default(),
+                };
+                state.drop(pane, target);
+                emit_event(OutgoingEvent::pane_dragged(grid_id, pane_id, target_pane));
+            }
+        }
+        Task::none()
+    }
+
+    fn handle_pane_clicked(&self, grid_id: String, pane: pane_grid::Pane) -> Task<Message> {
+        if let Some(state) = self.core.caches.pane_grid_states.get(&grid_id) {
+            let pane_id = state.get(pane).cloned().unwrap_or_default();
+            emit_event(OutgoingEvent::pane_clicked(grid_id, pane_id));
+        }
+        Task::none()
     }
 
     fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
@@ -1247,8 +1345,22 @@ impl App {
             }
         }
 
-        // After tree changes, notify extensions so they can prepare/cleanup state.
+        // After tree changes, update per-window theme cache and notify extensions.
         if is_tree_change {
+            // Rebuild per-window theme cache from current tree.
+            self.window_theme_cache.clear();
+            for win_id in self.core.tree.window_ids() {
+                if let Some(node) = self.core.tree.find_window(&win_id) {
+                    if let Some(theme_val) = node.props.get("theme") {
+                        if let Some(theme) = julep_core::theming::resolve_theme_only(theme_val) {
+                            self.window_theme_cache.insert(win_id, theme);
+                        }
+                        // None means "system" -- no cache entry, falls through
+                        // to the system_theme path in theme_for_window().
+                    }
+                }
+            }
+
             if is_snapshot {
                 self.dispatcher.clear_poisoned();
             }
@@ -1719,6 +1831,8 @@ impl App {
                 }
             }
             "drag_resize" => {
+                #[cfg(target_os = "macos")]
+                log::warn!("drag_resize is not supported on macOS");
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let direction = parse_direction(
                         settings
@@ -1747,6 +1861,8 @@ impl App {
                 }
             }
             "show_system_menu" => {
+                #[cfg(not(target_os = "windows"))]
+                log::warn!("show_system_menu is only supported on Windows");
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     window::show_system_menu(iced_id)
                 } else {
@@ -1799,13 +1915,19 @@ impl App {
             "get_size" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::size(iced_id).map(move |size| {
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!({"width": size.width, "height": size.height}),
-                        );
+                        let mut data = serde_json::json!({
+                            "width": size.width,
+                            "height": size.height,
+                            "op": "get_size",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
-                        Message::NoOp // dummy message to keep the type system happy
+                        Message::NoOp
                     })
                 } else {
                     Task::none()
@@ -1814,12 +1936,18 @@ impl App {
             "get_position" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::position(iced_id).map(move |pos| {
-                        let val = match pos {
-                            Some(p) => serde_json::json!({"x": p.x, "y": p.y}),
-                            None => serde_json::Value::Null,
+                        let mut data = match pos {
+                            Some(p) => {
+                                serde_json::json!({"x": p.x, "y": p.y, "op": "get_position"})
+                            }
+                            None => serde_json::json!({"op": "get_position"}),
                         };
-                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), val);
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1830,16 +1958,21 @@ impl App {
             "get_mode" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::mode(iced_id).map(move |mode| {
                         let mode_str = match mode {
                             window::Mode::Windowed => "windowed",
                             window::Mode::Fullscreen => "fullscreen",
                             window::Mode::Hidden => "hidden",
                         };
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!(mode_str),
-                        );
+                        let mut data = serde_json::json!({
+                            "mode": mode_str,
+                            "op": "get_mode",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1850,11 +1983,16 @@ impl App {
             "get_scale_factor" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::scale_factor(iced_id).map(move |factor| {
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!(factor),
-                        );
+                        let mut data = serde_json::json!({
+                            "scale_factor": factor,
+                            "op": "get_scale_factor",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1865,11 +2003,16 @@ impl App {
             "is_maximized" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::is_maximized(iced_id).map(move |val| {
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!(val),
-                        );
+                        let mut data = serde_json::json!({
+                            "maximized": val,
+                            "op": "is_maximized",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1880,11 +2023,16 @@ impl App {
             "is_minimized" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::is_minimized(iced_id).map(move |val| {
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!(val),
-                        );
+                        let mut data = serde_json::json!({
+                            "minimized": val,
+                            "op": "is_minimized",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1895,6 +2043,7 @@ impl App {
             "screenshot" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::screenshot(iced_id).map(move |screenshot| {
                         #[cfg(feature = "test-mode")]
                         let rgba_b64 = {
@@ -1907,9 +2056,13 @@ impl App {
                             "width": screenshot.size.width,
                             "height": screenshot.size.height,
                             "bytes_len": screenshot.rgba.len(),
+                            "op": "screenshot",
                         });
                         if let Some(b64) = rgba_b64 {
-                            data["rgba_base64"] = serde_json::json!(b64);
+                            data["rgba"] = serde_json::json!(b64);
+                        }
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
@@ -1928,6 +2081,29 @@ impl App {
                     let width = settings.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let height =
                         settings.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+
+                    const MAX_ICON_DIMENSION: u32 = 1024;
+
+                    if width == 0 || height == 0 {
+                        log::error!("set_icon: zero dimension ({}x{})", width, height);
+                        return Task::none();
+                    }
+                    if width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+                        log::error!(
+                            "set_icon: dimensions {}x{} exceed maximum {}",
+                            width,
+                            height,
+                            MAX_ICON_DIMENSION
+                        );
+                        return Task::none();
+                    }
+                    if width != height {
+                        log::warn!(
+                            "set_icon: non-square icon ({}x{}); some platforms may render poorly",
+                            width,
+                            height
+                        );
+                    }
 
                     match base64::engine::general_purpose::STANDARD.decode(icon_data_b64) {
                         Ok(rgba) => {
@@ -1962,11 +2138,16 @@ impl App {
             "raw_id" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::raw_id::<Message>(iced_id).map(move |raw| {
-                        let resp = julep_core::protocol::EffectResponse::ok(
-                            wid.clone(),
-                            serde_json::json!(raw),
-                        );
+                        let mut data = serde_json::json!({
+                            "raw_id": raw,
+                            "op": "raw_id",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -1977,14 +2158,20 @@ impl App {
             "monitor_size" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
                     let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
                     window::monitor_size(iced_id).map(move |size_opt| {
-                        let result = match size_opt {
-                            Some(size) => {
-                                serde_json::json!({"width": size.width, "height": size.height})
-                            }
-                            None => serde_json::Value::Null,
+                        let mut data = match size_opt {
+                            Some(size) => serde_json::json!({
+                                "width": size.width,
+                                "height": size.height,
+                                "op": "monitor_size",
+                            }),
+                            None => serde_json::json!({"op": "monitor_size"}),
                         };
-                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), result);
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
                         emit_effect_response(resp);
                         Message::NoOp
                     })
@@ -2257,20 +2444,39 @@ fn parse_direction(s: &str) -> window::Direction {
 }
 
 // ---------------------------------------------------------------------------
+// stdout write helper
+// ---------------------------------------------------------------------------
+
+/// Write pre-encoded bytes to stdout. Exits the process on broken pipe
+/// (the host process has gone away and there's nothing useful to do).
+fn write_stdout(bytes: &[u8]) {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    if let Err(e) = handle.write_all(bytes) {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            log::error!("stdout broken pipe -- shutting down");
+            std::process::exit(0);
+        }
+        log::error!("stdout write error: {e}");
+        return;
+    }
+    if let Err(e) = handle.flush() {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            log::error!("stdout broken pipe on flush -- shutting down");
+            std::process::exit(0);
+        }
+        log::error!("stdout flush error: {e}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // stdout event emitter
 // ---------------------------------------------------------------------------
 
 fn emit_event(event: OutgoingEvent) {
     let codec = Codec::get_global();
     match codec.encode(&event) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            if let Err(e) = handle.write_all(&bytes) {
-                log::error!("failed to write event to stdout: {e}");
-            }
-            let _ = handle.flush();
-        }
+        Ok(bytes) => write_stdout(&bytes),
         Err(e) => log::error!("failed to serialize event: {e}"),
     }
 }
@@ -2291,14 +2497,7 @@ pub(crate) fn emit_hello() {
     });
     let codec = Codec::get_global();
     match codec.encode(&msg) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            if let Err(e) = handle.write_all(&bytes) {
-                log::error!("failed to write hello to stdout: {e}");
-            }
-            let _ = handle.flush();
-        }
+        Ok(bytes) => write_stdout(&bytes),
         Err(e) => log::error!("failed to serialize hello: {e}"),
     }
 }
@@ -2310,14 +2509,7 @@ pub(crate) fn emit_hello() {
 fn emit_effect_response(response: julep_core::protocol::EffectResponse) {
     let codec = Codec::get_global();
     match codec.encode(&response) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            if let Err(e) = handle.write_all(&bytes) {
-                log::error!("failed to write effect response to stdout: {e}");
-            }
-            let _ = handle.flush();
-        }
+        Ok(bytes) => write_stdout(&bytes),
         Err(e) => log::error!("failed to serialize effect response: {e}"),
     }
 }
@@ -2333,14 +2525,7 @@ fn emit_query_response(kind: &str, tag: &str, data: serde_json::Value) {
     });
     let codec = Codec::get_global();
     match codec.encode(&msg) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            if let Err(e) = handle.write_all(&bytes) {
-                log::error!("failed to write query response to stdout: {e}");
-            }
-            let _ = handle.flush();
-        }
+        Ok(bytes) => write_stdout(&bytes),
         Err(e) => log::error!("failed to serialize query response: {e}"),
     }
 }
@@ -2375,8 +2560,7 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
         Message::Input(id, value) => Some(OutgoingEvent::input(id.clone(), value.clone())),
         Message::Submit(id, value) => Some(OutgoingEvent::submit(id.clone(), value.clone())),
         Message::Toggle(id, value) => Some(OutgoingEvent::toggle(id.clone(), *value)),
-        Message::Slide(id, value) => Some(OutgoingEvent::slide(id.clone(), *value)),
-        Message::SlideRelease(id, value) => Some(OutgoingEvent::slide_release(id.clone(), *value)),
+        Message::Slide(..) | Message::SlideRelease(..) => None,
         Message::Select(id, value) => Some(OutgoingEvent::select(id.clone(), value.clone())),
         Message::SensorResize(id, w, h) => Some(OutgoingEvent::sensor_resize(id.clone(), *w, *h)),
         Message::MouseAreaEvent(id, kind) => match kind.as_str() {
@@ -2547,6 +2731,19 @@ fn read_initial_settings(
                     );
                 }
                 let len = u32::from_be_bytes([byte, rest[0], rest[1], rest[2]]) as usize;
+                if len == 0 || len > julep_core::codec::MAX_MESSAGE_SIZE {
+                    log::error!(
+                        "initial settings frame size invalid ({len} bytes, \
+                         limit {} bytes)",
+                        julep_core::codec::MAX_MESSAGE_SIZE
+                    );
+                    return (
+                        Value::Object(Default::default()),
+                        iced::Settings::default(),
+                        Vec::new(),
+                        reader,
+                    );
+                }
                 let mut payload = vec![0u8; len];
                 if let Err(e) = reader.read_exact(&mut payload) {
                     log::error!("failed to read initial settings payload: {e}");
@@ -2561,8 +2758,10 @@ fn read_initial_settings(
             }
             Codec::Json => {
                 // byte is '{'. Read the rest of the line, prepend '{'.
+                // Wrap in Take to bound allocation before the full line is read.
                 let mut line = String::new();
-                if let Err(e) = reader.read_line(&mut line) {
+                let limit = (julep_core::codec::MAX_MESSAGE_SIZE + 1) as u64;
+                if let Err(e) = (&mut reader).take(limit).read_line(&mut line) {
                     log::error!("failed to read initial settings: {e}");
                     return (
                         Value::Object(Default::default()),

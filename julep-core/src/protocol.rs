@@ -1,6 +1,26 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// Replace non-finite f32 with 0.0 for safe JSON serialization.
+fn sanitize_f32(v: f32) -> f32 {
+    if v.is_finite() {
+        v
+    } else {
+        log::warn!("non-finite f32 ({v}) replaced with 0.0 in outgoing event");
+        0.0
+    }
+}
+
+/// Replace non-finite f64 with 0.0 for safe JSON serialization.
+fn sanitize_f64(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        log::warn!("non-finite f64 ({v}) replaced with 0.0 in outgoing event");
+        0.0
+    }
+}
+
 /// Protocol version number. Sent in the `hello` handshake message on startup
 /// and checked against the value the Elixir side embeds in Settings.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -346,7 +366,7 @@ pub fn emit_screenshot_response(
             });
             if !rgba_bytes.is_empty() {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(rgba_bytes);
-                map["rgba_base64"] = serde_json::Value::String(b64);
+                map["rgba"] = serde_json::Value::String(b64);
             }
             match serde_json::to_vec(&map) {
                 Ok(mut bytes) => {
@@ -364,9 +384,20 @@ pub fn emit_screenshot_response(
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     if let Err(e) = handle.write_all(&bytes) {
-        log::error!("failed to write screenshot response to stdout: {e}");
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            log::error!("stdout broken pipe -- shutting down");
+            std::process::exit(0);
+        }
+        log::error!("stdout write error: {e}");
+        return;
     }
-    let _ = handle.flush();
+    if let Err(e) = handle.flush() {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            log::error!("stdout broken pipe on flush -- shutting down");
+            std::process::exit(0);
+        }
+        log::error!("stdout flush error: {e}");
+    }
 }
 
 /// Response to a Reset message.
@@ -511,14 +542,14 @@ impl OutgoingEvent {
 
     pub fn slide(id: String, value: f64) -> Self {
         Self {
-            value: Some(serde_json::json!(value)),
+            value: Some(serde_json::json!(sanitize_f64(value))),
             ..Self::bare("slide", id)
         }
     }
 
     pub fn slide_release(id: String, value: f64) -> Self {
         Self {
-            value: Some(serde_json::json!(value)),
+            value: Some(serde_json::json!(sanitize_f64(value))),
             ..Self::bare("slide_release", id)
         }
     }
@@ -575,7 +606,7 @@ impl OutgoingEvent {
 
     pub fn cursor_moved(tag: String, x: f32, y: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y})),
+            data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
             ..Self::tagged("cursor_moved", tag)
         }
     }
@@ -605,8 +636,8 @@ impl OutgoingEvent {
     pub fn wheel_scrolled(tag: String, delta_x: f32, delta_y: f32, unit: &str) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "delta_x": delta_x,
-                "delta_y": delta_y,
+                "delta_x": sanitize_f32(delta_x),
+                "delta_y": sanitize_f32(delta_y),
                 "unit": unit,
             })),
             ..Self::tagged("wheel_scrolled", tag)
@@ -621,8 +652,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "finger_id": finger_id,
-                "x": x,
-                "y": y,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
             })),
             ..Self::tagged("finger_pressed", tag)
         }
@@ -632,8 +663,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "finger_id": finger_id,
-                "x": x,
-                "y": y,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
             })),
             ..Self::tagged("finger_moved", tag)
         }
@@ -643,8 +674,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "finger_id": finger_id,
-                "x": x,
-                "y": y,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
             })),
             ..Self::tagged("finger_lifted", tag)
         }
@@ -654,8 +685,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "finger_id": finger_id,
-                "x": x,
-                "y": y,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
             })),
             ..Self::tagged("finger_lost", tag)
         }
@@ -707,13 +738,14 @@ impl OutgoingEvent {
         width: f32,
         height: f32,
     ) -> Self {
-        let pos = position.map(|(x, y)| serde_json::json!({"x": x, "y": y}));
+        let pos =
+            position.map(|(x, y)| serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)}));
         Self {
             data: Some(serde_json::json!({
                 "window_id": window_id,
                 "position": pos,
-                "width": width,
-                "height": height,
+                "width": sanitize_f32(width),
+                "height": sanitize_f32(height),
             })),
             ..Self::tagged("window_opened", tag)
         }
@@ -737,8 +769,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "window_id": window_id,
-                "x": x,
-                "y": y,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
             })),
             ..Self::tagged("window_moved", tag)
         }
@@ -748,8 +780,8 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "window_id": window_id,
-                "width": width,
-                "height": height,
+                "width": sanitize_f32(width),
+                "height": sanitize_f32(height),
             })),
             ..Self::tagged("window_resized", tag)
         }
@@ -773,7 +805,7 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({
                 "window_id": window_id,
-                "scale_factor": scale_factor,
+                "scale_factor": sanitize_f32(scale_factor),
             })),
             ..Self::tagged("window_rescaled", tag)
         }
@@ -830,7 +862,9 @@ impl OutgoingEvent {
 
     pub fn sensor_resize(id: String, width: f32, height: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"width": width, "height": height})),
+            data: Some(
+                serde_json::json!({"width": sanitize_f32(width), "height": sanitize_f32(height)}),
+            ),
             ..Self::bare("sensor_resize", id)
         }
     }
@@ -842,7 +876,9 @@ impl OutgoingEvent {
     #[cfg(feature = "widget-canvas")]
     pub fn canvas_press(id: String, x: f32, y: f32, button: String) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y, "button": button})),
+            data: Some(
+                serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y), "button": button}),
+            ),
             ..Self::bare("canvas_press", id)
         }
     }
@@ -850,7 +886,9 @@ impl OutgoingEvent {
     #[cfg(feature = "widget-canvas")]
     pub fn canvas_release(id: String, x: f32, y: f32, button: String) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y, "button": button})),
+            data: Some(
+                serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y), "button": button}),
+            ),
             ..Self::bare("canvas_release", id)
         }
     }
@@ -858,7 +896,7 @@ impl OutgoingEvent {
     #[cfg(feature = "widget-canvas")]
     pub fn canvas_move(id: String, x: f32, y: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y})),
+            data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
             ..Self::bare("canvas_move", id)
         }
     }
@@ -866,7 +904,9 @@ impl OutgoingEvent {
     #[cfg(feature = "widget-canvas")]
     pub fn canvas_scroll(id: String, x: f32, y: f32, delta_x: f32, delta_y: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y, "delta_x": delta_x, "delta_y": delta_y})),
+            data: Some(
+                serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y), "delta_x": sanitize_f32(delta_x), "delta_y": sanitize_f32(delta_y)}),
+            ),
             ..Self::bare("canvas_scroll", id)
         }
     }
@@ -905,14 +945,16 @@ impl OutgoingEvent {
 
     pub fn mouse_area_move(id: String, x: f32, y: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"x": x, "y": y})),
+            data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
             ..Self::bare("mouse_move", id)
         }
     }
 
     pub fn mouse_area_scroll(id: String, delta_x: f32, delta_y: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y})),
+            data: Some(
+                serde_json::json!({"delta_x": sanitize_f32(delta_x), "delta_y": sanitize_f32(delta_y)}),
+            ),
             ..Self::bare("mouse_scroll", id)
         }
     }
@@ -923,7 +965,7 @@ impl OutgoingEvent {
 
     pub fn pane_resized(id: String, split: String, ratio: f32) -> Self {
         Self {
-            data: Some(serde_json::json!({"split": split, "ratio": ratio})),
+            data: Some(serde_json::json!({"split": split, "ratio": sanitize_f32(ratio)})),
             ..Self::bare("pane_resized", id)
         }
     }
@@ -982,10 +1024,10 @@ impl OutgoingEvent {
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "absolute_x": abs_x, "absolute_y": abs_y,
-                "relative_x": rel_x, "relative_y": rel_y,
-                "bounds_width": bounds_w, "bounds_height": bounds_h,
-                "content_width": content_w, "content_height": content_h,
+                "absolute_x": sanitize_f32(abs_x), "absolute_y": sanitize_f32(abs_y),
+                "relative_x": sanitize_f32(rel_x), "relative_y": sanitize_f32(rel_y),
+                "bounds_width": sanitize_f32(bounds_w), "bounds_height": sanitize_f32(bounds_h),
+                "content_width": sanitize_f32(content_w), "content_height": sanitize_f32(content_h),
             })),
             ..Self::bare("scroll", id)
         }
@@ -2053,5 +2095,58 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    // -- float sanitization --
+
+    #[test]
+    fn sanitize_f32_passes_finite() {
+        assert_eq!(super::sanitize_f32(1.5), 1.5);
+        assert_eq!(super::sanitize_f32(-0.0), -0.0);
+        assert_eq!(super::sanitize_f32(0.0), 0.0);
+    }
+
+    #[test]
+    fn sanitize_f32_replaces_nan() {
+        assert_eq!(super::sanitize_f32(f32::NAN), 0.0);
+    }
+
+    #[test]
+    fn sanitize_f32_replaces_infinity() {
+        assert_eq!(super::sanitize_f32(f32::INFINITY), 0.0);
+        assert_eq!(super::sanitize_f32(f32::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn sanitize_f64_passes_finite() {
+        assert_eq!(super::sanitize_f64(42.0), 42.0);
+    }
+
+    #[test]
+    fn sanitize_f64_replaces_nan() {
+        assert_eq!(super::sanitize_f64(f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn sanitize_f64_replaces_infinity() {
+        assert_eq!(super::sanitize_f64(f64::INFINITY), 0.0);
+        assert_eq!(super::sanitize_f64(f64::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn outgoing_slide_with_nan_produces_zero() {
+        let event = OutgoingEvent::slide("s1".to_string(), f64::NAN);
+        // The value should be 0.0, not NaN
+        let val = event.value.unwrap();
+        assert_eq!(val.as_f64(), Some(0.0));
+    }
+
+    #[test]
+    fn outgoing_cursor_moved_with_infinity_produces_zero() {
+        let event =
+            OutgoingEvent::cursor_moved("tag".to_string(), f32::INFINITY, f32::NEG_INFINITY);
+        let data = event.data.unwrap();
+        assert_eq!(data["x"].as_f64(), Some(0.0));
+        assert_eq!(data["y"].as_f64(), Some(0.0));
     }
 }

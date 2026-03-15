@@ -3,6 +3,7 @@
 #[cfg(feature = "headless")]
 mod headless;
 mod test_mode;
+mod test_protocol;
 
 mod renderer;
 
