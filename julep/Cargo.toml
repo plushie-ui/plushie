@@ -1,16 +1,16 @@
 [package]
-name = "julep-renderer"
+name = "julep"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "julep_renderer"
+name = "julep"
 path = "src/lib.rs"
 
 [[bin]]
-name = "julep-renderer"
+name = "julep"
 path = "src/main.rs"
 
 [dependencies]

@@ -24,7 +24,7 @@ jobs:
     name: CI
     runs-on: docker
     container:
-      image: git.lincracy.internal/lincracy/julep-renderer-ci:latest
+      image: git.lincracy.internal/lincracy/julep-ci:latest
     steps:
       - name: Checkout
         run: |

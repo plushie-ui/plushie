@@ -943,10 +943,7 @@ mod tests {
 
     #[test]
     fn parse_direction_variants() {
-        assert!(matches!(
-            parse_direction("north"),
-            window::Direction::North
-        ));
+        assert!(matches!(parse_direction("north"), window::Direction::North));
         assert!(matches!(
             parse_direction("south_west"),
             window::Direction::SouthWest

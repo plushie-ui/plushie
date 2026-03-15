@@ -1408,7 +1408,7 @@ pub(crate) fn run(builder: julep_core::app::JulepAppBuilder) -> iced::Result {
     let args: Vec<String> = std::env::args().collect();
 
     // Levelled logging via RUST_LOG. Default: warn (quiet). Use
-    // RUST_LOG=julep_renderer=debug (or =info, =trace) for more output.
+    // RUST_LOG=julep=debug (or =info, =trace) for more output.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Parse codec flags early so all modes (headless, test, normal) can use them.

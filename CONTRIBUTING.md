@@ -71,7 +71,8 @@ julep-core is the public SDK for writing widget extensions. The quick path:
 4. For iced types not in the prelude, use `julep_core::iced::*` instead
    of adding a direct `iced` dependency -- this avoids version conflicts.
 
-See the Julep project's `docs/extensions.md` for the full guide.
+See the `WidgetExtension` trait docs and examples in
+`julep-core/src/extensions.rs` for the full API reference.
 
 ## Pull Requests
 

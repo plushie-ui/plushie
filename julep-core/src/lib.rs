@@ -2,12 +2,12 @@
 //!
 //! Core library for the Julep desktop GUI framework. This crate provides the
 //! rendering engine, wire protocol handling, and widget infrastructure that
-//! powers the `julep-renderer` binary. The host process drives state and logic;
+//! powers the `julep` binary. The host process drives state and logic;
 //! this crate turns UI tree descriptions into native iced widgets.
 //!
 //! ## Feature flags
 //!
-//! Feature flags live on this crate and are re-exported by `julep-renderer`.
+//! Feature flags live on this crate and are re-exported by `julep`.
 //!
 //! **Widget features** (all enabled by `builtin-all`, which is on by default):
 //! - `widget-image` -- raster image widget (`iced/image`)
@@ -23,7 +23,7 @@
 //! - `clipboard` -- clipboard read/write via `arboard`
 //! - `notifications` -- OS notifications via `notify-rust`
 //!
-//! Note: `headless` and `test-mode` features are defined in `julep-renderer` only,
+//! Note: `headless` and `test-mode` features are defined in `julep` only,
 //! as they affect the binary entrypoint (iced_test Simulator vs real windows).
 //!
 //! **Feature flag interactions:**

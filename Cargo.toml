@@ -1,12 +1,12 @@
 [workspace]
-members = ["julep-core", "julep-renderer"]
+members = ["julep-core", "julep"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/lincracy/julep-renderer"
+repository = "https://github.com/lincracy/julep"
 
 [patch.crates-io]
 iced = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }

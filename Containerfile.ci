@@ -1,5 +1,5 @@
-# CI container for julep-renderer
-# Build: podman build -t julep-renderer-ci:latest -f Containerfile.ci .
+# CI container for julep
+# Build: podman build -t julep-ci:latest -f Containerfile.ci .
 
 # node:18-bookworm provides Node.js (needed by the host-side test harness)
 # on a Debian Bookworm base, giving us a stable apt package set for native

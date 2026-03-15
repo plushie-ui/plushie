@@ -1,12 +1,12 @@
-//! # julep-renderer
+//! # julep
 //!
-//! Binary crate for the Julep renderer. Three execution modes:
+//! Native GUI renderer binary. Three execution modes:
 //!
-//! - **Default:** `julep-renderer` -- Full iced::daemon with real windows.
-//! - **Headless:** `julep-renderer --headless` -- Core + wire protocol only,
+//! - **Default:** `julep` -- Full iced::daemon with real windows.
+//! - **Headless:** `julep --headless` -- Core + wire protocol only,
 //!   no display server required. Useful for CI and integration testing.
 //!   Requires the `headless` feature.
-//! - **Test mode:** `julep-renderer --test` -- Real iced::daemon windows plus
+//! - **Test mode:** `julep --test` -- Real iced::daemon windows plus
 //!   test protocol messages (Query, Interact, SnapshotCapture). Requires
 //!   the `test-mode` feature.
 //!

@@ -20,30 +20,30 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: julep-renderer
-            asset: julep-renderer-linux-x86_64
+            binary: julep
+            asset: julep-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: julep-renderer
-            asset: julep-renderer-linux-aarch64
+            binary: julep
+            asset: julep-linux-aarch64
             cross: true
           - target: x86_64-apple-darwin
             os: macos-13
-            binary: julep-renderer
-            asset: julep-renderer-darwin-x86_64
+            binary: julep
+            asset: julep-darwin-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: julep-renderer
-            asset: julep-renderer-darwin-aarch64
+            binary: julep
+            asset: julep-darwin-aarch64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: julep-renderer.exe
-            asset: julep-renderer-windows-x86_64.exe
+            binary: julep.exe
+            asset: julep-windows-x86_64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.75.0"
+          toolchain: "1.82.0"
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -104,4 +104,4 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            julep-renderer-*
+            julep-*

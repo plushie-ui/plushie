@@ -59,7 +59,7 @@ pub(crate) fn emit_hello() {
         "type": "hello",
         "protocol": julep_core::protocol::PROTOCOL_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
-        "name": "julep-renderer",
+        "name": "julep",
     });
     let codec = Codec::get_global();
     match codec.encode(&msg) {
