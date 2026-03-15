@@ -25,15 +25,27 @@ qrcode = { version = "0.14", optional = true, default-features = false }
 
 [features]
 default = ["builtin-all", "dialogs", "clipboard", "notifications"]
+# Enables all built-in widget features.
 builtin-all = ["widget-image", "widget-svg", "widget-canvas", "widget-markdown", "widget-highlighter", "widget-sysinfo", "widget-qr-code"]
+# Image widget (iced/image).
 widget-image = ["iced/image"]
+# SVG widget (iced/svg).
 widget-svg = ["iced/svg"]
+# Canvas widget -- 2D drawing surface (iced/canvas).
 widget-canvas = ["iced/canvas"]
+# Markdown widget (iced/markdown).
 widget-markdown = ["iced/markdown"]
+# TextEditor syntax highlighting (iced/highlighter).
 widget-highlighter = ["iced/highlighter"]
+# System info query (iced/sysinfo).
 widget-sysinfo = ["iced/sysinfo"]
+# QR code widget (iced/canvas + qrcode crate).
 widget-qr-code = ["iced/canvas", "dep:qrcode"]
+# File dialog support via rfd.
 dialogs = ["rfd"]
+# Clipboard read/write via arboard.
 clipboard = ["arboard"]
+# OS notification support via notify-rust.
 notifications = ["notify-rust"]
+# Accessibility via accesskit. Requires the iced fork with a11y support.
 a11y = []

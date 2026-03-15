@@ -391,8 +391,8 @@ pub(crate) fn render_responsive<'a>(
     dispatcher: &'a ExtensionDispatcher,
 ) -> Element<'a, Message> {
     // iced's Responsive widget takes a closure that receives Size and returns
-    // an Element. Since we can't call back to Elixir within a single frame,
-    // we render the children as-is and wrap in a sensor so Elixir receives
+    // an Element. Since we can't call back to the host within a single frame,
+    // we render the children as-is and wrap in a sensor so the host receives
     // resize events with the actual measured size.
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Fill);

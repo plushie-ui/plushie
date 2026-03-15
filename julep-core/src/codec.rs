@@ -702,7 +702,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("empty frame"));
     }
 
-    // -- Cross-format: simulate external msgpack (e.g. Elixir's Msgpax) --
+    // -- Cross-format: simulate external msgpack (e.g. Msgpax) --
     //
     // rmp-serde's own serializer produces bytes that its deserializer can
     // roundtrip, but external msgpack producers encode maps differently.
@@ -735,7 +735,7 @@ mod tests {
 
     #[test]
     fn msgpack_external_incoming_settings() {
-        // This is exactly what Elixir sends: a plain map with "type":"settings".
+        // This is exactly what a host sends: a plain map with "type":"settings".
         use crate::protocol::IncomingMessage;
         let external = json!({"type": "settings", "settings": {"antialiasing": false}});
         let bytes = rmp_serde::to_vec_named(&external).unwrap();
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn msgpack_image_op_with_native_binary() {
-        // Simulate what Elixir sends when using Msgpax.Bin for binary data.
+        // Simulate what an external producer sends when using native binary fields.
         // Build raw msgpack with a binary field using rmpv directly.
         use rmpv::Value as RmpvValue;
 

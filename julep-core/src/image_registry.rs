@@ -28,7 +28,7 @@ fn sniff_image_format(data: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// In-memory registry for image handles. Allows Elixir to send raw pixel
+/// In-memory registry for image handles. Allows the host to send raw pixel
 /// or encoded image data and reference them by name in the UI tree.
 pub struct ImageRegistry {
     #[cfg(feature = "widget-image")]

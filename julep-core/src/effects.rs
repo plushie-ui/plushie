@@ -313,7 +313,7 @@ fn handle_notification(id: String, _payload: &Value) -> EffectResponse {
 // ---------------------------------------------------------------------------
 
 /// Handle an async effect and return an EffectResponse. The response format
-/// matches the sync handlers exactly so Elixir can deserialize uniformly.
+/// matches the sync handlers exactly so the host can deserialize uniformly.
 #[cfg(feature = "dialogs")]
 pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) -> EffectResponse {
     match effect_type {

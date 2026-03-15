@@ -847,4 +847,79 @@ mod tests {
         // Root unchanged
         assert_eq!(tree.root().unwrap().id, "root");
     }
+
+    // -----------------------------------------------------------------------
+    // Malformed patch operations (error paths)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn patch_replace_node_missing_node_field_does_not_panic() {
+        let mut tree = Tree::new();
+        tree.snapshot(make_node("root", "column"));
+        // replace_node without the required "node" field
+        let op = make_patch_op("replace_node", vec![], json!({}));
+        tree.apply_patch(vec![op]);
+        // Tree should be unchanged
+        assert_eq!(tree.root().unwrap().id, "root");
+    }
+
+    #[test]
+    fn patch_replace_node_invalid_node_json_does_not_panic() {
+        let mut tree = Tree::new();
+        tree.snapshot(make_node("root", "column"));
+        // "node" is present but not a valid TreeNode (missing required fields)
+        let op = make_patch_op("replace_node", vec![], json!({"node": {"garbage": true}}));
+        tree.apply_patch(vec![op]);
+        assert_eq!(tree.root().unwrap().id, "root");
+    }
+
+    #[test]
+    fn patch_update_props_missing_props_field_does_not_panic() {
+        let mut tree = Tree::new();
+        tree.snapshot(make_node_with_props(
+            "root",
+            "text",
+            json!({"content": "hi"}),
+        ));
+        let op = make_patch_op("update_props", vec![], json!({}));
+        tree.apply_patch(vec![op]);
+        // Props unchanged -- the missing "props" field is handled gracefully
+        assert_eq!(tree.root().unwrap().props["content"], "hi");
+    }
+
+    #[test]
+    fn patch_insert_child_missing_index_does_not_panic() {
+        let mut tree = Tree::new();
+        tree.snapshot(make_node("root", "column"));
+        let op = make_patch_op(
+            "insert_child",
+            vec![],
+            json!({
+                "node": {"id": "x", "type": "text", "props": {}, "children": []}
+            }),
+        );
+        tree.apply_patch(vec![op]);
+        // No child inserted because index is missing
+        assert!(tree.root().unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn patch_insert_child_missing_node_does_not_panic() {
+        let mut tree = Tree::new();
+        tree.snapshot(make_node("root", "column"));
+        let op = make_patch_op("insert_child", vec![], json!({"index": 0}));
+        tree.apply_patch(vec![op]);
+        assert!(tree.root().unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn patch_remove_child_missing_index_does_not_panic() {
+        let mut tree = Tree::new();
+        let root = make_node_with_children("root", "column", vec![make_node("a", "text")]);
+        tree.snapshot(root);
+        let op = make_patch_op("remove_child", vec![], json!({}));
+        tree.apply_patch(vec![op]);
+        // Child should still be present -- the op failed gracefully
+        assert_eq!(tree.root().unwrap().children.len(), 1);
+    }
 }

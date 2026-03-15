@@ -2,7 +2,7 @@
 //!
 //! Core library for the Julep desktop GUI framework. This crate provides the
 //! rendering engine, wire protocol handling, and widget infrastructure that
-//! powers the `julep-renderer` binary. Elixir drives state and logic;
+//! powers the `julep-renderer` binary. The host process drives state and logic;
 //! this crate turns UI tree descriptions into native iced widgets.
 //!
 //! ## Feature flags
@@ -64,3 +64,10 @@ pub mod widgets;
 
 #[cfg(feature = "a11y")]
 pub(crate) mod a11y_widget;
+
+// Re-export iced so extension crates can use `julep_core::iced::*` without
+// adding a direct iced dependency. This avoids version conflicts when
+// julep-core bumps its iced version -- extensions that use only
+// `julep_core::prelude::*` and `julep_core::iced::*` get the upgrade
+// automatically.
+pub use iced;

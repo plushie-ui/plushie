@@ -1,7 +1,7 @@
 //! Accessibility override widget.
 //!
 //! Wraps a child widget to intercept [`operate`] calls and apply
-//! Elixir-side accessibility overrides (role, label, description, etc.)
+//! host-side accessibility overrides (role, label, description, etc.)
 //! to the accessibility tree. When `hidden` is set, the widget and all
 //! its descendants are removed from the accessibility tree while
 //! remaining visible and interactive for sighted users.
@@ -175,7 +175,7 @@ fn parse_live(s: &str) -> Option<accessible::Live> {
 // ---------------------------------------------------------------------------
 
 /// A widget that wraps a single child and intercepts [`operate`] to
-/// apply accessibility overrides from the Elixir-side `a11y` prop.
+/// apply accessibility overrides from the host-side `a11y` prop.
 ///
 /// All methods except [`operate`] delegate directly to the child.
 ///

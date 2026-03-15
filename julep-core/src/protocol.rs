@@ -22,10 +22,10 @@ fn sanitize_f64(v: f64) -> f64 {
 }
 
 /// Protocol version number. Sent in the `hello` handshake message on startup
-/// and checked against the value the Elixir side embeds in Settings.
+/// and checked against the value the host embeds in Settings.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Messages sent from Elixir to the renderer over stdin (JSONL).
+/// Messages sent from the host to the renderer over stdin.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {

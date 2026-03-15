@@ -40,7 +40,7 @@ pub enum CoreEffect {
         width: Option<u32>,
         height: Option<u32>,
     },
-    /// Extension configuration received from Elixir.
+    /// Extension configuration received from the host.
     ExtensionConfig(Value),
     /// Spawn an async effect (e.g. file dialogs) via Task::perform.
     SpawnAsyncEffect {
@@ -541,6 +541,84 @@ mod tests {
             tree: make_node("root2", "column"),
         });
         assert!(!core.caches.editor_contents.contains_key("ed1"));
+    }
+
+    // -- Multi-window sequence -----------------------------------------------
+
+    fn make_window_node(id: &str) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: "window".to_string(),
+            props: serde_json::json!({}),
+            children: vec![],
+        }
+    }
+
+    #[test]
+    fn multi_window_snapshot_two_windows_produces_sync_windows() {
+        let mut core = Core::new();
+        let mut root = make_node("root", "column");
+        root.children.push(make_window_node("win-a"));
+        root.children.push(make_window_node("win-b"));
+
+        let effects = core.apply(IncomingMessage::Snapshot { tree: root });
+
+        let has_sync = effects.iter().any(|e| matches!(e, CoreEffect::SyncWindows));
+        assert!(has_sync, "Snapshot with windows should produce SyncWindows");
+
+        // Verify the tree has both windows.
+        let ids = core.tree.window_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"win-a".to_string()));
+        assert!(ids.contains(&"win-b".to_string()));
+    }
+
+    #[test]
+    fn multi_window_second_snapshot_removes_window() {
+        let mut core = Core::new();
+
+        // First snapshot: two windows.
+        let mut root1 = make_node("root", "column");
+        root1.children.push(make_window_node("win-a"));
+        root1.children.push(make_window_node("win-b"));
+        core.apply(IncomingMessage::Snapshot { tree: root1 });
+        assert_eq!(core.tree.window_ids().len(), 2);
+
+        // Second snapshot: only one window.
+        let mut root2 = make_node("root", "column");
+        root2.children.push(make_window_node("win-a"));
+        let effects = core.apply(IncomingMessage::Snapshot { tree: root2 });
+
+        let has_sync = effects.iter().any(|e| matches!(e, CoreEffect::SyncWindows));
+        assert!(has_sync, "Second Snapshot should produce SyncWindows");
+
+        let ids = core.tree.window_ids();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "win-a");
+    }
+
+    #[test]
+    fn multi_window_snapshot_then_add_window_via_second_snapshot() {
+        let mut core = Core::new();
+
+        // First: one window.
+        let mut root1 = make_node("root", "column");
+        root1.children.push(make_window_node("win-a"));
+        core.apply(IncomingMessage::Snapshot { tree: root1 });
+        assert_eq!(core.tree.window_ids().len(), 1);
+
+        // Second: three windows.
+        let mut root2 = make_node("root", "column");
+        root2.children.push(make_window_node("win-a"));
+        root2.children.push(make_window_node("win-b"));
+        root2.children.push(make_window_node("win-c"));
+        let effects = core.apply(IncomingMessage::Snapshot { tree: root2 });
+
+        let has_sync = effects.iter().any(|e| matches!(e, CoreEffect::SyncWindows));
+        assert!(has_sync);
+
+        let ids = core.tree.window_ids();
+        assert_eq!(ids.len(), 3);
     }
 }
 

@@ -499,4 +499,191 @@ mod tests {
         let core = Core::new();
         assert_eq!(find_node_by_text(&core, "anything"), Value::Null);
     }
+
+    // -- handle_interact smoke tests --
+    //
+    // These verify handle_interact doesn't panic for various actions.
+    // The output goes to stdout via emit_wire which we can't capture in
+    // a unit test, but the test proves the code path doesn't crash.
+    // We build a Core with a tree so selector resolution has something
+    // to work with.
+
+    fn core_with_tree() -> Core {
+        let mut core = Core::new();
+        let mut root = make_node("root", "column");
+        root.children.push(make_text_node("btn1", "Click me"));
+        root.children.push({
+            let mut n = make_node("input1", "text_input");
+            n.props = json!({"placeholder": "Type here", "value": ""});
+            n
+        });
+        root.children.push({
+            let mut n = make_node("toggle1", "toggler");
+            n.props = json!({"is_toggled": false});
+            n
+        });
+        root.children.push({
+            let mut n = make_node("slider1", "slider");
+            n.props = json!({"min": 0.0, "max": 100.0, "value": 50.0});
+            n
+        });
+        core.apply(julep_core::protocol::IncomingMessage::Snapshot { tree: root });
+        core
+    }
+
+    #[test]
+    fn handle_interact_click_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i1".to_string(),
+            "click".to_string(),
+            json!({"by": "id", "value": "btn1"}),
+            json!({}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_type_text_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i2".to_string(),
+            "type_text".to_string(),
+            json!({"by": "id", "value": "input1"}),
+            json!({"text": "hello"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_submit_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i3".to_string(),
+            "submit".to_string(),
+            json!({"by": "id", "value": "input1"}),
+            json!({"value": "submitted"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_toggle_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i4".to_string(),
+            "toggle".to_string(),
+            json!({"by": "id", "value": "toggle1"}),
+            json!({"value": true}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_select_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i5".to_string(),
+            "select".to_string(),
+            json!({"by": "id", "value": "btn1"}),
+            json!({"value": "option_a"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_slide_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i6".to_string(),
+            "slide".to_string(),
+            json!({"by": "id", "value": "slider1"}),
+            json!({"value": 75.0}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_press_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i7".to_string(),
+            "press".to_string(),
+            json!({}),
+            json!({"key": "ctrl+s"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_release_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i8".to_string(),
+            "release".to_string(),
+            json!({}),
+            json!({"key": "a"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_move_to_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i9".to_string(),
+            "move_to".to_string(),
+            json!({}),
+            json!({"x": 100.0, "y": 200.0}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_type_key_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i10".to_string(),
+            "type_key".to_string(),
+            json!({}),
+            json!({"key": "enter"}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_unknown_action_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i11".to_string(),
+            "nonexistent_action".to_string(),
+            json!({"by": "id", "value": "btn1"}),
+            json!({}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_selector_not_found_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i12".to_string(),
+            "click".to_string(),
+            json!({"by": "id", "value": "no_such_widget"}),
+            json!({}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_by_text_selector() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i13".to_string(),
+            "click".to_string(),
+            json!({"by": "text", "value": "Click me"}),
+            json!({}),
+        );
+    }
 }

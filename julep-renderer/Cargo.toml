@@ -28,17 +28,31 @@ iced_winit = { version = "0.14", optional = true }
 
 [features]
 default = ["builtin-all", "dialogs", "clipboard", "notifications", "a11y"]
+# Enables all built-in widget features.
 builtin-all = ["widget-image", "widget-svg", "widget-canvas", "widget-markdown", "widget-highlighter", "widget-sysinfo", "widget-qr-code"]
+# Image widget (iced/image).
 widget-image = ["julep-core/widget-image"]
+# SVG widget (iced/svg).
 widget-svg = ["julep-core/widget-svg"]
+# Canvas widget -- 2D drawing surface (iced/canvas).
 widget-canvas = ["julep-core/widget-canvas"]
+# Markdown widget (iced/markdown).
 widget-markdown = ["julep-core/widget-markdown"]
+# TextEditor syntax highlighting (iced/highlighter).
 widget-highlighter = ["julep-core/widget-highlighter"]
+# System info query (iced/sysinfo).
 widget-sysinfo = ["julep-core/widget-sysinfo", "iced/sysinfo"]
+# QR code widget (iced/canvas + qrcode crate).
 widget-qr-code = ["julep-core/widget-qr-code"]
+# File dialog support via rfd.
 dialogs = ["julep-core/dialogs"]
+# Clipboard read/write via arboard.
 clipboard = ["julep-core/clipboard"]
+# OS notification support via notify-rust.
 notifications = ["julep-core/notifications"]
+# Headless test mode (Core + iced_test Simulator, no display).
 headless = ["iced_test", "sha2"]
+# Full test mode (real iced::daemon + test protocol messages).
 test-mode = ["sha2"]
+# Accessibility via accesskit. Requires the iced fork with a11y support.
 a11y = ["julep-core/a11y", "dep:iced_winit", "iced_winit/a11y"]

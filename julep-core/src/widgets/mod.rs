@@ -321,6 +321,12 @@ fn prune_all_stale_caches(live_ids: &HashSet<String>, caches: &mut WidgetCaches)
 // ---------------------------------------------------------------------------
 
 /// Map a TreeNode to an iced Element. Unknown types render as an empty container.
+///
+/// This is the immutable side of the ensure_caches/render split. All mutable
+/// cache state (text_editor Content, markdown Items, combo_box State, canvas
+/// Cache, etc.) must be pre-populated by [`ensure_caches`] before calling
+/// this function. `render` works exclusively with shared (`&`) references
+/// to caches, so it can run inside iced's `view()` which only has `&self`.
 pub fn render<'a>(
     node: &'a TreeNode,
     caches: &'a WidgetCaches,
@@ -766,5 +772,221 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Render smoke tests -- verify render() doesn't panic for common types
+    // -----------------------------------------------------------------------
+
+    use crate::extensions::ExtensionDispatcher;
+    use crate::image_registry::ImageRegistry;
+    use crate::protocol::TreeNode;
+
+    fn smoke_node(id: &str, type_name: &str, props: serde_json::Value) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: type_name.to_string(),
+            props,
+            children: vec![],
+        }
+    }
+
+    fn smoke_node_with_children(
+        id: &str,
+        type_name: &str,
+        props: serde_json::Value,
+        children: Vec<TreeNode>,
+    ) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: type_name.to_string(),
+            props,
+            children,
+        }
+    }
+
+    fn smoke_text_child() -> TreeNode {
+        smoke_node("child", "text", serde_json::json!({"content": "hi"}))
+    }
+
+    #[test]
+    fn render_smoke_text() {
+        let node = smoke_node("t", "text", serde_json::json!({"content": "hello"}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_column_empty() {
+        let node = smoke_node("c", "column", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_row_empty() {
+        let node = smoke_node("r", "row", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_container_with_child() {
+        let node = smoke_node_with_children(
+            "ct",
+            "container",
+            serde_json::json!({}),
+            vec![smoke_text_child()],
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_button_with_child() {
+        let node = smoke_node_with_children(
+            "btn",
+            "button",
+            serde_json::json!({}),
+            vec![smoke_text_child()],
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_checkbox() {
+        let node = smoke_node(
+            "cb",
+            "checkbox",
+            serde_json::json!({"label": "Accept", "checked": true}),
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_space() {
+        let node = smoke_node("sp", "space", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_rule() {
+        let node = smoke_node("rl", "rule", serde_json::json!({"direction": "horizontal"}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_progress_bar() {
+        let node = smoke_node(
+            "pb",
+            "progress_bar",
+            serde_json::json!({"value": 50.0, "min": 0.0, "max": 100.0}),
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_slider() {
+        let node = smoke_node(
+            "sl",
+            "slider",
+            serde_json::json!({"min": 0.0, "max": 100.0, "value": 50.0}),
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_text_input() {
+        let node = smoke_node(
+            "ti",
+            "text_input",
+            serde_json::json!({"placeholder": "Type here", "value": ""}),
+        );
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_toggler() {
+        let node = smoke_node("tg", "toggler", serde_json::json!({"is_toggled": false}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_smoke_stack_empty() {
+        let node = smoke_node("st", "stack", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    // -----------------------------------------------------------------------
+    // Error path tests -- unknown type and missing props
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn render_unknown_type_returns_element_without_panic() {
+        let node = smoke_node("unk", "definitely_not_a_widget", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        // Should produce the empty container fallback, not panic.
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    #[test]
+    fn render_text_input_missing_props_does_not_panic() {
+        let node = smoke_node("ti_empty", "text_input", serde_json::json!({}));
+        let caches = WidgetCaches::new();
+        let images = ImageRegistry::new();
+        let theme = iced::Theme::Dark;
+        let dispatcher = ExtensionDispatcher::default();
+        let _elem = render(&node, &caches, &images, &theme, &dispatcher);
     }
 }

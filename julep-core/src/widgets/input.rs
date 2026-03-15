@@ -1037,7 +1037,7 @@ pub(crate) fn render_combo_box<'a>(
     .width(width)
     .padding(padding_val);
 
-    // on_input: emit Input events so Elixir can filter
+    // on_input: emit Input events so the host can filter
     cb = cb.on_input(move |v| Message::Input(input_id.clone(), v));
 
     if let Some(sz) = prop_f32(props, "size").or(caches.default_text_size) {

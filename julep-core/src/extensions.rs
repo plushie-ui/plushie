@@ -84,7 +84,7 @@ pub trait WidgetExtension: Send + Sync + 'static {
     /// `extension_config` object. Must be unique across all extensions.
     fn config_key(&self) -> &str;
 
-    /// Receive configuration from Elixir. Called on startup and renderer
+    /// Receive configuration from the host. Called on startup and renderer
     /// restart. Receives `Value::Null` if no config provided.
     fn init(&mut self, _config: &Value) {}
 
@@ -107,7 +107,7 @@ pub trait WidgetExtension: Send + Sync + 'static {
         EventResult::PassThrough
     }
 
-    /// Handle a command sent from Elixir directly to this extension.
+    /// Handle a command sent from the host directly to this extension.
     fn handle_command(
         &mut self,
         _node_id: &str,
@@ -128,7 +128,7 @@ pub trait WidgetExtension: Send + Sync + 'static {
 
 /// Result of extension event handling.
 pub enum EventResult {
-    /// Don't handle -- forward to Elixir as-is.
+    /// Don't handle -- forward to the host as-is.
     PassThrough,
     /// Handled internally. Don't forward original. Optionally emit different events.
     Consumed(Vec<OutgoingEvent>),
@@ -515,7 +515,7 @@ impl ExtensionDispatcher {
                     self.extensions[ext_idx].config_key()
                 );
                 self.poisoned[ext_idx] = true;
-                // Report the panic back to Elixir so update/2 can handle it.
+                // Report the panic back to the host so it can handle it.
                 let error_data = serde_json::json!({
                     "error": msg,
                     "op": op,
@@ -1305,5 +1305,119 @@ mod tests {
         // reset() should clear poisoned state.
         dispatcher.reset(&mut caches);
         assert!(!dispatcher.is_poisoned(0));
+    }
+
+    // -- Full poison lifecycle (render panics -> poisoned -> clear) -----------
+
+    /// Extension that panics on render.
+    struct PanickingRenderExtension;
+
+    impl WidgetExtension for PanickingRenderExtension {
+        fn type_names(&self) -> &[&str] {
+            &["panicky_render"]
+        }
+        fn config_key(&self) -> &str {
+            "panicky_render"
+        }
+        fn render<'a>(&self, _node: &'a TreeNode, _env: &WidgetEnv<'a>) -> Element<'a, Message> {
+            panic!("render goes boom");
+        }
+    }
+
+    #[test]
+    fn poison_lifecycle_render_panics_then_clear() {
+        let ext: Box<dyn WidgetExtension> = Box::new(PanickingRenderExtension);
+        let mut dispatcher = ExtensionDispatcher::new(vec![ext]);
+        let mut caches = ExtensionCaches::new();
+        let images = crate::image_registry::ImageRegistry::new();
+        let theme = Theme::Dark;
+
+        // Register the node.
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("pr1", "panicky_render"));
+        dispatcher.prepare_all(&root, &mut caches, &theme);
+
+        // 1) Extension should not be poisoned yet.
+        assert!(!dispatcher.is_poisoned(0));
+
+        // 2) Record RENDER_PANIC_THRESHOLD render panics.
+        //    In real usage, catch_unwind in widgets::render calls
+        //    record_render_panic. We simulate the same sequence.
+        for i in 0..RENDER_PANIC_THRESHOLD {
+            let at_threshold = dispatcher.record_render_panic("panicky_render");
+            if i < RENDER_PANIC_THRESHOLD - 1 {
+                assert!(!at_threshold, "should not be at threshold yet (i={i})");
+            } else {
+                assert!(at_threshold, "should be at threshold now");
+            }
+        }
+
+        // 3) prepare_all triggers the poisoning check.
+        dispatcher.prepare_all(&root, &mut caches, &theme);
+        assert!(
+            dispatcher.is_poisoned(0),
+            "extension should be poisoned after threshold + prepare_all"
+        );
+
+        // 4) Verify the poisoned extension renders a placeholder via the
+        //    dispatcher (returns Some with red error text, not a panic).
+        let node = make_node("pr1", "panicky_render");
+        {
+            let widget_caches = crate::widgets::WidgetCaches::new();
+            let render_ctx = crate::extensions::RenderContext {
+                caches: &widget_caches,
+                images: &images,
+                theme: &theme,
+                extensions: &dispatcher,
+            };
+            let env = WidgetEnv {
+                caches: &caches,
+                images: &images,
+                theme: &theme,
+                render_ctx,
+                default_text_size: None,
+                default_font: None,
+            };
+            let result = dispatcher.render(&node, &env);
+            assert!(
+                result.is_some(),
+                "poisoned extension should still return Some (placeholder)"
+            );
+        } // borrows released here
+
+        // 5) clear_poisoned simulates what happens on Snapshot.
+        dispatcher.clear_poisoned();
+        assert!(
+            !dispatcher.is_poisoned(0),
+            "poison should be cleared after clear_poisoned"
+        );
+
+        // 6) After clearing, the extension can render again (will panic
+        //    again in this test, but the point is it's no longer skipped).
+        //    We verify by checking that render() actually calls the
+        //    extension (which panics) rather than returning the placeholder.
+        //    We use catch_unwind to contain the panic.
+        let widget_caches2 = crate::widgets::WidgetCaches::new();
+        let render_ctx2 = crate::extensions::RenderContext {
+            caches: &widget_caches2,
+            images: &images,
+            theme: &theme,
+            extensions: &dispatcher,
+        };
+        let env2 = WidgetEnv {
+            caches: &caches,
+            images: &images,
+            theme: &theme,
+            render_ctx: render_ctx2,
+            default_text_size: None,
+            default_font: None,
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dispatcher.render(&node, &env2)
+        }));
+        assert!(
+            result.is_err(),
+            "after clearing poison, render should call the extension again (which panics)"
+        );
     }
 }
