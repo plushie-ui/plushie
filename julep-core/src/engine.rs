@@ -270,7 +270,9 @@ impl Core {
                 log::debug!("ExtensionCommand message ignored by Core (handled by renderer App)");
             }
             IncomingMessage::AdvanceFrame { .. } => {
-                log::debug!("AdvanceFrame message ignored by Core (handled by headless/test_mode)");
+                log::warn!(
+                    "AdvanceFrame is only supported in headless/test mode; ignored in daemon mode"
+                );
             }
             IncomingMessage::ExtensionCommandBatch { .. } => {
                 log::debug!(
