@@ -61,6 +61,9 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
     let padding_val = parse_padding_value(props);
     let table_id = node.id.clone();
 
+    let header_text_size = prop_f32(props, "header_text_size").unwrap_or(14.0);
+    let row_text_size = prop_f32(props, "row_text_size").unwrap_or(13.0);
+
     let sort_by = prop_str(props, "sort_by");
     let sort_order = prop_str(props, "sort_order");
 
@@ -101,7 +104,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                     let click_id = table_id.clone();
                     let click_key = col.key.clone();
                     container(
-                        button(text(label_text).size(14.0))
+                        button(text(label_text).size(header_text_size))
                             .on_press(Message::Event(
                                 click_id,
                                 serde_json::json!({"column": click_key}),
@@ -113,7 +116,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                     .align_x(col.align)
                     .into()
                 } else {
-                    container(text(label_text).size(14.0))
+                    container(text(label_text).size(header_text_size))
                         .width(col.width)
                         .align_x(col.align)
                         .into()
@@ -142,7 +145,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                         other => other.to_string(),
                     })
                     .unwrap_or_default();
-                container(text(cell_text).size(13.0))
+                container(text(cell_text).size(row_text_size))
                     .width(col.width)
                     .align_x(col.align)
                     .into()

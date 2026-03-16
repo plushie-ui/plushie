@@ -971,17 +971,45 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
         s = s.shift_step(ss);
     }
 
+    // Rail styling props (applied on top of any style preset)
+    let rail_color = prop_color(props, "rail_color");
+    let rail_width = prop_f32(props, "rail_width");
+    let has_rail_overrides = rail_color.is_some() || rail_width.is_some();
+
     // Style with optional circular handle
     let circular = prop_bool_default(props, "circular_handle", false);
     if circular {
         let radius = prop_f32(props, "handle_radius").unwrap_or(8.0);
         s = s.style(move |theme, status| {
-            slider::default(theme, status).with_circular_handle(radius)
+            let mut style = slider::default(theme, status).with_circular_handle(radius);
+            if let Some(rc) = rail_color {
+                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
+            }
+            if let Some(rw) = rail_width {
+                style.rail.width = rw;
+            }
+            style
         });
     } else if let Some(style_val) = props.and_then(|p| p.get("style")) {
         if let Some(style_name) = style_val.as_str() {
             s = match style_name {
-                "default" => s.style(slider::default),
+                "default" => {
+                    if has_rail_overrides {
+                        s.style(move |theme: &iced::Theme, status| {
+                            let mut style = slider::default(theme, status);
+                            if let Some(rc) = rail_color {
+                                style.rail.backgrounds =
+                                    (iced::Background::Color(rc), iced::Background::Color(rc));
+                            }
+                            if let Some(rw) = rail_width {
+                                style.rail.width = rw;
+                            }
+                            style
+                        })
+                    } else {
+                        s.style(slider::default)
+                    }
+                }
                 _ => {
                     log::warn!(
                         "unknown style {:?} for widget type {:?}, using default",
@@ -996,6 +1024,13 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
             s = s.style(move |theme: &iced::Theme, status| {
                 let mut style = slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
+                if let Some(rc) = rail_color {
+                    style.rail.backgrounds =
+                        (iced::Background::Color(rc), iced::Background::Color(rc));
+                }
+                if let Some(rw) = rail_width {
+                    style.rail.width = rw;
+                }
                 if matches!(status, slider::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
@@ -1006,6 +1041,17 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                 style
             });
         }
+    } else if has_rail_overrides {
+        s = s.style(move |theme: &iced::Theme, status| {
+            let mut style = slider::default(theme, status);
+            if let Some(rc) = rail_color {
+                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
+            }
+            if let Some(rw) = rail_width {
+                style.rail.width = rw;
+            }
+            style
+        });
     }
 
     container(s).id(widget::Id::from(node.id.clone())).into()
@@ -1043,11 +1089,32 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
         s = s.shift_step(ss);
     }
 
+    // Rail styling props (applied on top of any style preset)
+    let rail_color = prop_color(props, "rail_color");
+    let rail_width = prop_f32(props, "rail_width");
+    let has_rail_overrides = rail_color.is_some() || rail_width.is_some();
+
     // Style: string name or style map object
     if let Some(style_val) = props.and_then(|p| p.get("style")) {
         if let Some(style_name) = style_val.as_str() {
             s = match style_name {
-                "default" => s.style(vertical_slider::default),
+                "default" => {
+                    if has_rail_overrides {
+                        s.style(move |theme: &iced::Theme, status| {
+                            let mut style = vertical_slider::default(theme, status);
+                            if let Some(rc) = rail_color {
+                                style.rail.backgrounds =
+                                    (iced::Background::Color(rc), iced::Background::Color(rc));
+                            }
+                            if let Some(rw) = rail_width {
+                                style.rail.width = rw;
+                            }
+                            style
+                        })
+                    } else {
+                        s.style(vertical_slider::default)
+                    }
+                }
                 _ => {
                     log::warn!(
                         "unknown style {:?} for widget type {:?}, using default",
@@ -1062,6 +1129,13 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
             s = s.style(move |theme: &iced::Theme, status| {
                 let mut style = vertical_slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
+                if let Some(rc) = rail_color {
+                    style.rail.backgrounds =
+                        (iced::Background::Color(rc), iced::Background::Color(rc));
+                }
+                if let Some(rw) = rail_width {
+                    style.rail.width = rw;
+                }
                 if matches!(status, vertical_slider::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
@@ -1072,6 +1146,17 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
                 style
             });
         }
+    } else if has_rail_overrides {
+        s = s.style(move |theme: &iced::Theme, status| {
+            let mut style = vertical_slider::default(theme, status);
+            if let Some(rc) = rail_color {
+                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
+            }
+            if let Some(rw) = rail_width {
+                style.rail.width = rw;
+            }
+            style
+        });
     }
 
     container(s).id(widget::Id::from(node.id.clone())).into()
@@ -1242,6 +1327,61 @@ pub(crate) fn render_combo_box<'a>(
     if prop_bool_default(props, "on_close", false) {
         let close_id = node.id.clone();
         cb = cb.on_close(Message::Event(close_id, Value::Null, "close".into()));
+    }
+
+    // Style: string name or style map object (applies to the input field)
+    if let Some(style_val) = props.and_then(|p| p.get("style")) {
+        if let Some(style_name) = style_val.as_str() {
+            cb = match style_name {
+                "default" => cb.input_style(text_input::default),
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "combo_box"
+                    );
+                    cb
+                }
+            };
+        } else if let Some(obj) = style_val.as_object() {
+            let ov = parse_style_overrides(obj);
+            cb = cb.input_style(move |theme: &iced::Theme, status| {
+                let mut style = text_input::default(theme, status);
+                apply_text_input_fields(&mut style, &ov.base);
+                match status {
+                    text_input::Status::Focused { .. } => {
+                        if let Some(ref f) = ov.focused {
+                            apply_text_input_fields(&mut style, f);
+                        }
+                    }
+                    text_input::Status::Hovered => {
+                        if let Some(ref f) = ov.hovered {
+                            apply_text_input_fields(&mut style, f);
+                        } else {
+                            style.background = deviate_background(style.background, 0.1);
+                        }
+                    }
+                    text_input::Status::Disabled => {
+                        if let Some(ref f) = ov.disabled {
+                            apply_text_input_fields(&mut style, f);
+                        } else {
+                            style.background = match style.background {
+                                iced::Background::Color(c) => {
+                                    iced::Background::Color(alpha_color(c, 0.5))
+                                }
+                                iced::Background::Gradient(g) => {
+                                    iced::Background::Gradient(alpha_gradient(g, 0.5))
+                                }
+                            };
+                            style.value = alpha_color(style.value, 0.5);
+                            style.border = auto_derive_disabled_border(style.border);
+                        }
+                    }
+                    _ => {}
+                }
+                style
+            });
+        }
     }
 
     container(cb).id(widget::Id::from(node.id.clone())).into()

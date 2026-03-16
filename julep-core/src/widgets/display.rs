@@ -294,6 +294,7 @@ pub(crate) fn render_markdown<'a>(
     };
 
     // Build markdown Settings from props, falling back to theme defaults.
+    let link_color = prop_color(props, "link_color");
     let settings =
         if let Some(text_size) = prop_f32(props, "text_size").or(caches.default_text_size) {
             let mut s = markdown::Settings::with_text_size(text_size, markdown::Style::from(theme));
@@ -312,6 +313,9 @@ pub(crate) fn render_markdown<'a>(
             if let Some(v) = prop_f32(props, "spacing") {
                 s.spacing = Pixels(v);
             }
+            if let Some(lc) = link_color {
+                s.style.link_color = lc;
+            }
             s
         } else {
             let mut s = markdown::Settings::from(theme);
@@ -329,6 +333,9 @@ pub(crate) fn render_markdown<'a>(
             }
             if let Some(v) = prop_f32(props, "spacing") {
                 s.spacing = Pixels(v);
+            }
+            if let Some(lc) = link_color {
+                s.style.link_color = lc;
             }
             s
         };

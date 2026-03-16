@@ -514,6 +514,24 @@ pub(crate) fn render_scrollable<'a>(
         s = s.auto_scroll(true);
     }
 
+    // Scrollbar color styling
+    let scrollbar_color = prop_color(props, "scrollbar_color");
+    let scroller_color = prop_color(props, "scroller_color");
+    if scrollbar_color.is_some() || scroller_color.is_some() {
+        s = s.style(move |theme: &iced::Theme, status| {
+            let mut style = scrollable::default(theme, status);
+            if let Some(sc) = scrollbar_color {
+                style.vertical_rail.background = Some(iced::Background::Color(sc));
+                style.horizontal_rail.background = Some(iced::Background::Color(sc));
+            }
+            if let Some(sc) = scroller_color {
+                style.vertical_rail.scroller.background = iced::Background::Color(sc);
+                style.horizontal_rail.scroller.background = iced::Background::Color(sc);
+            }
+            style
+        });
+    }
+
     s.into()
 }
 
@@ -579,6 +597,24 @@ pub(crate) fn render_pane_grid<'a>(
         Message::PaneResized(node_id.clone(), evt)
     });
     pg = pg.on_drag(move |evt| Message::PaneDragged(node_id2.clone(), evt));
+
+    // Divider styling
+    let divider_color = prop_color(props, "divider_color");
+    let divider_width = prop_f32(props, "divider_width");
+    if divider_color.is_some() || divider_width.is_some() {
+        pg = pg.style(move |theme: &iced::Theme| {
+            let mut style = pane_grid::default(theme);
+            if let Some(dc) = divider_color {
+                style.hovered_split.color = dc;
+                style.picked_split.color = dc;
+            }
+            if let Some(dw) = divider_width {
+                style.hovered_split.width = dw;
+                style.picked_split.width = dw;
+            }
+            style
+        });
+    }
 
     pg.into()
 }
