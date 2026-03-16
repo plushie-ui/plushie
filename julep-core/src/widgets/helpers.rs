@@ -643,6 +643,7 @@ pub(crate) fn parse_style_map_fields(obj: &serde_json::Map<String, Value>) -> St
 #[derive(Clone)]
 pub(crate) struct StyleOverrides {
     pub(crate) base: StyleMapFields,
+    pub(crate) preset_base: Option<String>,
     pub(crate) hovered: Option<StyleMapFields>,
     pub(crate) pressed: Option<StyleMapFields>,
     pub(crate) disabled: Option<StyleMapFields>,
@@ -652,6 +653,7 @@ pub(crate) struct StyleOverrides {
 pub(crate) fn parse_style_overrides(obj: &serde_json::Map<String, Value>) -> StyleOverrides {
     StyleOverrides {
         base: parse_style_map_fields(obj),
+        preset_base: obj.get("base").and_then(|v| v.as_str()).map(str::to_owned),
         hovered: obj
             .get("hovered")
             .and_then(|v| v.as_object())

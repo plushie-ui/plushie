@@ -198,7 +198,33 @@ pub(crate) fn render_container<'a>(
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
-            c = c.style(move |_theme| container_style_from_base(&ov.base));
+            c = c.style(move |theme| {
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("transparent") => container::transparent(theme),
+                    Some("rounded_box") => container::rounded_box(theme),
+                    Some("bordered_box") => container::bordered_box(theme),
+                    Some("dark") => container::dark(theme),
+                    Some("primary") => container::primary(theme),
+                    Some("secondary") => container::secondary(theme),
+                    Some("success") => container::success(theme),
+                    Some("danger") => container::danger(theme),
+                    Some("warning") => container::warning(theme),
+                    _ => container::Style::default(),
+                };
+                if let Some(bg) = ov.base.background {
+                    style.background = Some(bg);
+                }
+                if let Some(tc) = ov.base.text_color {
+                    style.text_color = Some(tc);
+                }
+                if let Some(brd) = ov.base.border {
+                    style.border = brd;
+                }
+                if let Some(shd) = ov.base.shadow {
+                    style.shadow = shd;
+                }
+                style
+            });
         }
     }
 

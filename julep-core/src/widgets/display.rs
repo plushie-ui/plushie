@@ -390,7 +390,14 @@ pub(crate) fn render_progress_bar<'a>(node: &'a TreeNode) -> Element<'a, Message
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             pb = pb.style(move |theme: &iced::Theme| {
-                let mut style = progress_bar::primary(theme);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("primary") => progress_bar::primary(theme),
+                    Some("secondary") => progress_bar::secondary(theme),
+                    Some("success") => progress_bar::success(theme),
+                    Some("danger") => progress_bar::danger(theme),
+                    Some("warning") => progress_bar::warning(theme),
+                    _ => progress_bar::primary(theme),
+                };
                 apply_progress_bar_fields(&mut style, &ov.base);
                 style
             });
@@ -438,7 +445,12 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);
                 r = r.style(move |theme: &iced::Theme| {
-                    apply_rule_style(&mut rule::default(theme), &ov.base)
+                    let base_fn: fn(&iced::Theme) -> rule::Style = match ov.preset_base.as_deref() {
+                        Some("default") => rule::default,
+                        Some("weak") => rule::weak,
+                        _ => rule::default,
+                    };
+                    apply_rule_style(&mut base_fn(theme), &ov.base)
                 });
             }
         }
@@ -462,7 +474,12 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);
                 r = r.style(move |theme: &iced::Theme| {
-                    apply_rule_style(&mut rule::default(theme), &ov.base)
+                    let base_fn: fn(&iced::Theme) -> rule::Style = match ov.preset_base.as_deref() {
+                        Some("default") => rule::default,
+                        Some("weak") => rule::weak,
+                        _ => rule::default,
+                    };
+                    apply_rule_style(&mut base_fn(theme), &ov.base)
                 });
             }
         }

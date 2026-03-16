@@ -68,7 +68,17 @@ pub(crate) fn render_button<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             b = b.style(move |theme: &iced::Theme, status| {
-                let mut style = button::primary(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("primary") => button::primary(theme, status),
+                    Some("secondary") => button::secondary(theme, status),
+                    Some("success") => button::success(theme, status),
+                    Some("danger") => button::danger(theme, status),
+                    Some("warning") => button::warning(theme, status),
+                    Some("text") => button::text(theme, status),
+                    Some("background") => button::background(theme, status),
+                    Some("subtle") => button::subtle(theme, status),
+                    _ => button::primary(theme, status),
+                };
                 apply_button_fields(&mut style, &ov.base);
                 match status {
                     button::Status::Hovered => {

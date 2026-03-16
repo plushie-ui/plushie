@@ -105,7 +105,12 @@ pub(crate) fn render_text_input<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             ti = ti.style(move |theme: &iced::Theme, status| {
-                let mut style = text_input::default(theme, status);
+                let base_fn: fn(&iced::Theme, text_input::Status) -> text_input::Style =
+                    match ov.preset_base.as_deref() {
+                        Some("default") => text_input::default,
+                        _ => text_input::default,
+                    };
+                let mut style = base_fn(theme, status);
                 apply_text_input_fields(&mut style, &ov.base);
                 match status {
                     text_input::Status::Focused { .. } => {
@@ -480,7 +485,12 @@ pub(crate) fn render_text_editor<'a>(
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);
                 Some(Box::new(move |theme: &iced::Theme, status| {
-                    let mut style = text_editor::default(theme, status);
+                    let base_fn: fn(&iced::Theme, text_editor::Status) -> text_editor::Style =
+                        match ov.preset_base.as_deref() {
+                            Some("default") => text_editor::default,
+                            _ => text_editor::default,
+                        };
+                    let mut style = base_fn(theme, status);
                     apply_text_editor_fields(&mut style, &ov.base);
                     match status {
                         text_editor::Status::Focused { .. } => {
@@ -687,7 +697,13 @@ pub(crate) fn render_checkbox<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             cb = cb.style(move |theme: &iced::Theme, status| {
-                let mut style = checkbox::primary(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("primary") => checkbox::primary(theme, status),
+                    Some("secondary") => checkbox::secondary(theme, status),
+                    Some("success") => checkbox::success(theme, status),
+                    Some("danger") => checkbox::danger(theme, status),
+                    _ => checkbox::primary(theme, status),
+                };
                 apply_checkbox_fields(&mut style, &ov.base);
                 match status {
                     checkbox::Status::Hovered { .. } => {
@@ -801,7 +817,10 @@ pub(crate) fn render_toggler<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             t = t.style(move |theme: &iced::Theme, status| {
-                let mut style = toggler::default(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("default") => toggler::default(theme, status),
+                    _ => toggler::default(theme, status),
+                };
                 apply_toggler_fields(&mut style, &ov.base);
                 match status {
                     toggler::Status::Hovered { .. } => {
@@ -922,7 +941,10 @@ pub(crate) fn render_radio<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             r = r.style(move |theme: &iced::Theme, status| {
-                let mut style = iced::widget::radio::default(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("default") => iced::widget::radio::default(theme, status),
+                    _ => iced::widget::radio::default(theme, status),
+                };
                 apply_radio_fields(&mut style, &ov.base);
                 if matches!(status, iced::widget::radio::Status::Hovered { .. }) {
                     if let Some(ref f) = ov.hovered {
@@ -1022,7 +1044,10 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             s = s.style(move |theme: &iced::Theme, status| {
-                let mut style = slider::default(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("default") => slider::default(theme, status),
+                    _ => slider::default(theme, status),
+                };
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
                 if let Some(rc) = rail_color {
                     style.rail.backgrounds =
@@ -1127,7 +1152,10 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             s = s.style(move |theme: &iced::Theme, status| {
-                let mut style = vertical_slider::default(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("default") => vertical_slider::default(theme, status),
+                    _ => vertical_slider::default(theme, status),
+                };
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
                 if let Some(rc) = rail_color {
                     style.rail.backgrounds =
@@ -1235,7 +1263,10 @@ pub(crate) fn render_pick_list<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             pl = pl.style(move |theme: &iced::Theme, status| {
-                let mut style = pick_list::default(theme, status);
+                let mut style = match ov.preset_base.as_deref() {
+                    Some("default") => pick_list::default(theme, status),
+                    _ => pick_list::default(theme, status),
+                };
                 apply_pick_list_fields(&mut style, &ov.base);
                 if matches!(status, pick_list::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
@@ -1346,7 +1377,12 @@ pub(crate) fn render_combo_box<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             cb = cb.input_style(move |theme: &iced::Theme, status| {
-                let mut style = text_input::default(theme, status);
+                let base_fn: fn(&iced::Theme, text_input::Status) -> text_input::Style =
+                    match ov.preset_base.as_deref() {
+                        Some("default") => text_input::default,
+                        _ => text_input::default,
+                    };
+                let mut style = base_fn(theme, status);
                 apply_text_input_fields(&mut style, &ov.base);
                 match status {
                     text_input::Status::Focused { .. } => {
