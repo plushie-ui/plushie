@@ -304,6 +304,7 @@ Perform an operation on a widget (focus, scroll, etc.).
 | `move_cursor_to_front` | `target` | Move cursor to start |
 | `move_cursor_to_end` | `target` | Move cursor to end |
 | `close_window` | `window_id` | Close a window |
+| `announce` | `text` | Screen reader announcement (no visible widget needed) |
 | `exit` | -- | Exit the renderer |
 | `pane_split` | `target`, `pane`, `axis`, `new_pane_id` | Split a pane |
 | `pane_close` | `target`, `pane` | Close a pane |
@@ -490,8 +491,15 @@ User interaction or subscription event.
 | `tag` | string | Subscription tag (optional, for subscription events) |
 | `modifiers` | object | Keyboard modifiers (optional) |
 | `data` | object | Additional event data (optional) |
+| `captured` | bool | Whether a widget consumed this event (optional, subscription events only) |
 
 Fields that are null or absent are omitted from the serialized output.
+
+**Event capture status.** All keyboard, mouse, touch, and IME subscription
+events include an optional `captured` boolean. When `true`, an iced widget
+already consumed the event (e.g. a TextEditor captured a Tab key press).
+When `false` or absent, no widget handled the event. Widget-level events
+(click, input, submit, etc.) never carry this field.
 
 #### Widget events
 
@@ -669,3 +677,104 @@ The following message types are only available in test mode
 
 These are used for integration testing and are not part of the
 normal protocol flow.
+
+---
+
+## Accessibility props
+
+Any tree node can carry an `a11y` object in its `props` to control
+accessibility behaviour. All fields are optional.
+
+```json
+{
+  "a11y": {
+    "role": "button",
+    "label": "Submit form",
+    "description": "Sends the form to the server",
+    "hidden": false,
+    "expanded": true,
+    "required": false,
+    "level": 2,
+    "live": "polite",
+    "busy": false,
+    "invalid": false,
+    "modal": false,
+    "read_only": false,
+    "mnemonic": "S",
+    "toggled": null,
+    "selected": null,
+    "value": "current value",
+    "orientation": "horizontal",
+    "labelled_by": "label-node-id",
+    "described_by": "desc-node-id",
+    "error_message": "error-node-id"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `role` | string | Accessible role (e.g. `"button"`, `"text_input"`, `"image"`) |
+| `label` | string | Primary accessible label |
+| `description` | string | Extended description |
+| `hidden` | bool | Hide from assistive technology |
+| `expanded` | bool | Expanded/collapsed state |
+| `required` | bool | Required field indicator |
+| `level` | number | Heading level (1-6) |
+| `live` | string | Live region: `"off"`, `"polite"`, `"assertive"` |
+| `busy` | bool | Content is loading/updating |
+| `invalid` | bool | Validation failed |
+| `modal` | bool | Modal container |
+| `read_only` | bool | Read-only field |
+| `mnemonic` | string | Keyboard mnemonic (single character) |
+| `toggled` | bool | Toggle state |
+| `selected` | bool | Selection state |
+| `value` | string | Text value announced by AT |
+| `orientation` | string | `"horizontal"` or `"vertical"` |
+| `labelled_by` | string | Node ID of the labelling element |
+| `described_by` | string | Node ID of the describing element |
+| `error_message` | string | Node ID of the error message element |
+
+**Auto-inference:** Image and SVG widgets with an `alt` prop auto-populate
+`label` from the alt text. Text input and text editor widgets auto-populate
+`description` from their `placeholder` prop. Explicit `a11y` values always
+take priority.
+
+---
+
+## Extended styling props
+
+Beyond the standard `style` prop (which accepts a preset name or a
+StyleMap object), several widgets support additional colour and sizing
+props.
+
+| Widget | Prop | Type | Description |
+|--------|------|------|-------------|
+| `text_input` | `placeholder_color` | hex color | Placeholder text colour |
+| `text_input` | `selection_color` | hex color | Text selection highlight |
+| `text_editor` | `placeholder_color` | hex color | Placeholder text colour |
+| `text_editor` | `selection_color` | hex color | Text selection highlight |
+| `slider` | `rail_color` | hex color | Track rail colour |
+| `slider` | `rail_width` | number | Track rail thickness |
+| `vertical_slider` | `rail_color` | hex color | Track rail colour |
+| `vertical_slider` | `rail_width` | number | Track rail thickness |
+| `scrollable` | `scrollbar_color` | hex color | Scrollbar track colour |
+| `scrollable` | `scroller_color` | hex color | Scroller handle colour |
+| `table` | `header_text_size` | number | Header row text size |
+| `table` | `row_text_size` | number | Body row text size |
+| `pane_grid` | `divider_color` | hex color | Pane divider colour |
+| `pane_grid` | `divider_width` | number | Pane divider thickness |
+| `markdown` | `link_color` | hex color | Hyperlink colour |
+
+**StyleMap `base` field.** A StyleMap object can include a `"base"` field
+naming a preset to extend. The style starts from the preset's defaults,
+then remaining fields override individual properties:
+
+```json
+{
+  "style": {
+    "base": "secondary",
+    "background": "#ff0000"
+  }
+}
+```
