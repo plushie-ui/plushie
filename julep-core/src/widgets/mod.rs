@@ -511,7 +511,22 @@ pub fn render<'a>(
         }
     };
 
-    if let Some(overrides) = crate::a11y_widget::A11yOverrides::from_props(&node.props) {
+    // Explicit a11y overrides take precedence.
+    let overrides = crate::a11y_widget::A11yOverrides::from_props(&node.props).or_else(|| {
+        // Auto-infer accessibility overrides from widget-specific props
+        // when the host hasn't set an explicit a11y block.
+        let props = node.props.as_object();
+        match node.type_name.as_str() {
+            "image" | "svg" => {
+                prop_str(props, "alt").map(crate::a11y_widget::A11yOverrides::with_label)
+            }
+            "text_input" => prop_str(props, "placeholder")
+                .map(crate::a11y_widget::A11yOverrides::with_description),
+            _ => None,
+        }
+    });
+
+    if let Some(overrides) = overrides {
         return crate::a11y_widget::A11yOverride::wrap(element, overrides).into();
     }
 
@@ -1001,5 +1016,113 @@ mod tests {
         let theme = iced::Theme::Dark;
         let dispatcher = ExtensionDispatcher::default();
         let _elem = render(&node, &caches, &images, &theme, &dispatcher);
+    }
+
+    // -----------------------------------------------------------------------
+    // A11y auto-inference tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: extract auto-inferred overrides the same way render() does,
+    /// without actually rendering (avoids needing image handles etc.).
+    fn infer_a11y_overrides(node: &TreeNode) -> Option<crate::a11y_widget::A11yOverrides> {
+        crate::a11y_widget::A11yOverrides::from_props(&node.props).or_else(|| {
+            let props = node.props.as_object();
+            match node.type_name.as_str() {
+                "image" | "svg" => {
+                    prop_str(props, "alt").map(crate::a11y_widget::A11yOverrides::with_label)
+                }
+                "text_input" => prop_str(props, "placeholder")
+                    .map(crate::a11y_widget::A11yOverrides::with_description),
+                _ => None,
+            }
+        })
+    }
+
+    #[test]
+    fn a11y_auto_infer_image_alt_as_label() {
+        let node = smoke_node(
+            "img1",
+            "image",
+            serde_json::json!({"source": "logo.png", "alt": "Company logo"}),
+        );
+        let overrides = infer_a11y_overrides(&node).expect("should infer overrides from alt");
+        assert_eq!(overrides.label.as_deref(), Some("Company logo"));
+        assert!(overrides.description.is_none());
+        assert!(!overrides.hidden);
+    }
+
+    #[test]
+    fn a11y_auto_infer_svg_alt_as_label() {
+        let node = smoke_node(
+            "svg1",
+            "svg",
+            serde_json::json!({"source": "icon.svg", "alt": "Settings icon"}),
+        );
+        let overrides = infer_a11y_overrides(&node).expect("should infer overrides from alt");
+        assert_eq!(overrides.label.as_deref(), Some("Settings icon"));
+    }
+
+    #[test]
+    fn a11y_auto_infer_text_input_placeholder_as_description() {
+        let node = smoke_node(
+            "ti1",
+            "text_input",
+            serde_json::json!({"placeholder": "Search...", "value": ""}),
+        );
+        let overrides =
+            infer_a11y_overrides(&node).expect("should infer overrides from placeholder");
+        assert_eq!(overrides.description.as_deref(), Some("Search..."));
+        assert!(overrides.label.is_none());
+    }
+
+    #[test]
+    fn a11y_explicit_overrides_take_precedence_over_alt() {
+        let node = smoke_node(
+            "img2",
+            "image",
+            serde_json::json!({
+                "source": "logo.png",
+                "alt": "Auto alt",
+                "a11y": {"label": "Explicit label"}
+            }),
+        );
+        let overrides = infer_a11y_overrides(&node).expect("should have explicit overrides");
+        // Explicit label wins; no double-wrapping.
+        assert_eq!(overrides.label.as_deref(), Some("Explicit label"));
+    }
+
+    #[test]
+    fn a11y_no_wrapping_without_alt_or_a11y() {
+        let node = smoke_node("txt1", "text", serde_json::json!({"content": "hello"}));
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "plain text node should not get a11y wrapping"
+        );
+    }
+
+    #[test]
+    fn a11y_no_wrapping_image_without_alt() {
+        let node = smoke_node(
+            "img3",
+            "image",
+            serde_json::json!({"source": "decorative.png"}),
+        );
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "image without alt should not get a11y wrapping"
+        );
+    }
+
+    #[test]
+    fn a11y_no_wrapping_text_input_without_placeholder() {
+        let node = smoke_node(
+            "ti2",
+            "text_input",
+            serde_json::json!({"value": "typed text"}),
+        );
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "text_input without placeholder should not get a11y wrapping"
+        );
     }
 }

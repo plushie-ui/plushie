@@ -2044,7 +2044,6 @@ dependencies = [
  "julep-core",
  "julep-iced",
  "julep-iced-test",
- "julep-iced-winit",
  "log",
  "serde",
  "serde_json",

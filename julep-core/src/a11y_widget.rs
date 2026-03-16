@@ -30,6 +30,7 @@ use serde_json::Value;
 /// accessibility tree.
 ///
 /// [`operate`]: iced::advanced::widget::Widget::operate
+#[derive(Default)]
 pub(crate) struct A11yOverrides {
     /// Semantic role override.
     pub role: Option<accessible::Role>,
@@ -47,6 +48,16 @@ pub(crate) struct A11yOverrides {
     pub level: Option<usize>,
     /// Live region urgency override.
     pub live: Option<accessible::Live>,
+    /// Whether the widget is busy (loading/processing).
+    pub busy: bool,
+    /// Whether the widget's value is invalid (form validation).
+    pub invalid: bool,
+    /// Whether this dialog is modal (restricts AT navigation).
+    pub modal: bool,
+    /// Whether the widget is read-only (viewable but not editable).
+    pub read_only: bool,
+    /// Keyboard mnemonic (Alt+letter shortcut).
+    pub mnemonic: Option<char>,
 }
 
 impl A11yOverrides {
@@ -91,6 +102,25 @@ impl A11yOverrides {
             .and_then(|v| v.as_str())
             .and_then(parse_live);
 
+        let busy = a11y.get("busy").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let invalid = a11y
+            .get("invalid")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let modal = a11y.get("modal").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let read_only = a11y
+            .get("read_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let mnemonic = a11y
+            .get("mnemonic")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.chars().next());
+
         Some(Self {
             role,
             label,
@@ -100,7 +130,28 @@ impl A11yOverrides {
             required,
             level,
             live,
+            busy,
+            invalid,
+            modal,
+            read_only,
+            mnemonic,
         })
+    }
+
+    /// Create overrides with just a label (for alt text auto-inference).
+    pub(crate) fn with_label(label: String) -> Self {
+        Self {
+            label: Some(label),
+            ..Self::default()
+        }
+    }
+
+    /// Create overrides with just a description (for placeholder auto-inference).
+    pub(crate) fn with_description(description: String) -> Self {
+        Self {
+            description: Some(description),
+            ..Self::default()
+        }
     }
 }
 
@@ -364,6 +415,16 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
             live: self.overrides.live.or(accessible.live),
             level: self.overrides.level.or(accessible.level),
             required: self.overrides.required || accessible.required,
+            busy: self.overrides.busy || accessible.busy,
+            invalid: self.overrides.invalid || accessible.invalid,
+            modal: self.overrides.modal || accessible.modal,
+            read_only: self.overrides.read_only || accessible.read_only,
+            disabled: if self.overrides.read_only {
+                true
+            } else {
+                accessible.disabled
+            },
+            mnemonic: self.overrides.mnemonic.or(accessible.mnemonic),
             ..accessible.clone()
         };
         self.inner.accessible(id, bounds, &overridden);
@@ -387,6 +448,12 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
                 live: self.overrides.live,
                 level: self.overrides.level,
                 required: self.overrides.required,
+                busy: self.overrides.busy,
+                invalid: self.overrides.invalid,
+                modal: self.overrides.modal,
+                read_only: self.overrides.read_only,
+                disabled: self.overrides.read_only,
+                mnemonic: self.overrides.mnemonic,
                 ..Accessible::default()
             };
             self.inner.accessible(id, bounds, &base);
@@ -581,7 +648,12 @@ mod tests {
                 "expanded": true,
                 "required": true,
                 "level": 2,
-                "live": "assertive"
+                "live": "assertive",
+                "busy": true,
+                "invalid": true,
+                "modal": true,
+                "read_only": true,
+                "mnemonic": "E"
             }
         });
         let overrides = A11yOverrides::from_props(&props).unwrap();
@@ -596,6 +668,11 @@ mod tests {
         assert!(overrides.required);
         assert_eq!(overrides.level, Some(2));
         assert_eq!(overrides.live, Some(accessible::Live::Assertive));
+        assert!(overrides.busy);
+        assert!(overrides.invalid);
+        assert!(overrides.modal);
+        assert!(overrides.read_only);
+        assert_eq!(overrides.mnemonic, Some('E'));
     }
 
     #[test]
@@ -666,5 +743,150 @@ mod tests {
         // The actual interception test would require an Operation mock,
         // but the parsing confirms the override would trigger the
         // container-to-accessible upgrade (role.is_some()).
+    }
+
+    #[test]
+    fn from_props_parses_busy() {
+        let props = json!({"a11y": {"busy": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.busy);
+    }
+
+    #[test]
+    fn from_props_busy_defaults_false() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(!overrides.busy);
+    }
+
+    #[test]
+    fn from_props_parses_invalid() {
+        let props = json!({"a11y": {"invalid": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.invalid);
+    }
+
+    #[test]
+    fn from_props_invalid_defaults_false() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(!overrides.invalid);
+    }
+
+    #[test]
+    fn from_props_parses_modal() {
+        let props = json!({"a11y": {"modal": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.modal);
+    }
+
+    #[test]
+    fn from_props_modal_defaults_false() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(!overrides.modal);
+    }
+
+    #[test]
+    fn from_props_parses_read_only() {
+        let props = json!({"a11y": {"read_only": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.read_only);
+    }
+
+    #[test]
+    fn from_props_read_only_defaults_false() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(!overrides.read_only);
+    }
+
+    #[test]
+    fn from_props_parses_mnemonic() {
+        let props = json!({"a11y": {"mnemonic": "F"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.mnemonic, Some('F'));
+    }
+
+    #[test]
+    fn from_props_mnemonic_takes_first_char() {
+        let props = json!({"a11y": {"mnemonic": "Save"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.mnemonic, Some('S'));
+    }
+
+    #[test]
+    fn from_props_mnemonic_none_when_missing() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.mnemonic.is_none());
+    }
+
+    #[test]
+    fn from_props_mnemonic_none_when_empty() {
+        let props = json!({"a11y": {"mnemonic": ""}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.mnemonic.is_none());
+    }
+
+    #[test]
+    fn from_props_parses_all_new_fields() {
+        let props = json!({
+            "a11y": {
+                "busy": true,
+                "invalid": true,
+                "modal": true,
+                "read_only": true,
+                "mnemonic": "X"
+            }
+        });
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.busy);
+        assert!(overrides.invalid);
+        assert!(overrides.modal);
+        assert!(overrides.read_only);
+        assert_eq!(overrides.mnemonic, Some('X'));
+    }
+
+    #[test]
+    fn with_label_sets_only_label() {
+        let overrides = A11yOverrides::with_label("Alt text".to_string());
+        assert_eq!(overrides.label.as_deref(), Some("Alt text"));
+        assert!(overrides.description.is_none());
+        assert!(overrides.role.is_none());
+        assert!(!overrides.hidden);
+        assert!(!overrides.required);
+        assert!(!overrides.busy);
+        assert!(!overrides.invalid);
+        assert!(!overrides.modal);
+        assert!(!overrides.read_only);
+        assert!(overrides.mnemonic.is_none());
+    }
+
+    #[test]
+    fn with_description_sets_only_description() {
+        let overrides = A11yOverrides::with_description("Placeholder hint".to_string());
+        assert_eq!(overrides.description.as_deref(), Some("Placeholder hint"));
+        assert!(overrides.label.is_none());
+        assert!(overrides.role.is_none());
+        assert!(!overrides.hidden);
+    }
+
+    #[test]
+    fn default_all_fields_unset() {
+        let overrides = A11yOverrides::default();
+        assert!(overrides.label.is_none());
+        assert!(overrides.description.is_none());
+        assert!(overrides.role.is_none());
+        assert!(!overrides.hidden);
+        assert!(overrides.expanded.is_none());
+        assert!(!overrides.required);
+        assert!(overrides.level.is_none());
+        assert!(overrides.live.is_none());
+        assert!(!overrides.busy);
+        assert!(!overrides.invalid);
+        assert!(!overrides.modal);
+        assert!(!overrides.read_only);
+        assert!(overrides.mnemonic.is_none());
     }
 }
