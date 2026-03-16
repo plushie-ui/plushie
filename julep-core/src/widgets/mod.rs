@@ -517,9 +517,8 @@ pub fn render<'a>(
         // when the host hasn't set an explicit a11y block.
         let props = node.props.as_object();
         match node.type_name.as_str() {
-            "image" | "svg" => {
-                prop_str(props, "alt").map(crate::a11y_widget::A11yOverrides::with_label)
-            }
+            // Image and SVG use iced's native .alt()/.description() methods
+            // directly, so no A11yOverride wrapping needed for those.
             "text_input" | "text_editor" | "combo_box" => prop_str(props, "placeholder")
                 .map(crate::a11y_widget::A11yOverrides::with_description),
             _ => None,
@@ -1028,10 +1027,9 @@ mod tests {
         crate::a11y_widget::A11yOverrides::from_props(&node.props).or_else(|| {
             let props = node.props.as_object();
             match node.type_name.as_str() {
-                "image" | "svg" => {
-                    prop_str(props, "alt").map(crate::a11y_widget::A11yOverrides::with_label)
-                }
-                "text_input" => prop_str(props, "placeholder")
+                // Image and SVG use iced's native .alt()/.description() methods
+                // directly, so no A11yOverride wrapping needed for those.
+                "text_input" | "text_editor" | "combo_box" => prop_str(props, "placeholder")
                     .map(crate::a11y_widget::A11yOverrides::with_description),
                 _ => None,
             }
@@ -1039,27 +1037,31 @@ mod tests {
     }
 
     #[test]
-    fn a11y_auto_infer_image_alt_as_label() {
+    fn a11y_image_alt_uses_native_iced_method_not_override() {
+        // Image/SVG alt text is handled by iced's native .alt() method,
+        // not by A11yOverride wrapping. No override should be created.
         let node = smoke_node(
             "img1",
             "image",
             serde_json::json!({"source": "logo.png", "alt": "Company logo"}),
         );
-        let overrides = infer_a11y_overrides(&node).expect("should infer overrides from alt");
-        assert_eq!(overrides.label.as_deref(), Some("Company logo"));
-        assert!(overrides.description.is_none());
-        assert!(!overrides.hidden);
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "image with alt should NOT get A11yOverride (uses native .alt())"
+        );
     }
 
     #[test]
-    fn a11y_auto_infer_svg_alt_as_label() {
+    fn a11y_svg_alt_uses_native_iced_method_not_override() {
         let node = smoke_node(
             "svg1",
             "svg",
             serde_json::json!({"source": "icon.svg", "alt": "Settings icon"}),
         );
-        let overrides = infer_a11y_overrides(&node).expect("should infer overrides from alt");
-        assert_eq!(overrides.label.as_deref(), Some("Settings icon"));
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "svg with alt should NOT get A11yOverride (uses native .alt())"
+        );
     }
 
     #[test]

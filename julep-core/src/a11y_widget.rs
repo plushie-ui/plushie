@@ -211,14 +211,6 @@ impl A11yOverrides {
             || self.error_message.is_some()
     }
 
-    /// Create overrides with just a label (for alt text auto-inference).
-    pub(crate) fn with_label(label: String) -> Self {
-        Self {
-            label: Some(label),
-            ..Self::default()
-        }
-    }
-
     /// Create overrides with just a description (for placeholder auto-inference).
     pub(crate) fn with_description(description: String) -> Self {
         Self {
@@ -960,25 +952,6 @@ mod tests {
         assert!(overrides.modal);
         assert!(overrides.read_only);
         assert_eq!(overrides.mnemonic, Some('X'));
-    }
-
-    #[test]
-    fn with_label_sets_only_label() {
-        let overrides = A11yOverrides::with_label("Alt text".to_string());
-        assert_eq!(overrides.label.as_deref(), Some("Alt text"));
-        assert!(overrides.description.is_none());
-        assert!(overrides.role.is_none());
-        assert!(!overrides.hidden);
-        assert!(!overrides.required);
-        assert!(!overrides.busy);
-        assert!(!overrides.invalid);
-        assert!(!overrides.modal);
-        assert!(!overrides.read_only);
-        assert!(overrides.mnemonic.is_none());
-        assert!(overrides.toggled.is_none());
-        assert!(overrides.selected.is_none());
-        assert!(overrides.value.is_none());
-        assert!(overrides.orientation.is_none());
     }
 
     #[test]
