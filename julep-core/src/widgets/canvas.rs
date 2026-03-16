@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use iced::widget::canvas;
-use iced::{Color, Element, Length, Pixels, Point, Radians, Size, Vector, mouse};
+use iced::{Color, Element, Length, Pixels, Point, Radians, Size, Vector, alignment, mouse};
 use serde_json::Value;
 
 use super::WidgetCaches;
@@ -393,6 +393,61 @@ pub(crate) fn collect_clipped_shapes<'a>(shapes: &[&'a Value]) -> (usize, Vec<&'
     (shapes.len(), result)
 }
 
+/// Apply per-shape opacity to a `canvas::Fill`. Multiplies the opacity
+/// into solid color alpha. Gradient stops are left unchanged (the host
+/// should bake opacity into gradient stop colors if needed).
+fn apply_opacity_to_fill(shape: &Value, mut fill: canvas::Fill) -> canvas::Fill {
+    if let Some(opacity) = shape.get("opacity").and_then(|v| v.as_f64()) {
+        let a = opacity as f32;
+        if let canvas::Style::Solid(ref mut c) = fill.style {
+            c.a *= a;
+        }
+    }
+    fill
+}
+
+/// Apply per-shape opacity to a `canvas::Stroke`.
+fn apply_opacity_to_stroke(
+    shape: &Value,
+    mut stroke: canvas::Stroke<'static>,
+) -> canvas::Stroke<'static> {
+    if let Some(opacity) = shape.get("opacity").and_then(|v| v.as_f64()) {
+        let a = opacity as f32;
+        if let canvas::Style::Solid(ref mut c) = stroke.style {
+            c.a *= a;
+        }
+    }
+    stroke
+}
+
+/// Apply per-shape opacity to a plain color (used by text fill and
+/// legacy line stroke).
+fn apply_opacity_to_color(shape: &Value, mut color: Color) -> Color {
+    if let Some(opacity) = shape.get("opacity").and_then(|v| v.as_f64()) {
+        color.a *= opacity as f32;
+    }
+    color
+}
+
+/// Parse horizontal text alignment from a JSON string value.
+fn parse_canvas_text_align_x(value: Option<&Value>) -> iced::widget::text::Alignment {
+    match value.and_then(|v| v.as_str()) {
+        Some("left") | Some("start") => iced::widget::text::Alignment::Left,
+        Some("center") => iced::widget::text::Alignment::Center,
+        Some("right") | Some("end") => iced::widget::text::Alignment::Right,
+        _ => iced::widget::text::Alignment::Default,
+    }
+}
+
+/// Parse vertical text alignment from a JSON string value.
+fn parse_canvas_text_align_y(value: Option<&Value>) -> alignment::Vertical {
+    match value.and_then(|v| v.as_str()) {
+        Some("center") => alignment::Vertical::Center,
+        Some("bottom") | Some("end") => alignment::Vertical::Bottom,
+        _ => alignment::Vertical::Top,
+    }
+}
+
 /// Draw a single shape (or transform command) into the frame.
 fn draw_canvas_shape(
     frame: &mut canvas::Frame,
@@ -439,14 +494,15 @@ fn draw_canvas_shape(
                 canvas::Path::rectangle(Point::new(x, y), Size::new(w, h))
             };
             if let Some(fill_val) = shape.get("fill") {
-                let fill = parse_canvas_fill(fill_val, shape);
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
                 frame.fill(&rect_path, fill);
             } else if shape.get("stroke").is_none() {
                 // Legacy fallback: no fill or stroke key means solid white fill
-                frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::WHITE);
+                let color = apply_opacity_to_color(shape, Color::WHITE);
+                frame.fill_rectangle(Point::new(x, y), Size::new(w, h), color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = parse_canvas_stroke(stroke_val);
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
                 frame.stroke(&rect_path, stroke);
             }
         }
@@ -456,13 +512,14 @@ fn draw_canvas_shape(
             let r = json_f32(shape, "r");
             let circle_path = canvas::Path::circle(Point::new(x, y), r);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = parse_canvas_fill(fill_val, shape);
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
                 frame.fill(&circle_path, fill);
             } else if shape.get("stroke").is_none() {
-                frame.fill(&circle_path, Color::WHITE);
+                let color = apply_opacity_to_color(shape, Color::WHITE);
+                frame.fill(&circle_path, color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = parse_canvas_stroke(stroke_val);
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
                 frame.stroke(&circle_path, stroke);
             }
         }
@@ -473,11 +530,11 @@ fn draw_canvas_shape(
             let y2 = json_f32(shape, "y2");
             let line_path = canvas::Path::line(Point::new(x1, y1), Point::new(x2, y2));
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = parse_canvas_stroke(stroke_val);
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
                 frame.stroke(&line_path, stroke);
             } else {
                 // Legacy: use fill color as stroke color
-                let color = json_color(shape, "fill");
+                let color = apply_opacity_to_color(shape, json_color(shape, "fill"));
                 let width = shape
                     .get("width")
                     .and_then(|v| v.as_f64())
@@ -495,12 +552,24 @@ fn draw_canvas_shape(
             let x = json_f32(shape, "x");
             let y = json_f32(shape, "y");
             let content = shape.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let fill_color = json_color(shape, "fill");
+            let fill_color = apply_opacity_to_color(shape, json_color(shape, "fill"));
             let size = shape.get("size").and_then(|v| v.as_f64()).map(|v| v as f32);
+            let align_x = parse_canvas_text_align_x(
+                shape
+                    .get("align_x")
+                    .or_else(|| shape.get("horizontal_alignment")),
+            );
+            let align_y = parse_canvas_text_align_y(
+                shape
+                    .get("align_y")
+                    .or_else(|| shape.get("vertical_alignment")),
+            );
             let mut canvas_text = canvas::Text {
                 content: content.to_owned(),
                 position: Point::new(x, y),
                 color: fill_color,
+                align_x,
+                align_y,
                 ..canvas::Text::default()
             };
             if let Some(s) = size {
@@ -519,11 +588,11 @@ fn draw_canvas_shape(
                 .unwrap_or(&[]);
             let path = build_path_from_commands(commands);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = parse_canvas_fill(fill_val, shape);
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
                 frame.fill(&path, fill);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = parse_canvas_stroke(stroke_val);
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
                 frame.stroke(&path, stroke);
             }
         }
@@ -964,5 +1033,121 @@ mod tests {
         // No pop_clip found -- returns all shapes
         assert_eq!(end_idx, shapes.len());
         assert_eq!(collected.len(), 1);
+    }
+
+    // -- Text alignment tests --
+
+    #[test]
+    fn text_align_x_parses_left() {
+        let v = json!("left");
+        assert_eq!(format!("{:?}", parse_canvas_text_align_x(Some(&v))), "Left");
+    }
+
+    #[test]
+    fn text_align_x_parses_center() {
+        let v = json!("center");
+        assert_eq!(
+            format!("{:?}", parse_canvas_text_align_x(Some(&v))),
+            "Center"
+        );
+    }
+
+    #[test]
+    fn text_align_x_parses_right() {
+        let v = json!("right");
+        assert_eq!(
+            format!("{:?}", parse_canvas_text_align_x(Some(&v))),
+            "Right"
+        );
+    }
+
+    #[test]
+    fn text_align_x_defaults_to_default() {
+        assert_eq!(format!("{:?}", parse_canvas_text_align_x(None)), "Default");
+    }
+
+    #[test]
+    fn text_align_y_parses_center() {
+        let v = json!("center");
+        assert_eq!(
+            parse_canvas_text_align_y(Some(&v)),
+            alignment::Vertical::Center
+        );
+    }
+
+    #[test]
+    fn text_align_y_parses_bottom() {
+        let v = json!("bottom");
+        assert_eq!(
+            parse_canvas_text_align_y(Some(&v)),
+            alignment::Vertical::Bottom
+        );
+    }
+
+    #[test]
+    fn text_align_y_defaults_to_top() {
+        assert_eq!(parse_canvas_text_align_y(None), alignment::Vertical::Top);
+    }
+
+    // -- Opacity tests --
+
+    #[test]
+    fn opacity_applied_to_fill() {
+        let shape = json!({"type": "rect", "fill": "#ff0000", "opacity": 0.5});
+        let fill = apply_opacity_to_fill(&shape, parse_canvas_fill(&json!("#ff0000"), &shape));
+        match fill.style {
+            canvas::Style::Solid(c) => {
+                assert!(
+                    (c.a - 0.5).abs() < 0.001,
+                    "expected alpha ~0.5, got {}",
+                    c.a
+                );
+            }
+            _ => panic!("expected solid fill"),
+        }
+    }
+
+    #[test]
+    fn opacity_applied_to_stroke() {
+        let shape = json!({"type": "rect", "opacity": 0.25});
+        let stroke_val = json!({"color": "#00ff00", "width": 2.0});
+        let stroke = apply_opacity_to_stroke(&shape, parse_canvas_stroke(&stroke_val));
+        match stroke.style {
+            canvas::Style::Solid(c) => {
+                assert!(
+                    (c.a - 0.25).abs() < 0.001,
+                    "expected alpha ~0.25, got {}",
+                    c.a
+                );
+            }
+            _ => panic!("expected solid stroke"),
+        }
+    }
+
+    #[test]
+    fn opacity_applied_to_color() {
+        let shape = json!({"opacity": 0.75});
+        let color = apply_opacity_to_color(&shape, Color::WHITE);
+        assert!(
+            (color.a - 0.75).abs() < 0.001,
+            "expected alpha ~0.75, got {}",
+            color.a
+        );
+    }
+
+    #[test]
+    fn no_opacity_leaves_alpha_unchanged() {
+        let shape = json!({"type": "rect", "fill": "#ff0000"});
+        let fill = apply_opacity_to_fill(&shape, parse_canvas_fill(&json!("#ff0000"), &shape));
+        match fill.style {
+            canvas::Style::Solid(c) => {
+                assert!(
+                    (c.a - 1.0).abs() < 0.001,
+                    "expected alpha ~1.0, got {}",
+                    c.a
+                );
+            }
+            _ => panic!("expected solid fill"),
+        }
     }
 }
