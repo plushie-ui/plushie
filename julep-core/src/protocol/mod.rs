@@ -460,6 +460,19 @@ pub struct OutgoingEvent {
     /// `"data"` object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
+    /// Whether the event was captured (consumed) by an iced widget before
+    /// reaching the subscription listener.  Present on keyboard, mouse,
+    /// touch, and IME events; absent on widget-level events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured: Option<bool>,
+}
+
+impl OutgoingEvent {
+    /// Mark the event with its capture status.
+    pub fn with_captured(mut self, captured: bool) -> Self {
+        self.captured = Some(captured);
+        self
+    }
 }
 
 /// Serializable representation of keyboard modifiers.
@@ -913,6 +926,7 @@ mod tests {
                 None
             },
             repeat: false,
+            captured: false,
         }
     }
 
@@ -1481,10 +1495,34 @@ mod tests {
     fn outgoing_event_bare_omits_optional_fields() {
         let evt = OutgoingEvent::click("b".to_string());
         let serialized = serde_json::to_string(&evt).unwrap();
-        // value, tag, modifiers should all be absent from the JSON string
+        // value, tag, modifiers, captured should all be absent from the JSON string
         assert!(!serialized.contains("\"value\""));
         assert!(!serialized.contains("\"tag\""));
         assert!(!serialized.contains("\"modifiers\""));
+        assert!(!serialized.contains("\"captured\""));
+    }
+
+    #[test]
+    fn outgoing_event_with_captured_true() {
+        let evt = OutgoingEvent::cursor_moved("m".to_string(), 1.0, 2.0).with_captured(true);
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["captured"], true);
+    }
+
+    #[test]
+    fn outgoing_event_with_captured_false() {
+        let evt =
+            OutgoingEvent::key_press("kb".to_string(), &make_key_event_data("a", false, false))
+                .with_captured(false);
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["captured"], false);
+    }
+
+    #[test]
+    fn outgoing_event_without_captured_omits_field() {
+        let evt = OutgoingEvent::click("btn".to_string());
+        let json = serde_json::to_value(&evt).unwrap();
+        assert!(json.get("captured").is_none());
     }
 
     // -----------------------------------------------------------------------

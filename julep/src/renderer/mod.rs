@@ -240,27 +240,45 @@ impl App {
             // -- Keyboard events --
             Message::KeyPressed(data) => self.handle_key_pressed(data),
             Message::KeyReleased(data) => self.handle_key_released(data),
-            Message::ModifiersChanged(mods) => self.handle_modifiers_changed(mods),
+            Message::ModifiersChanged(mods, captured) => {
+                self.handle_modifiers_changed(mods, captured)
+            }
 
             // -- Mouse events --
-            Message::CursorMoved(pos, _win) => self.handle_cursor_moved(pos),
-            Message::CursorEntered(_win) => self.handle_cursor_entered(),
-            Message::CursorLeft(_win) => self.handle_cursor_left(),
-            Message::MouseButtonPressed(button, _win) => self.handle_mouse_button_pressed(button),
-            Message::MouseButtonReleased(button, _win) => self.handle_mouse_button_released(button),
-            Message::WheelScrolled(delta, _win) => self.handle_wheel_scrolled(delta),
+            Message::CursorMoved(pos, _win, captured) => self.handle_cursor_moved(pos, captured),
+            Message::CursorEntered(_win, captured) => self.handle_cursor_entered(captured),
+            Message::CursorLeft(_win, captured) => self.handle_cursor_left(captured),
+            Message::MouseButtonPressed(button, _win, captured) => {
+                self.handle_mouse_button_pressed(button, captured)
+            }
+            Message::MouseButtonReleased(button, _win, captured) => {
+                self.handle_mouse_button_released(button, captured)
+            }
+            Message::WheelScrolled(delta, _win, captured) => {
+                self.handle_wheel_scrolled(delta, captured)
+            }
 
             // -- Touch events --
-            Message::FingerPressed(finger, pos, _win) => self.handle_finger_pressed(finger, pos),
-            Message::FingerMoved(finger, pos, _win) => self.handle_finger_moved(finger, pos),
-            Message::FingerLifted(finger, pos, _win) => self.handle_finger_lifted(finger, pos),
-            Message::FingerLost(finger, pos, _win) => self.handle_finger_lost(finger, pos),
+            Message::FingerPressed(finger, pos, _win, captured) => {
+                self.handle_finger_pressed(finger, pos, captured)
+            }
+            Message::FingerMoved(finger, pos, _win, captured) => {
+                self.handle_finger_moved(finger, pos, captured)
+            }
+            Message::FingerLifted(finger, pos, _win, captured) => {
+                self.handle_finger_lifted(finger, pos, captured)
+            }
+            Message::FingerLost(finger, pos, _win, captured) => {
+                self.handle_finger_lost(finger, pos, captured)
+            }
 
             // -- IME events --
-            Message::ImeOpened => self.handle_ime_opened(),
-            Message::ImePreedit(text, cursor) => self.handle_ime_preedit(text, cursor),
-            Message::ImeCommit(text) => self.handle_ime_commit(text),
-            Message::ImeClosed => self.handle_ime_closed(),
+            Message::ImeOpened(captured) => self.handle_ime_opened(captured),
+            Message::ImePreedit(text, cursor, captured) => {
+                self.handle_ime_preedit(text, cursor, captured)
+            }
+            Message::ImeCommit(text, captured) => self.handle_ime_commit(text, captured),
+            Message::ImeClosed(captured) => self.handle_ime_closed(captured),
 
             // -- Window lifecycle events --
             Message::WindowCloseRequested(window_id) => {
@@ -510,7 +528,8 @@ impl App {
             .get("on_key_press")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::key_press(tag.clone(), &data));
+            let captured = data.captured;
+            emit_event(OutgoingEvent::key_press(tag.clone(), &data).with_captured(captured));
         }
         Task::none()
     }
@@ -522,93 +541,112 @@ impl App {
             .get("on_key_release")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::key_release(tag.clone(), &data));
+            let captured = data.captured;
+            emit_event(OutgoingEvent::key_release(tag.clone(), &data).with_captured(captured));
         }
         Task::none()
     }
 
-    fn handle_modifiers_changed(&self, mods: iced::keyboard::Modifiers) -> Task<Message> {
+    fn handle_modifiers_changed(
+        &self,
+        mods: iced::keyboard::Modifiers,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_modifiers_changed")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::modifiers_changed(
-                tag.clone(),
-                serialize_modifiers(mods),
-            ));
+            emit_event(
+                OutgoingEvent::modifiers_changed(tag.clone(), serialize_modifiers(mods))
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_cursor_moved(&self, pos: Point) -> Task<Message> {
+    fn handle_cursor_moved(&self, pos: Point, captured: bool) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_mouse_move")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::cursor_moved(tag.clone(), pos.x, pos.y));
+            emit_event(
+                OutgoingEvent::cursor_moved(tag.clone(), pos.x, pos.y).with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_cursor_entered(&self) -> Task<Message> {
+    fn handle_cursor_entered(&self, captured: bool) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_mouse_move")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::cursor_entered(tag.clone()));
+            emit_event(OutgoingEvent::cursor_entered(tag.clone()).with_captured(captured));
         }
         Task::none()
     }
 
-    fn handle_cursor_left(&self) -> Task<Message> {
+    fn handle_cursor_left(&self, captured: bool) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_mouse_move")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::cursor_left(tag.clone()));
+            emit_event(OutgoingEvent::cursor_left(tag.clone()).with_captured(captured));
         }
         Task::none()
     }
 
-    fn handle_mouse_button_pressed(&self, button: iced::mouse::Button) -> Task<Message> {
+    fn handle_mouse_button_pressed(
+        &self,
+        button: iced::mouse::Button,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_mouse_button")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::button_pressed(
-                tag.clone(),
-                serialize_mouse_button(&button),
-            ));
+            emit_event(
+                OutgoingEvent::button_pressed(tag.clone(), serialize_mouse_button(&button))
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_mouse_button_released(&self, button: iced::mouse::Button) -> Task<Message> {
+    fn handle_mouse_button_released(
+        &self,
+        button: iced::mouse::Button,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_mouse_button")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::button_released(
-                tag.clone(),
-                serialize_mouse_button(&button),
-            ));
+            emit_event(
+                OutgoingEvent::button_released(tag.clone(), serialize_mouse_button(&button))
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_wheel_scrolled(&self, delta: iced::mouse::ScrollDelta) -> Task<Message> {
+    fn handle_wheel_scrolled(
+        &self,
+        delta: iced::mouse::ScrollDelta,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
@@ -616,81 +654,97 @@ impl App {
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
             let (dx, dy, unit) = serialize_scroll_delta(&delta);
-            emit_event(OutgoingEvent::wheel_scrolled(tag.clone(), dx, dy, unit));
+            emit_event(
+                OutgoingEvent::wheel_scrolled(tag.clone(), dx, dy, unit).with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_finger_pressed(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+    fn handle_finger_pressed(
+        &self,
+        finger: iced::touch::Finger,
+        pos: Point,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_touch")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::finger_pressed(
-                tag.clone(),
-                finger.0,
-                pos.x,
-                pos.y,
-            ));
+            emit_event(
+                OutgoingEvent::finger_pressed(tag.clone(), finger.0, pos.x, pos.y)
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_finger_moved(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+    fn handle_finger_moved(
+        &self,
+        finger: iced::touch::Finger,
+        pos: Point,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_touch")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::finger_moved(
-                tag.clone(),
-                finger.0,
-                pos.x,
-                pos.y,
-            ));
+            emit_event(
+                OutgoingEvent::finger_moved(tag.clone(), finger.0, pos.x, pos.y)
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_finger_lifted(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+    fn handle_finger_lifted(
+        &self,
+        finger: iced::touch::Finger,
+        pos: Point,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_touch")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::finger_lifted(
-                tag.clone(),
-                finger.0,
-                pos.x,
-                pos.y,
-            ));
+            emit_event(
+                OutgoingEvent::finger_lifted(tag.clone(), finger.0, pos.x, pos.y)
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_finger_lost(&self, finger: iced::touch::Finger, pos: Point) -> Task<Message> {
+    fn handle_finger_lost(
+        &self,
+        finger: iced::touch::Finger,
+        pos: Point,
+        captured: bool,
+    ) -> Task<Message> {
         let tag = self
             .core
             .active_subscriptions
             .get("on_touch")
             .or_else(|| self.core.active_subscriptions.get("on_event"));
         if let Some(tag) = tag {
-            emit_event(OutgoingEvent::finger_lost(
-                tag.clone(),
-                finger.0,
-                pos.x,
-                pos.y,
-            ));
+            emit_event(
+                OutgoingEvent::finger_lost(tag.clone(), finger.0, pos.x, pos.y)
+                    .with_captured(captured),
+            );
         }
         Task::none()
     }
 
-    fn handle_ime_opened(&self) -> Task<Message> {
-        self.emit_if_subscribed("on_ime", OutgoingEvent::ime_opened);
+    fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
+        self.emit_if_subscribed("on_ime", |tag| {
+            OutgoingEvent::ime_opened(tag).with_captured(captured)
+        });
         Task::none()
     }
 
@@ -698,20 +752,25 @@ impl App {
         &self,
         text: String,
         cursor: Option<std::ops::Range<usize>>,
+        captured: bool,
     ) -> Task<Message> {
         self.emit_if_subscribed("on_ime", |tag| {
-            OutgoingEvent::ime_preedit(tag, text, cursor)
+            OutgoingEvent::ime_preedit(tag, text, cursor).with_captured(captured)
         });
         Task::none()
     }
 
-    fn handle_ime_commit(&self, text: String) -> Task<Message> {
-        self.emit_if_subscribed("on_ime", |tag| OutgoingEvent::ime_commit(tag, text));
+    fn handle_ime_commit(&self, text: String, captured: bool) -> Task<Message> {
+        self.emit_if_subscribed("on_ime", |tag| {
+            OutgoingEvent::ime_commit(tag, text).with_captured(captured)
+        });
         Task::none()
     }
 
-    fn handle_ime_closed(&self) -> Task<Message> {
-        self.emit_if_subscribed("on_ime", OutgoingEvent::ime_closed);
+    fn handle_ime_closed(&self, captured: bool) -> Task<Message> {
+        self.emit_if_subscribed("on_ime", |tag| {
+            OutgoingEvent::ime_closed(tag).with_captured(captured)
+        });
         Task::none()
     }
 
@@ -936,7 +995,7 @@ impl App {
         // mouse, touch, and IME events. Skip specific subscriptions to avoid
         // duplicate event delivery (M-16).
         if !has_on_event && self.core.active_subscriptions.contains_key("on_key_press") {
-            subs.push(event::listen_with(|evt, _status, _window| {
+            subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key,
                     modified_key,
@@ -955,6 +1014,7 @@ impl App {
                         modifiers,
                         text: text.map(|s| s.to_string()),
                         repeat,
+                        captured: status == iced::event::Status::Captured,
                     }))
                 } else {
                     None
@@ -968,7 +1028,7 @@ impl App {
                 .active_subscriptions
                 .contains_key("on_key_release")
         {
-            subs.push(event::listen_with(|evt, _status, _window| {
+            subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
                     key,
                     modified_key,
@@ -985,6 +1045,7 @@ impl App {
                         modifiers,
                         text: None,
                         repeat: false,
+                        captured: status == iced::event::Status::Captured,
                     }))
                 } else {
                     None
@@ -998,9 +1059,12 @@ impl App {
                 .active_subscriptions
                 .contains_key("on_modifiers_changed")
         {
-            subs.push(event::listen_with(|evt, _status, _window| {
+            subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) = evt {
-                    Some(Message::ModifiersChanged(mods))
+                    Some(Message::ModifiersChanged(
+                        mods,
+                        status == iced::event::Status::Captured,
+                    ))
                 } else {
                     None
                 }
@@ -1009,17 +1073,20 @@ impl App {
 
         // -- Mouse subscriptions --
         if !has_on_event && self.core.active_subscriptions.contains_key("on_mouse_move") {
-            subs.push(event::listen_with(|evt, _status, window| match evt {
-                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                    Some(Message::CursorMoved(position, window))
+            subs.push(event::listen_with(|evt, status, window| {
+                let captured = status == iced::event::Status::Captured;
+                match evt {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::CursorMoved(position, window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
+                        Some(Message::CursorEntered(window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::CursorLeft(window, captured))
+                    }
+                    _ => None,
                 }
-                iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
-                    Some(Message::CursorEntered(window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
-                    Some(Message::CursorLeft(window))
-                }
-                _ => None,
             }));
         }
 
@@ -1029,14 +1096,17 @@ impl App {
                 .active_subscriptions
                 .contains_key("on_mouse_button")
         {
-            subs.push(event::listen_with(|evt, _status, window| match evt {
-                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)) => {
-                    Some(Message::MouseButtonPressed(button, window))
+            subs.push(event::listen_with(|evt, status, window| {
+                let captured = status == iced::event::Status::Captured;
+                match evt {
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)) => {
+                        Some(Message::MouseButtonPressed(button, window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button)) => {
+                        Some(Message::MouseButtonReleased(button, window, captured))
+                    }
+                    _ => None,
                 }
-                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button)) => {
-                    Some(Message::MouseButtonReleased(button, window))
-                }
-                _ => None,
             }));
         }
 
@@ -1046,9 +1116,13 @@ impl App {
                 .active_subscriptions
                 .contains_key("on_mouse_scroll")
         {
-            subs.push(event::listen_with(|evt, _status, window| {
+            subs.push(event::listen_with(|evt, status, window| {
                 if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = evt {
-                    Some(Message::WheelScrolled(delta, window))
+                    Some(Message::WheelScrolled(
+                        delta,
+                        window,
+                        status == iced::event::Status::Captured,
+                    ))
                 } else {
                     None
                 }
@@ -1057,40 +1131,46 @@ impl App {
 
         // -- Touch subscriptions --
         if !has_on_event && self.core.active_subscriptions.contains_key("on_touch") {
-            subs.push(event::listen_with(|evt, _status, window| match evt {
-                iced::Event::Touch(iced::touch::Event::FingerPressed { id, position }) => {
-                    Some(Message::FingerPressed(id, position, window))
+            subs.push(event::listen_with(|evt, status, window| {
+                let captured = status == iced::event::Status::Captured;
+                match evt {
+                    iced::Event::Touch(iced::touch::Event::FingerPressed { id, position }) => {
+                        Some(Message::FingerPressed(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerMoved { id, position }) => {
+                        Some(Message::FingerMoved(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerLifted { id, position }) => {
+                        Some(Message::FingerLifted(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerLost { id, position }) => {
+                        Some(Message::FingerLost(id, position, window, captured))
+                    }
+                    _ => None,
                 }
-                iced::Event::Touch(iced::touch::Event::FingerMoved { id, position }) => {
-                    Some(Message::FingerMoved(id, position, window))
-                }
-                iced::Event::Touch(iced::touch::Event::FingerLifted { id, position }) => {
-                    Some(Message::FingerLifted(id, position, window))
-                }
-                iced::Event::Touch(iced::touch::Event::FingerLost { id, position }) => {
-                    Some(Message::FingerLost(id, position, window))
-                }
-                _ => None,
             }));
         }
 
         // -- IME subscriptions --
         if !has_on_event && self.core.active_subscriptions.contains_key("on_ime") {
-            subs.push(event::listen_with(|evt, _status, _window| match evt {
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
-                    Some(Message::ImeOpened)
+            subs.push(event::listen_with(|evt, status, _window| {
+                let captured = status == iced::event::Status::Captured;
+                match evt {
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
+                        Some(Message::ImeOpened(captured))
+                    }
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
+                        text,
+                        cursor,
+                    )) => Some(Message::ImePreedit(text, cursor, captured)),
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
+                        Some(Message::ImeCommit(text, captured))
+                    }
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
+                        Some(Message::ImeClosed(captured))
+                    }
+                    _ => None,
                 }
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
-                    text,
-                    cursor,
-                )) => Some(Message::ImePreedit(text, cursor)),
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
-                    Some(Message::ImeCommit(text))
-                }
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
-                    Some(Message::ImeClosed)
-                }
-                _ => None,
             }));
         }
 
@@ -1160,91 +1240,96 @@ impl App {
         // subscription (e.g. on_key_press) are active, skip event categories
         // that already have a dedicated subscription listener above.
         if self.core.active_subscriptions.contains_key("on_event") {
-            subs.push(event::listen_with(|evt, _status, window| match evt {
-                // Keyboard
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key,
-                    modified_key,
-                    physical_key,
-                    location,
-                    modifiers,
-                    text,
-                    repeat,
-                }) => Some(Message::KeyPressed(KeyEventData {
-                    key,
-                    modified_key,
-                    physical_key,
-                    location,
-                    modifiers,
-                    text: text.map(|s| s.to_string()),
-                    repeat,
-                })),
-                iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
-                    key,
-                    modified_key,
-                    physical_key,
-                    location,
-                    modifiers,
-                }) => Some(Message::KeyReleased(KeyEventData {
-                    key,
-                    modified_key,
-                    physical_key,
-                    location,
-                    modifiers,
-                    text: None,
-                    repeat: false,
-                })),
-                iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) => {
-                    Some(Message::ModifiersChanged(mods))
+            subs.push(event::listen_with(|evt, status, window| {
+                let captured = status == iced::event::Status::Captured;
+                match evt {
+                    // Keyboard
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key,
+                        modified_key,
+                        physical_key,
+                        location,
+                        modifiers,
+                        text,
+                        repeat,
+                    }) => Some(Message::KeyPressed(KeyEventData {
+                        key,
+                        modified_key,
+                        physical_key,
+                        location,
+                        modifiers,
+                        text: text.map(|s| s.to_string()),
+                        repeat,
+                        captured,
+                    })),
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                        key,
+                        modified_key,
+                        physical_key,
+                        location,
+                        modifiers,
+                    }) => Some(Message::KeyReleased(KeyEventData {
+                        key,
+                        modified_key,
+                        physical_key,
+                        location,
+                        modifiers,
+                        text: None,
+                        repeat: false,
+                        captured,
+                    })),
+                    iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) => {
+                        Some(Message::ModifiersChanged(mods, captured))
+                    }
+                    // Mouse
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::CursorMoved(position, window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
+                        Some(Message::CursorEntered(window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::CursorLeft(window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)) => {
+                        Some(Message::MouseButtonPressed(button, window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button)) => {
+                        Some(Message::MouseButtonReleased(button, window, captured))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                        Some(Message::WheelScrolled(delta, window, captured))
+                    }
+                    // Touch
+                    iced::Event::Touch(iced::touch::Event::FingerPressed { id, position }) => {
+                        Some(Message::FingerPressed(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerMoved { id, position }) => {
+                        Some(Message::FingerMoved(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerLifted { id, position }) => {
+                        Some(Message::FingerLifted(id, position, window, captured))
+                    }
+                    iced::Event::Touch(iced::touch::Event::FingerLost { id, position }) => {
+                        Some(Message::FingerLost(id, position, window, captured))
+                    }
+                    // IME
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
+                        Some(Message::ImeOpened(captured))
+                    }
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
+                        text,
+                        cursor,
+                    )) => Some(Message::ImePreedit(text, cursor, captured)),
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
+                        Some(Message::ImeCommit(text, captured))
+                    }
+                    iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
+                        Some(Message::ImeClosed(captured))
+                    }
+                    // Window events handled by on_window_event
+                    _ => None,
                 }
-                // Mouse
-                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                    Some(Message::CursorMoved(position, window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::CursorEntered) => {
-                    Some(Message::CursorEntered(window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
-                    Some(Message::CursorLeft(window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)) => {
-                    Some(Message::MouseButtonPressed(button, window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button)) => {
-                    Some(Message::MouseButtonReleased(button, window))
-                }
-                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
-                    Some(Message::WheelScrolled(delta, window))
-                }
-                // Touch
-                iced::Event::Touch(iced::touch::Event::FingerPressed { id, position }) => {
-                    Some(Message::FingerPressed(id, position, window))
-                }
-                iced::Event::Touch(iced::touch::Event::FingerMoved { id, position }) => {
-                    Some(Message::FingerMoved(id, position, window))
-                }
-                iced::Event::Touch(iced::touch::Event::FingerLifted { id, position }) => {
-                    Some(Message::FingerLifted(id, position, window))
-                }
-                iced::Event::Touch(iced::touch::Event::FingerLost { id, position }) => {
-                    Some(Message::FingerLost(id, position, window))
-                }
-                // IME
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
-                    Some(Message::ImeOpened)
-                }
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
-                    text,
-                    cursor,
-                )) => Some(Message::ImePreedit(text, cursor)),
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
-                    Some(Message::ImeCommit(text))
-                }
-                iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
-                    Some(Message::ImeClosed)
-                }
-                // Window events handled by on_window_event
-                _ => None,
             }));
         }
 

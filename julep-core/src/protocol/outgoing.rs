@@ -17,6 +17,7 @@ impl OutgoingEvent {
             tag: None,
             modifiers: None,
             data: None,
+            captured: None,
         }
     }
 
@@ -30,6 +31,7 @@ impl OutgoingEvent {
             tag: Some(tag),
             modifiers: None,
             data: None,
+            captured: None,
         }
     }
 

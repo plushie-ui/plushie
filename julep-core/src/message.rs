@@ -24,6 +24,8 @@ pub struct KeyEventData {
     pub modifiers: iced::keyboard::Modifiers,
     pub text: Option<String>,
     pub repeat: bool,
+    /// Whether iced reported this event as `Captured` (consumed by a widget).
+    pub captured: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,17 +60,17 @@ pub enum Message {
     KeyPressed(KeyEventData),
     /// A keyboard key was released (full event data).
     KeyReleased(KeyEventData),
-    /// Keyboard modifiers changed.
-    ModifiersChanged(iced::keyboard::Modifiers),
+    /// Keyboard modifiers changed (modifiers, captured).
+    ModifiersChanged(iced::keyboard::Modifiers, bool),
     // -- IME events --
-    /// IME session opened.
-    ImeOpened,
-    /// IME preedit text updated (composing text, optional cursor range).
-    ImePreedit(String, Option<std::ops::Range<usize>>),
-    /// IME committed final text.
-    ImeCommit(String),
-    /// IME session closed.
-    ImeClosed,
+    /// IME session opened (captured).
+    ImeOpened(bool),
+    /// IME preedit text updated (composing text, optional cursor range, captured).
+    ImePreedit(String, Option<std::ops::Range<usize>>, bool),
+    /// IME committed final text (text, captured).
+    ImeCommit(String, bool),
+    /// IME session closed (captured).
+    ImeClosed(bool),
     /// A window close was requested by the user (WM close button).
     WindowCloseRequested(window::Id),
     /// A window was actually closed by iced.
@@ -76,27 +78,27 @@ pub enum Message {
     /// A new window was opened (iced_id, julep_id).
     WindowOpened(window::Id, String),
     // -- Mouse events --
-    /// Cursor moved to (x, y) in a window.
-    CursorMoved(Point, window::Id),
-    /// Cursor entered a window.
-    CursorEntered(window::Id),
-    /// Cursor left a window.
-    CursorLeft(window::Id),
-    /// Mouse button pressed.
-    MouseButtonPressed(iced::mouse::Button, window::Id),
-    /// Mouse button released.
-    MouseButtonReleased(iced::mouse::Button, window::Id),
-    /// Mouse wheel scrolled.
-    WheelScrolled(iced::mouse::ScrollDelta, window::Id),
+    /// Cursor moved to (x, y) in a window (position, window_id, captured).
+    CursorMoved(Point, window::Id, bool),
+    /// Cursor entered a window (window_id, captured).
+    CursorEntered(window::Id, bool),
+    /// Cursor left a window (window_id, captured).
+    CursorLeft(window::Id, bool),
+    /// Mouse button pressed (button, window_id, captured).
+    MouseButtonPressed(iced::mouse::Button, window::Id, bool),
+    /// Mouse button released (button, window_id, captured).
+    MouseButtonReleased(iced::mouse::Button, window::Id, bool),
+    /// Mouse wheel scrolled (delta, window_id, captured).
+    WheelScrolled(iced::mouse::ScrollDelta, window::Id, bool),
     // -- Touch events --
-    /// Touch finger pressed.
-    FingerPressed(iced::touch::Finger, Point, window::Id),
-    /// Touch finger moved.
-    FingerMoved(iced::touch::Finger, Point, window::Id),
-    /// Touch finger lifted.
-    FingerLifted(iced::touch::Finger, Point, window::Id),
-    /// Touch finger lost.
-    FingerLost(iced::touch::Finger, Point, window::Id),
+    /// Touch finger pressed (finger, position, window_id, captured).
+    FingerPressed(iced::touch::Finger, Point, window::Id, bool),
+    /// Touch finger moved (finger, position, window_id, captured).
+    FingerMoved(iced::touch::Finger, Point, window::Id, bool),
+    /// Touch finger lifted (finger, position, window_id, captured).
+    FingerLifted(iced::touch::Finger, Point, window::Id, bool),
+    /// Touch finger lost (finger, position, window_id, captured).
+    FingerLost(iced::touch::Finger, Point, window::Id, bool),
     // -- Window lifecycle events --
     /// A window event from iced (window_id, event).
     WindowEvent(window::Id, window::Event),
