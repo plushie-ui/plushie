@@ -138,6 +138,25 @@ impl A11yOverrides {
         })
     }
 
+    /// Returns true if any override would affect the accessible node.
+    ///
+    /// Used to decide whether a container-only widget (column, row, etc.)
+    /// should be upgraded to an accessible node in the a11y tree.
+    pub(crate) fn has_accessible_overrides(&self) -> bool {
+        self.role.is_some()
+            || self.label.is_some()
+            || self.description.is_some()
+            || self.expanded.is_some()
+            || self.live.is_some()
+            || self.level.is_some()
+            || self.mnemonic.is_some()
+            || self.required
+            || self.busy
+            || self.invalid
+            || self.modal
+            || self.read_only
+    }
+
     /// Create overrides with just a label (for alt text auto-inference).
     pub(crate) fn with_label(label: String) -> Self {
         Self {
@@ -431,10 +450,7 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
         // Without this, container-type widgets (column, row, stack, etc.)
         // would silently ignore a11y overrides because they only call
         // container(), never accessible().
-        if self.overrides.role.is_some()
-            || self.overrides.label.is_some()
-            || self.overrides.description.is_some()
-        {
+        if self.overrides.has_accessible_overrides() {
             let base = Accessible {
                 role: self.overrides.role.unwrap_or_default(),
                 label: self.overrides.label.as_deref(),
