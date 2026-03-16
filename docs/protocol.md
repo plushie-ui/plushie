@@ -519,6 +519,9 @@ Produced by widget interactions. The `id` field is the node ID.
 | `sensor_resize` | id, data: {width, height} | Sensor widget resized |
 | `scroll` | id, data: {absolute_x, absolute_y, relative_x, relative_y, bounds_width, bounds_height, content_width, content_height} | Scrollable scrolled |
 | `sort` | id, data: {column} | Table column sort clicked |
+| `key_binding` | id, data | TextEditor key binding rule matched |
+| `open` | id | PickList or ComboBox menu opened |
+| `close` | id | PickList or ComboBox menu closed |
 
 Mouse area events (from `mouse_area` widget):
 
