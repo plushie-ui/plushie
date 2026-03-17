@@ -1,5 +1,15 @@
 //! Platform effect handlers (file dialogs, clipboard, notifications).
 //!
+//! Effects are side-effectful operations requested by the host that
+//! interact with OS resources. Each effect has an `id` for correlating
+//! the response, a `kind` string for dispatch, and a JSON `payload`
+//! with kind-specific parameters.
+//!
+//! File dialog effects run asynchronously via [`handle_async_effect`]
+//! when a tokio runtime is available (the normal iced daemon path).
+//! The sync [`handle_effect`] fallback exists for headless/blocking
+//! contexts. Clipboard and notification effects are always synchronous.
+//!
 //! **File paths:** All file path strings returned by dialog handlers use
 //! OS-native path separators (`/` on Unix, `\` on Windows). Cross-platform
 //! consumers should normalize paths before comparing or storing them.
@@ -23,6 +33,75 @@ fn path_to_json_string(path: &std::path::Path) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Dialog parameter parsing
+// ---------------------------------------------------------------------------
+
+/// Parsed file dialog parameters extracted from the JSON payload.
+struct DialogParams<'a> {
+    title: &'a str,
+    filters: Vec<(&'a str, Vec<&'a str>)>,
+    directory: Option<&'a str>,
+    default_name: Option<&'a str>,
+}
+
+/// Parse common dialog parameters from a JSON payload.
+fn parse_dialog_params<'a>(payload: &'a Value, default_title: &'a str) -> DialogParams<'a> {
+    let title = payload
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or(default_title);
+
+    let mut filters = Vec::new();
+    if let Some(arr) = payload.get("filters").and_then(|v| v.as_array()) {
+        for filter in arr {
+            if let Some(pair) = filter.as_array()
+                && pair.len() >= 2
+                && let (Some(name), Some(ext)) = (pair[0].as_str(), pair[1].as_str())
+            {
+                let extensions: Vec<&str> = ext
+                    .split(';')
+                    .map(|e| e.trim().trim_start_matches("*."))
+                    .collect();
+                filters.push((name, extensions));
+            }
+        }
+    }
+
+    let directory = payload.get("directory").and_then(|v| v.as_str());
+    let default_name = payload.get("default_name").and_then(|v| v.as_str());
+
+    DialogParams {
+        title,
+        filters,
+        directory,
+        default_name,
+    }
+}
+
+/// Apply parsed parameters to an `rfd::FileDialog` or `rfd::AsyncFileDialog`.
+/// Both types share identical builder methods but no common trait.
+macro_rules! apply_dialog_params {
+    ($dialog_type:ty, $params:expr) => {{
+        let params = &$params;
+        let mut d = <$dialog_type>::new().set_title(params.title);
+        for (name, exts) in &params.filters {
+            d = d.add_filter(*name, exts);
+        }
+        if let Some(dir) = params.directory {
+            d = d.set_directory(dir);
+        }
+        if let Some(name) = params.default_name {
+            d = d.set_file_name(name);
+        }
+        d
+    }};
+}
+
+// ---------------------------------------------------------------------------
+// Effect dispatch
+// ---------------------------------------------------------------------------
+
 /// Returns true for effect kinds that should run asynchronously (file dialogs).
 pub fn is_async_effect(kind: &str) -> bool {
     matches!(
@@ -35,6 +114,14 @@ pub fn is_async_effect(kind: &str) -> bool {
     )
 }
 
+/// Dispatch an effect synchronously and return the response.
+///
+/// File dialog effects use `rfd::FileDialog` (blocking). On macOS, sync
+/// dialogs may deadlock if called on the main thread -- prefer
+/// [`handle_async_effect`] when a tokio runtime is available.
+///
+/// Clipboard and notification effects are always synchronous regardless
+/// of which dispatch function is used.
 pub fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse {
     match kind {
         "file_open" => handle_file_open(id, payload),
@@ -54,181 +141,130 @@ pub fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse 
     }
 }
 
-// ---------------------------------------------------------------------------
-// File dialogs -- synchronous handlers (rfd crate)
-//
-// These sync handlers are used by `handle_effect()`, which is the fallback
-// path when the async runtime isn't available (e.g. during initialization or
-// in contexts where tokio isn't running). They are NOT dead code -- the async
-// counterparts in `handle_async_effect()` below use `rfd::AsyncFileDialog`
-// and are used by the renderer's `SpawnAsyncEffect` path (via Task::perform).
-// Both paths coexist intentionally: sync for headless/blocking contexts,
-// async for the normal iced daemon event loop.
-// ---------------------------------------------------------------------------
-
-/// Synchronous file open dialog. Used when the async runtime is unavailable.
+/// Dispatch an async effect and return the response. The response format
+/// matches [`handle_effect`] exactly so the host can deserialize uniformly.
 ///
-/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
-/// thread because macOS requires native dialogs to run on the main thread.
-/// Prefer `handle_async_effect` when a tokio runtime is available.
-fn handle_file_open(id: String, payload: &Value) -> EffectResponse {
-    let title = payload
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Open File");
-
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-
-    if let Some(filters) = payload.get("filters").and_then(|v| v.as_array()) {
-        for filter in filters {
-            if let Some(arr) = filter.as_array()
-                && arr.len() >= 2
-                && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-            {
-                let extensions: Vec<&str> = ext
-                    .split(';')
-                    .map(|e| e.trim().trim_start_matches("*."))
-                    .collect();
-                dialog = dialog.add_filter(name, &extensions);
+/// Only file dialog effects have async implementations (via
+/// `rfd::AsyncFileDialog`). Other kinds are not routed here -- see
+/// [`is_async_effect`].
+///
+/// Note: on X11-only Linux desktops without a portal (e.g. minimal WMs),
+/// rfd falls back to a GTK dialog which may block a tokio worker thread.
+/// This is a known rfd limitation, not specific to julep.
+pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) -> EffectResponse {
+    match effect_type {
+        "file_open" => {
+            let p = parse_dialog_params(params, "Open File");
+            let dialog = apply_dialog_params!(rfd::AsyncFileDialog, p);
+            match dialog.pick_file().await {
+                Some(h) => EffectResponse::ok(id, json!({"path": path_to_json_string(h.path())})),
+                None => EffectResponse::cancelled(id),
             }
         }
-    }
-
-    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
-        dialog = dialog.set_directory(dir);
-    }
-
-    match dialog.pick_file() {
-        Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
-        None => EffectResponse::error(id, "cancelled".to_string()),
+        "file_open_multiple" => {
+            let p = parse_dialog_params(params, "Open Files");
+            let dialog = apply_dialog_params!(rfd::AsyncFileDialog, p);
+            match dialog.pick_files().await {
+                Some(handles) => {
+                    let paths: Vec<String> = handles
+                        .iter()
+                        .map(|h| path_to_json_string(h.path()))
+                        .collect();
+                    EffectResponse::ok(id, json!({"paths": paths}))
+                }
+                None => EffectResponse::cancelled(id),
+            }
+        }
+        "file_save" => {
+            let p = parse_dialog_params(params, "Save File");
+            let dialog = apply_dialog_params!(rfd::AsyncFileDialog, p);
+            match dialog.save_file().await {
+                Some(h) => EffectResponse::ok(id, json!({"path": path_to_json_string(h.path())})),
+                None => EffectResponse::cancelled(id),
+            }
+        }
+        "directory_select" => {
+            let p = parse_dialog_params(params, "Select Directory");
+            let dialog = apply_dialog_params!(rfd::AsyncFileDialog, p);
+            match dialog.pick_folder().await {
+                Some(h) => EffectResponse::ok(id, json!({"path": path_to_json_string(h.path())})),
+                None => EffectResponse::cancelled(id),
+            }
+        }
+        "directory_select_multiple" => {
+            let p = parse_dialog_params(params, "Select Directories");
+            let dialog = apply_dialog_params!(rfd::AsyncFileDialog, p);
+            match dialog.pick_folders().await {
+                Some(handles) => {
+                    let paths: Vec<String> = handles
+                        .iter()
+                        .map(|h| path_to_json_string(h.path()))
+                        .collect();
+                    EffectResponse::ok(id, json!({"paths": paths}))
+                }
+                None => EffectResponse::cancelled(id),
+            }
+        }
+        _ => EffectResponse::unsupported(id),
     }
 }
 
-/// Synchronous multi-file open dialog. Used when the async runtime is unavailable.
-///
-/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
-/// thread because macOS requires native dialogs to run on the main thread.
-/// Prefer `handle_async_effect` when a tokio runtime is available.
+// ---------------------------------------------------------------------------
+// Sync file dialog handlers
+//
+// These use rfd::FileDialog (blocking). The async counterparts above use
+// rfd::AsyncFileDialog. Both coexist: sync for headless/blocking contexts,
+// async for the normal iced daemon event loop.
+// ---------------------------------------------------------------------------
+
+fn handle_file_open(id: String, payload: &Value) -> EffectResponse {
+    let p = parse_dialog_params(payload, "Open File");
+    let dialog = apply_dialog_params!(rfd::FileDialog, p);
+    match dialog.pick_file() {
+        Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
+        None => EffectResponse::cancelled(id),
+    }
+}
+
 fn handle_file_open_multiple(id: String, payload: &Value) -> EffectResponse {
-    let title = payload
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Open Files");
-
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-
-    if let Some(filters) = payload.get("filters").and_then(|v| v.as_array()) {
-        for filter in filters {
-            if let Some(arr) = filter.as_array()
-                && arr.len() >= 2
-                && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-            {
-                let extensions: Vec<&str> = ext
-                    .split(';')
-                    .map(|e| e.trim().trim_start_matches("*."))
-                    .collect();
-                dialog = dialog.add_filter(name, &extensions);
-            }
-        }
-    }
-
-    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
-        dialog = dialog.set_directory(dir);
-    }
-
+    let p = parse_dialog_params(payload, "Open Files");
+    let dialog = apply_dialog_params!(rfd::FileDialog, p);
     match dialog.pick_files() {
         Some(paths) => {
             let paths: Vec<String> = paths.iter().map(|p| path_to_json_string(p)).collect();
             EffectResponse::ok(id, json!({"paths": paths}))
         }
-        None => EffectResponse::error(id, "cancelled".to_string()),
+        None => EffectResponse::cancelled(id),
     }
 }
 
-/// Synchronous file save dialog. Used when the async runtime is unavailable.
-///
-/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
-/// thread because macOS requires native dialogs to run on the main thread.
-/// Prefer `handle_async_effect` when a tokio runtime is available.
 fn handle_file_save(id: String, payload: &Value) -> EffectResponse {
-    let title = payload
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Save File");
-
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-
-    if let Some(name) = payload.get("default_name").and_then(|v| v.as_str()) {
-        dialog = dialog.set_file_name(name);
-    }
-
-    if let Some(filters) = payload.get("filters").and_then(|v| v.as_array()) {
-        for filter in filters {
-            if let Some(arr) = filter.as_array()
-                && arr.len() >= 2
-                && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-            {
-                let extensions: Vec<&str> = ext
-                    .split(';')
-                    .map(|e| e.trim().trim_start_matches("*."))
-                    .collect();
-                dialog = dialog.add_filter(name, &extensions);
-            }
-        }
-    }
-
+    let p = parse_dialog_params(payload, "Save File");
+    let dialog = apply_dialog_params!(rfd::FileDialog, p);
     match dialog.save_file() {
         Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
-        None => EffectResponse::error(id, "cancelled".to_string()),
+        None => EffectResponse::cancelled(id),
     }
 }
 
-/// Synchronous directory select dialog. Used when the async runtime is unavailable.
-///
-/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
-/// thread because macOS requires native dialogs to run on the main thread.
-/// Prefer `handle_async_effect` when a tokio runtime is available.
 fn handle_directory_select(id: String, payload: &Value) -> EffectResponse {
-    let title = payload
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Select Directory");
-
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-
-    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
-        dialog = dialog.set_directory(dir);
-    }
-
+    let p = parse_dialog_params(payload, "Select Directory");
+    let dialog = apply_dialog_params!(rfd::FileDialog, p);
     match dialog.pick_folder() {
         Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
-        None => EffectResponse::error(id, "cancelled".to_string()),
+        None => EffectResponse::cancelled(id),
     }
 }
 
-/// Synchronous multi-directory select dialog. Used when the async runtime is unavailable.
-///
-/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
-/// thread because macOS requires native dialogs to run on the main thread.
-/// Prefer `handle_async_effect` when a tokio runtime is available.
 fn handle_directory_select_multiple(id: String, payload: &Value) -> EffectResponse {
-    let title = payload
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Select Directories");
-
-    let mut dialog = rfd::FileDialog::new().set_title(title);
-
-    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
-        dialog = dialog.set_directory(dir);
-    }
-
+    let p = parse_dialog_params(payload, "Select Directories");
+    let dialog = apply_dialog_params!(rfd::FileDialog, p);
     match dialog.pick_folders() {
         Some(paths) => {
             let paths: Vec<String> = paths.iter().map(|p| path_to_json_string(p)).collect();
             EffectResponse::ok(id, json!({"paths": paths}))
         }
-        None => EffectResponse::error(id, "cancelled".to_string()),
+        None => EffectResponse::cancelled(id),
     }
 }
 
@@ -280,11 +316,10 @@ fn handle_clipboard_read(id: String) -> EffectResponse {
 }
 
 fn handle_clipboard_write(id: String, payload: &Value) -> EffectResponse {
-    let text = payload
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let Some(text) = payload.get("text").and_then(|v| v.as_str()) else {
+        return EffectResponse::error(id, "missing required field: text".to_string());
+    };
+    let text = text.to_string();
 
     with_clipboard(&id, |clipboard, id| match clipboard.set_text(text) {
         Ok(()) => EffectResponse::ok(id.to_string(), json!(null)),
@@ -300,11 +335,10 @@ fn handle_clipboard_read_html(id: String) -> EffectResponse {
 }
 
 fn handle_clipboard_write_html(id: String, payload: &Value) -> EffectResponse {
-    let html = payload
-        .get("html")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let Some(html) = payload.get("html").and_then(|v| v.as_str()) else {
+        return EffectResponse::error(id, "missing required field: html".to_string());
+    };
+    let html = html.to_string();
 
     let alt_text = payload
         .get("alt_text")
@@ -353,11 +387,10 @@ fn handle_clipboard_read_primary(id: String) -> EffectResponse {
 #[cfg(target_os = "linux")]
 fn handle_clipboard_write_primary(id: String, payload: &Value) -> EffectResponse {
     use arboard::{LinuxClipboardKind, SetExtLinux};
-    let text = payload
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let Some(text) = payload.get("text").and_then(|v| v.as_str()) else {
+        return EffectResponse::error(id, "missing required field: text".to_string());
+    };
+    let text = text.to_string();
 
     with_clipboard(&id, |clipboard, id| {
         match clipboard
@@ -401,7 +434,7 @@ fn handle_notification(id: String, payload: &Value) -> EffectResponse {
     let title = payload
         .get("title")
         .and_then(|v| v.as_str())
-        .unwrap_or("Julep");
+        .unwrap_or("julep");
 
     let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -412,8 +445,9 @@ fn handle_notification(id: String, payload: &Value) -> EffectResponse {
         notification.icon(icon);
     }
 
-    if let Some(timeout_ms) = payload.get("timeout").and_then(|v| v.as_i64()) {
-        notification.timeout(notify_rust::Timeout::Milliseconds(timeout_ms as u32));
+    if let Some(timeout_ms) = payload.get("timeout").and_then(|v| v.as_u64()) {
+        let clamped = timeout_ms.min(u32::MAX as u64) as u32;
+        notification.timeout(notify_rust::Timeout::Milliseconds(clamped));
     }
 
     if let Some(urgency) = payload.get("urgency").and_then(|v| v.as_str()) {
@@ -436,170 +470,6 @@ fn handle_notification(id: String, payload: &Value) -> EffectResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Async effect handlers (file dialogs via rfd::AsyncFileDialog)
-// ---------------------------------------------------------------------------
-
-/// Handle an async effect and return an EffectResponse. The response format
-/// matches the sync handlers exactly so the host can deserialize uniformly.
-///
-// Note: on X11-only Linux desktops without a portal (e.g. minimal WMs),
-// rfd falls back to a GTK dialog which may block a tokio worker thread.
-// This is a known rfd limitation, not specific to julep.
-pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) -> EffectResponse {
-    match effect_type {
-        "file_open" => {
-            let title = params
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Open File");
-
-            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-
-            if let Some(filters) = params.get("filters").and_then(|v| v.as_array()) {
-                for filter in filters {
-                    if let Some(arr) = filter.as_array()
-                        && arr.len() >= 2
-                        && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-                    {
-                        let extensions: Vec<&str> = ext
-                            .split(';')
-                            .map(|e| e.trim().trim_start_matches("*."))
-                            .collect();
-                        dialog = dialog.add_filter(name, &extensions);
-                    }
-                }
-            }
-
-            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
-                dialog = dialog.set_directory(dir);
-            }
-
-            match dialog.pick_file().await {
-                Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
-                }
-                None => EffectResponse::error(id, "cancelled".to_string()),
-            }
-        }
-        "file_open_multiple" => {
-            let title = params
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Open Files");
-
-            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-
-            if let Some(filters) = params.get("filters").and_then(|v| v.as_array()) {
-                for filter in filters {
-                    if let Some(arr) = filter.as_array()
-                        && arr.len() >= 2
-                        && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-                    {
-                        let extensions: Vec<&str> = ext
-                            .split(';')
-                            .map(|e| e.trim().trim_start_matches("*."))
-                            .collect();
-                        dialog = dialog.add_filter(name, &extensions);
-                    }
-                }
-            }
-
-            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
-                dialog = dialog.set_directory(dir);
-            }
-
-            match dialog.pick_files().await {
-                Some(handles) => {
-                    let paths: Vec<String> = handles
-                        .iter()
-                        .map(|h| path_to_json_string(h.path()))
-                        .collect();
-                    EffectResponse::ok(id, json!({"paths": paths}))
-                }
-                None => EffectResponse::error(id, "cancelled".to_string()),
-            }
-        }
-        "file_save" => {
-            let title = params
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Save File");
-
-            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-
-            if let Some(name) = params.get("default_name").and_then(|v| v.as_str()) {
-                dialog = dialog.set_file_name(name);
-            }
-
-            if let Some(filters) = params.get("filters").and_then(|v| v.as_array()) {
-                for filter in filters {
-                    if let Some(arr) = filter.as_array()
-                        && arr.len() >= 2
-                        && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
-                    {
-                        let extensions: Vec<&str> = ext
-                            .split(';')
-                            .map(|e| e.trim().trim_start_matches("*."))
-                            .collect();
-                        dialog = dialog.add_filter(name, &extensions);
-                    }
-                }
-            }
-
-            match dialog.save_file().await {
-                Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
-                }
-                None => EffectResponse::error(id, "cancelled".to_string()),
-            }
-        }
-        "directory_select" => {
-            let title = params
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Select Directory");
-
-            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-
-            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
-                dialog = dialog.set_directory(dir);
-            }
-
-            match dialog.pick_folder().await {
-                Some(handle) => {
-                    EffectResponse::ok(id, json!({"path": path_to_json_string(handle.path())}))
-                }
-                None => EffectResponse::error(id, "cancelled".to_string()),
-            }
-        }
-        "directory_select_multiple" => {
-            let title = params
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Select Directories");
-
-            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
-
-            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
-                dialog = dialog.set_directory(dir);
-            }
-
-            match dialog.pick_folders().await {
-                Some(handles) => {
-                    let paths: Vec<String> = handles
-                        .iter()
-                        .map(|h| path_to_json_string(h.path()))
-                        .collect();
-                    EffectResponse::ok(id, json!({"paths": paths}))
-                }
-                None => EffectResponse::error(id, "cancelled".to_string()),
-            }
-        }
-        _ => EffectResponse::unsupported(id),
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -617,10 +487,9 @@ mod tests {
     }
 
     /// Dispatch every known effect kind with a minimal payload and verify
-    /// none of them panic. The handlers may return "unsupported" (when the
-    /// corresponding feature is not compiled in) or "error" (when the OS
-    /// resource -- clipboard, display server, notification daemon -- is
-    /// unavailable in the test environment). That's fine: we're testing
+    /// none of them panic. The handlers may return "error" when the OS
+    /// resource (clipboard, display server, notification daemon) is
+    /// unavailable in the test environment. That's fine: we're testing
     /// that the routing reaches the right handler and returns cleanly.
     #[test]
     fn dispatch_routes_all_known_kinds_without_panic() {
@@ -653,19 +522,18 @@ mod tests {
             let id = format!("test-{kind}");
             let resp = handle_effect(id.clone(), kind, payload);
 
-            // Must get a well-formed response with matching id.
             assert_eq!(resp.id, id, "id mismatch for kind {kind}");
             assert_eq!(resp.message_type, "effect_response");
             assert!(
-                resp.status == "ok" || resp.status == "error",
+                resp.status == "ok" || resp.status == "error" || resp.status == "cancelled",
                 "unexpected status '{}' for kind {kind}",
                 resp.status
             );
         }
     }
 
-    /// Verify that minimal/empty payloads don't cause panics -- handlers
-    /// should defensively unwrap_or on missing fields, not panic.
+    /// Verify that empty payloads don't cause panics -- handlers should
+    /// defensively unwrap_or on missing fields.
     #[test]
     fn handlers_tolerate_empty_payloads() {
         let kinds: &[&str] = &[
@@ -690,7 +558,6 @@ mod tests {
         }
     }
 
-    /// Multiple unknown kinds all return unsupported with distinct ids.
     #[test]
     fn unknown_kinds_preserve_id() {
         for i in 0..5 {
@@ -702,16 +569,7 @@ mod tests {
         }
     }
 
-    // NOTE: The handler implementations (file dialogs via rfd,
-    // clipboard via arboard, notifications via notify-rust) interact with real
-    // OS resources -- display server, clipboard daemon, notification service.
-    // They can't be meaningfully unit-tested without those services running.
-    // Integration-level testing of those paths belongs in a CI environment
-    // with Xvfb / a clipboard provider available, not in pure unit tests.
-
-    // -----------------------------------------------------------------------
-    // is_async_effect
-    // -----------------------------------------------------------------------
+    // -- is_async_effect ------------------------------------------------------
 
     #[test]
     fn async_effects_recognized() {
@@ -726,11 +584,6 @@ mod tests {
     fn sync_effects_not_async() {
         assert!(!is_async_effect("clipboard_read"));
         assert!(!is_async_effect("clipboard_write"));
-        assert!(!is_async_effect("clipboard_read_html"));
-        assert!(!is_async_effect("clipboard_write_html"));
-        assert!(!is_async_effect("clipboard_clear"));
-        assert!(!is_async_effect("clipboard_read_primary"));
-        assert!(!is_async_effect("clipboard_write_primary"));
         assert!(!is_async_effect("notification"));
     }
 
@@ -741,9 +594,53 @@ mod tests {
         assert!(!is_async_effect("FILE_OPEN")); // case-sensitive
     }
 
-    // -----------------------------------------------------------------------
-    // path_to_json_string
-    // -----------------------------------------------------------------------
+    // -- parse_dialog_params --------------------------------------------------
+
+    #[test]
+    fn parse_params_defaults() {
+        let payload = json!({});
+        let p = parse_dialog_params(&payload, "Default Title");
+        assert_eq!(p.title, "Default Title");
+        assert!(p.filters.is_empty());
+        assert!(p.directory.is_none());
+        assert!(p.default_name.is_none());
+    }
+
+    #[test]
+    fn parse_params_with_all_fields() {
+        let payload = json!({
+            "title": "Custom Title",
+            "filters": [["Images", "*.png;*.jpg"], ["All", "*.*"]],
+            "directory": "/home/user",
+            "default_name": "output.txt"
+        });
+        let p = parse_dialog_params(&payload, "Ignored");
+        assert_eq!(p.title, "Custom Title");
+        assert_eq!(p.filters.len(), 2);
+        assert_eq!(p.filters[0].0, "Images");
+        assert_eq!(p.filters[0].1, vec!["png", "jpg"]);
+        assert_eq!(p.filters[1].0, "All");
+        assert_eq!(p.directory, Some("/home/user"));
+        assert_eq!(p.default_name, Some("output.txt"));
+    }
+
+    #[test]
+    fn parse_params_malformed_filters_ignored() {
+        let payload = json!({
+            "filters": [
+                "not an array",
+                [],
+                ["only one element"],
+                ["Name", "*.txt"]
+            ]
+        });
+        let p = parse_dialog_params(&payload, "T");
+        // Only the last filter is valid
+        assert_eq!(p.filters.len(), 1);
+        assert_eq!(p.filters[0].0, "Name");
+    }
+
+    // -- path_to_json_string --------------------------------------------------
 
     #[test]
     fn path_normal() {

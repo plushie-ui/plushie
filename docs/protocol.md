@@ -668,9 +668,14 @@ Response to an EffectRequest.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Matches the request id |
-| `status` | string | `"ok"` or `"error"` |
+| `status` | string | `"ok"`, `"cancelled"`, or `"error"` |
 | `result` | any | Result data (when status is ok) |
 | `error` | string | Error message (when status is error) |
+
+The `"cancelled"` status is returned when the user dismisses a dialog
+without selecting (e.g. clicks Cancel on a file picker). It carries no
+`result` or `error` field. Clients should treat it as a normal outcome,
+not as a failure.
 
 Window query operations (get_size, get_position, etc.) also use this
 format, with the `id` set to the window_id.

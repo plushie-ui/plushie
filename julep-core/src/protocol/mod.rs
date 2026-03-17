@@ -184,6 +184,19 @@ impl EffectResponse {
     pub fn unsupported(id: String) -> Self {
         Self::error(id, "unsupported".to_string())
     }
+
+    /// The user cancelled the operation (e.g. closed a file dialog).
+    /// Distinct from `error` -- cancellation is a normal user action,
+    /// not a failure.
+    pub fn cancelled(id: String) -> Self {
+        Self {
+            message_type: "effect_response",
+            id,
+            status: "cancelled",
+            result: None,
+            error: None,
+        }
+    }
 }
 
 /// Response to a Query message.
