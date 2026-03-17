@@ -1,7 +1,20 @@
-//! Test helpers for widget extension authors.
+//! Test factory helpers for widget extension authors.
 //!
-//! Provides convenient constructors for `TreeNode`, `WidgetCaches`, and
-//! `ExtensionCaches` so extension tests don't need to import half the crate.
+//! Provides [`TestEnv`] for setting up a render environment and
+//! [`node`] / [`node_with_props`] / [`node_with_children`] for
+//! constructing test tree nodes.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use julep_core::testing::*;
+//! use julep_core::prelude::*;
+//!
+//! let test = TestEnv::default();
+//! let node = node_with_props("s-1", "sparkline", json!({"color": "#ff0000"}));
+//! let env = test.env();
+//! let element = my_extension.render(&node, &env);
+//! ```
 
 use iced::Theme;
 use serde_json::{Value, json};
@@ -11,7 +24,11 @@ use crate::image_registry::ImageRegistry;
 use crate::protocol::TreeNode;
 use crate::widgets::WidgetCaches;
 
-/// Create a minimal `TreeNode` for testing.
+// ---------------------------------------------------------------------------
+// TreeNode constructors
+// ---------------------------------------------------------------------------
+
+/// Create a minimal [`TreeNode`] with empty props and no children.
 pub fn node(id: &str, type_name: &str) -> TreeNode {
     TreeNode {
         id: id.to_string(),
@@ -21,7 +38,7 @@ pub fn node(id: &str, type_name: &str) -> TreeNode {
     }
 }
 
-/// Create a `TreeNode` with props for testing.
+/// Create a [`TreeNode`] with the given props and no children.
 pub fn node_with_props(id: &str, type_name: &str, props: Value) -> TreeNode {
     TreeNode {
         id: id.to_string(),
@@ -31,7 +48,7 @@ pub fn node_with_props(id: &str, type_name: &str, props: Value) -> TreeNode {
     }
 }
 
-/// Create a `TreeNode` with children for testing.
+/// Create a [`TreeNode`] with children and empty props.
 pub fn node_with_children(id: &str, type_name: &str, children: Vec<TreeNode>) -> TreeNode {
     TreeNode {
         id: id.to_string(),
@@ -41,75 +58,85 @@ pub fn node_with_children(id: &str, type_name: &str, children: Vec<TreeNode>) ->
     }
 }
 
-/// Create empty `WidgetCaches` for testing.
-pub fn widget_caches() -> WidgetCaches {
-    WidgetCaches::new()
-}
+// ---------------------------------------------------------------------------
+// TestEnv: owns all render dependencies
+// ---------------------------------------------------------------------------
 
-/// Create empty `ExtensionCaches` for testing.
-pub fn ext_caches() -> ExtensionCaches {
-    ExtensionCaches::new()
-}
-
-/// Create an empty `ImageRegistry` for testing.
-pub fn image_registry() -> ImageRegistry {
-    ImageRegistry::new()
-}
-
-/// Create an empty `ExtensionDispatcher` for testing.
-pub fn dispatcher() -> ExtensionDispatcher {
-    ExtensionDispatcher::new(vec![])
-}
-
-/// Create a `WidgetEnv` for testing extension `render()` methods.
+/// Owns all the dependencies needed to construct a [`WidgetEnv`] for
+/// testing extension `render()` methods.
 ///
-/// The caller owns all the dependencies and passes them in. Use the other
-/// helpers in this module (`widget_caches()`, `ext_caches()`, etc.) to
-/// create default instances.
+/// All fields are public so tests can customize before calling [`env`](Self::env).
 ///
 /// # Example
 ///
 /// ```ignore
-/// use julep_core::testing::*;
-/// use iced::Theme;
-///
-/// let wc = widget_caches();
-/// let ec = ext_caches();
-/// let images = image_registry();
-/// let theme = Theme::Dark;
-/// let disp = dispatcher();
-///
-/// let env = widget_env_with(&ec, &wc, &images, &theme, &disp);
-/// let element = my_extension.render(&node("n1", "sparkline"), &env);
+/// let test = TestEnv::default();
+/// let env = test.env();
+/// let element = my_extension.render(&node, &env);
 /// ```
-pub fn widget_env_with<'a>(
-    ext_caches: &'a ExtensionCaches,
-    widget_caches: &'a WidgetCaches,
-    images: &'a ImageRegistry,
-    theme: &'a Theme,
-    dispatcher: &'a ExtensionDispatcher,
-) -> WidgetEnv<'a> {
-    WidgetEnv {
-        caches: ext_caches,
-        images,
-        theme,
-        render_ctx: RenderContext {
-            caches: widget_caches,
-            images,
-            theme,
-            extensions: dispatcher,
-        },
-        default_text_size: widget_caches.default_text_size,
-        default_font: widget_caches.default_font,
+///
+/// With customization:
+///
+/// ```ignore
+/// let test = TestEnv {
+///     theme: Theme::Light,
+///     ..TestEnv::default()
+/// };
+/// let env = test.env();
+/// ```
+pub struct TestEnv {
+    pub ext_caches: ExtensionCaches,
+    pub widget_caches: WidgetCaches,
+    pub images: ImageRegistry,
+    pub theme: Theme,
+    pub dispatcher: ExtensionDispatcher,
+}
+
+impl Default for TestEnv {
+    fn default() -> Self {
+        Self {
+            ext_caches: ExtensionCaches::new(),
+            widget_caches: WidgetCaches::new(),
+            images: ImageRegistry::new(),
+            theme: Theme::Dark,
+            dispatcher: ExtensionDispatcher::new(vec![]),
+        }
     }
 }
+
+impl TestEnv {
+    /// Borrow a [`WidgetEnv`] from the owned test state.
+    pub fn env(&self) -> WidgetEnv<'_> {
+        WidgetEnv {
+            caches: &self.ext_caches,
+            images: &self.images,
+            theme: &self.theme,
+            render_ctx: RenderContext {
+                caches: &self.widget_caches,
+                images: &self.images,
+                theme: &self.theme,
+                extensions: &self.dispatcher,
+            },
+            default_text_size: self.widget_caches.default_text_size,
+            default_font: self.widget_caches.default_font,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extensions::GenerationCounter;
+    use crate::prop_helpers::{prop_f32, prop_str};
+
+    // -- TreeNode constructors ------------------------------------------------
 
     #[test]
-    fn test_node_creation() {
+    fn node_has_empty_props_and_no_children() {
         let n = node("btn-1", "button");
         assert_eq!(n.id, "btn-1");
         assert_eq!(n.type_name, "button");
@@ -118,150 +145,98 @@ mod tests {
     }
 
     #[test]
-    fn test_node_with_props() {
+    fn node_with_props_stores_props() {
         let n = node_with_props("txt-1", "text", json!({"content": "hello", "size": 14}));
-        assert_eq!(n.id, "txt-1");
-        assert_eq!(n.type_name, "text");
         assert_eq!(n.props["content"], "hello");
         assert_eq!(n.props["size"], 14);
     }
 
     #[test]
-    fn test_node_with_children() {
+    fn node_with_children_stores_children() {
         let children = vec![node("a", "text"), node("b", "button")];
         let n = node_with_children("col-1", "column", children);
-        assert_eq!(n.id, "col-1");
         assert_eq!(n.children.len(), 2);
         assert_eq!(n.children[0].id, "a");
         assert_eq!(n.children[1].id, "b");
     }
 
     #[test]
-    fn test_widget_caches_creation() {
-        let c = widget_caches();
-        assert!(c.editor_contents.is_empty());
-        assert!(c.combo_states.is_empty());
-    }
-
-    #[test]
-    fn test_ext_caches_creation() {
-        let c = ext_caches();
-        assert!(!c.contains("test", "anything"));
-    }
-
-    #[test]
-    fn test_ext_caches_insert_and_get() {
-        let mut c = ext_caches();
-        c.insert("ns", "counter", 42u32);
-        assert_eq!(c.get::<u32>("ns", "counter"), Some(&42));
-        assert!(c.contains("ns", "counter"));
-    }
-
-    #[test]
-    fn test_node_with_props_and_prop_helpers() {
-        use crate::prop_helpers::{prop_f32, prop_str};
-
+    fn node_props_work_with_prop_helpers() {
         let n = node_with_props("s-1", "sparkline", json!({"label": "cpu", "max": 100.0}));
-        assert_eq!(prop_str(&n, "label"), Some("cpu".to_string()));
-        assert!((prop_f32(&n, "max").unwrap() - 100.0).abs() < 0.001);
+        let props = n.props.as_object();
+        assert_eq!(prop_str(props, "label"), Some("cpu".to_string()));
+        assert!((prop_f32(props, "max").unwrap() - 100.0).abs() < 0.001);
     }
 
-    #[test]
-    fn test_image_registry_creation() {
-        let r = image_registry();
-        assert!(r.get("nonexistent").is_none());
-    }
+    // -- TestEnv --------------------------------------------------------------
 
     #[test]
-    fn test_dispatcher_creation() {
-        let d = dispatcher();
-        assert!(d.is_empty());
-        assert!(!d.handles_type("anything"));
-    }
-
-    #[test]
-    fn test_widget_env_with() {
-        use iced::Theme;
-
-        let wc = widget_caches();
-        let ec = ext_caches();
-        let images = image_registry();
-        let theme = Theme::Dark;
-        let disp = dispatcher();
-
-        let env = widget_env_with(&ec, &wc, &images, &theme, &disp);
-
-        // Verify env fields are accessible and point to our instances
-        assert!(!env.caches.contains("test", "anything"));
-        assert!(env.render_ctx.extensions.is_empty());
-        // Default text size and font should be None when WidgetCaches are fresh.
+    fn default_env_has_no_text_defaults() {
+        let test = TestEnv::default();
+        let env = test.env();
         assert!(env.default_text_size.is_none());
         assert!(env.default_font.is_none());
     }
 
     #[test]
-    fn test_widget_env_inherits_text_defaults() {
-        use iced::{Font, Theme};
+    fn default_env_has_empty_state() {
+        let test = TestEnv::default();
+        let env = test.env();
+        assert!(!env.caches.contains("test", "anything"));
+        assert!(env.render_ctx.extensions.is_empty());
+    }
 
-        let mut wc = widget_caches();
-        wc.default_text_size = Some(18.0);
-        wc.default_font = Some(Font::MONOSPACE);
+    #[test]
+    fn env_inherits_text_defaults() {
+        let test = TestEnv {
+            widget_caches: {
+                let mut wc = WidgetCaches::new();
+                wc.default_text_size = Some(18.0);
+                wc.default_font = Some(iced::Font::MONOSPACE);
+                wc
+            },
+            ..TestEnv::default()
+        };
 
-        let ec = ext_caches();
-        let images = image_registry();
-        let theme = Theme::Dark;
-        let disp = dispatcher();
-
-        let env = widget_env_with(&ec, &wc, &images, &theme, &disp);
-
+        let env = test.env();
         assert_eq!(env.default_text_size, Some(18.0));
-        assert_eq!(env.default_font, Some(Font::MONOSPACE));
+        assert_eq!(env.default_font, Some(iced::Font::MONOSPACE));
     }
 
     #[test]
-    fn test_generation_counter_starts_at_zero() {
-        use crate::extensions::GenerationCounter;
-
-        let counter = GenerationCounter::new();
-        assert_eq!(counter.get(), 0);
+    fn env_theme_is_customizable() {
+        let test = TestEnv {
+            theme: Theme::Light,
+            ..TestEnv::default()
+        };
+        let _env = test.env();
     }
 
-    #[test]
-    fn test_generation_counter_default() {
-        use crate::extensions::GenerationCounter;
-
-        let counter = GenerationCounter::default();
-        assert_eq!(counter.get(), 0);
-    }
+    // -- GenerationCounter in ExtensionCaches ---------------------------------
 
     #[test]
-    fn test_generation_counter_bump() {
-        use crate::extensions::GenerationCounter;
-
+    fn generation_counter_lifecycle() {
         let mut counter = GenerationCounter::new();
+        assert_eq!(counter.get(), 0);
         counter.bump();
-        assert_eq!(counter.get(), 1);
         counter.bump();
-        counter.bump();
-        assert_eq!(counter.get(), 3);
+        assert_eq!(counter.get(), 2);
     }
 
     #[test]
-    fn test_generation_counter_in_ext_caches() {
-        use crate::extensions::GenerationCounter;
+    fn generation_counter_in_caches() {
+        let mut test = TestEnv::default();
+        test.ext_caches
+            .insert("spark", "spark-1:gen", GenerationCounter::new());
 
-        let mut caches = ext_caches();
-        caches.insert("spark", "spark-1:gen", GenerationCounter::new());
-
-        let counter = caches
+        let counter = test
+            .ext_caches
             .get_mut::<GenerationCounter>("spark", "spark-1:gen")
             .unwrap();
-        assert_eq!(counter.get(), 0);
         counter.bump();
-        assert_eq!(counter.get(), 1);
 
-        // Re-borrow to verify persistence
-        let counter = caches
+        let counter = test
+            .ext_caches
             .get::<GenerationCounter>("spark", "spark-1:gen")
             .unwrap();
         assert_eq!(counter.get(), 1);

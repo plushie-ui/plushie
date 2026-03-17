@@ -3,83 +3,16 @@ use iced::widget::{
     button, checkbox, container, pick_list, progress_bar, rule, slider, text_editor, text_input,
     toggler,
 };
-use iced::{
-    Border, Color, ContentFit, Fill, Font, Length, Padding, Pixels, Radians, Shadow, Vector,
-    alignment, font, mouse,
-};
+use iced::{Border, Color, Font, Length, Padding, Pixels, Radians, Shadow, Vector, font, mouse};
 use serde_json::Value;
 
+// Re-export all public prop helpers so widget submodules using `use super::*`
+// continue to find them without changes.
+pub(crate) use crate::prop_helpers::*;
+
 // ---------------------------------------------------------------------------
-// Prop helpers
+// Widget-internal helpers not in prop_helpers
 // ---------------------------------------------------------------------------
-
-pub(crate) type Props<'a> = Option<&'a serde_json::Map<String, Value>>;
-
-pub(crate) fn prop_str<'a>(props: Props<'a>, key: &str) -> Option<String> {
-    props?.get(key)?.as_str().map(str::to_owned)
-}
-
-pub(crate) fn prop_f32(props: Props<'_>, key: &str) -> Option<f32> {
-    let val = props?.get(key)?;
-    match val {
-        Value::Number(n) => n.as_f64().map(|v| v as f32),
-        Value::String(s) => s.trim().parse::<f32>().ok(),
-        _ => None,
-    }
-}
-
-pub(crate) fn prop_f64(props: Props<'_>, key: &str) -> Option<f64> {
-    let val = props?.get(key)?;
-    match val {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.trim().parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
-pub(crate) fn prop_bool(props: Props<'_>, key: &str) -> Option<bool> {
-    props?.get(key)?.as_bool()
-}
-
-/// Read a boolean prop with a default value.
-pub(crate) fn prop_bool_default(props: Props<'_>, key: &str, default: bool) -> bool {
-    prop_bool(props, key).unwrap_or(default)
-}
-
-pub(crate) fn prop_length(props: Props<'_>, key: &str, fallback: Length) -> Length {
-    props
-        .and_then(|p| p.get(key))
-        .and_then(value_to_length)
-        .unwrap_or(fallback)
-}
-
-pub(crate) fn value_to_length(val: &Value) -> Option<Length> {
-    match val {
-        Value::Number(n) => n
-            .as_f64()
-            .map(|v| v as f32)
-            .filter(|v| *v >= 0.0)
-            .map(Length::Fixed),
-        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
-            "fill" | "full" | "expand" | "stretch" => Some(Fill),
-            "shrink" | "auto" | "fit" => Some(Length::Shrink),
-            other => other
-                .parse::<f32>()
-                .ok()
-                .filter(|v| *v >= 0.0)
-                .map(Length::Fixed),
-        },
-        Value::Object(obj) => {
-            // Handle {"fill_portion": N}
-            if let Some(n) = obj.get("fill_portion").and_then(|v| v.as_u64()) {
-                Some(Length::FillPortion(n as u16))
-            } else {
-                Some(Length::Shrink)
-            }
-        }
-        _ => None,
-    }
-}
 
 /// Try to parse a length from an optional Value. Returns None if the value
 /// is absent or unparseable (unlike prop_length which returns a fallback).
@@ -161,78 +94,6 @@ pub(crate) fn parse_padding_value(props: Props<'_>) -> Padding {
     }
 }
 
-pub(crate) fn prop_horizontal_alignment(props: Props<'_>, key: &str) -> alignment::Horizontal {
-    props
-        .and_then(|p| p.get(key))
-        .and_then(|v| v.as_str())
-        .and_then(value_to_horizontal_alignment)
-        .unwrap_or(alignment::Horizontal::Left)
-}
-
-pub(crate) fn prop_vertical_alignment(props: Props<'_>, key: &str) -> alignment::Vertical {
-    props
-        .and_then(|p| p.get(key))
-        .and_then(|v| v.as_str())
-        .and_then(value_to_vertical_alignment)
-        .unwrap_or(alignment::Vertical::Top)
-}
-
-pub(crate) fn value_to_horizontal_alignment(s: &str) -> Option<alignment::Horizontal> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "left" | "start" => Some(alignment::Horizontal::Left),
-        "center" => Some(alignment::Horizontal::Center),
-        "right" | "end" => Some(alignment::Horizontal::Right),
-        _ => None,
-    }
-}
-
-pub(crate) fn value_to_vertical_alignment(s: &str) -> Option<alignment::Vertical> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "top" | "start" => Some(alignment::Vertical::Top),
-        "center" => Some(alignment::Vertical::Center),
-        "bottom" | "end" => Some(alignment::Vertical::Bottom),
-        _ => None,
-    }
-}
-
-/// Parse a "range" prop as [min, max] into an inclusive range of f32.
-pub(crate) fn prop_range_f32(props: Props<'_>) -> std::ops::RangeInclusive<f32> {
-    props
-        .and_then(|p| p.get("range"))
-        .and_then(|v| v.as_array())
-        .and_then(|arr| {
-            let min = arr.first()?.as_f64()? as f32;
-            let max = arr.get(1)?.as_f64()? as f32;
-            Some(min..=max)
-        })
-        .unwrap_or(0.0..=100.0)
-}
-
-/// Parse a "range" prop as [min, max] into an inclusive range of f64.
-pub(crate) fn prop_range_f64(props: Props<'_>) -> std::ops::RangeInclusive<f64> {
-    props
-        .and_then(|p| p.get("range"))
-        .and_then(|v| v.as_array())
-        .and_then(|arr| {
-            let min = arr.first()?.as_f64()?;
-            let max = arr.get(1)?.as_f64()?;
-            Some(min..=max)
-        })
-        .unwrap_or(0.0..=100.0)
-}
-
-pub(crate) fn prop_content_fit(props: Props<'_>) -> Option<ContentFit> {
-    let s = prop_str(props, "content_fit")?;
-    match s.to_ascii_lowercase().as_str() {
-        "contain" => Some(ContentFit::Contain),
-        "cover" => Some(ContentFit::Cover),
-        "fill" => Some(ContentFit::Fill),
-        "none" => Some(ContentFit::None),
-        "scale_down" => Some(ContentFit::ScaleDown),
-        _ => None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Mouse interaction (cursor) parsing
 // ---------------------------------------------------------------------------
@@ -268,53 +129,10 @@ pub(crate) fn parse_interaction(s: &str) -> Option<mouse::Interaction> {
 }
 
 // ---------------------------------------------------------------------------
-// Color parsing -- hex string "#rrggbb" / "#rrggbbaa" or {r,g,b,a} object
+// Color parsing -- {r,g,b,a} object or hex string via theming::parse_hex_color
 // ---------------------------------------------------------------------------
 
-pub(crate) fn parse_hex_color(s: &str) -> Option<Color> {
-    let s = s.strip_prefix('#').unwrap_or(s);
-    match s.len() {
-        3 => {
-            // #rgb -> #rrggbb
-            let mut expanded = String::with_capacity(6);
-            for c in s.chars() {
-                expanded.push(c);
-                expanded.push(c);
-            }
-            let r = u8::from_str_radix(&expanded[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&expanded[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&expanded[4..6], 16).ok()?;
-            Some(Color::from_rgb8(r, g, b))
-        }
-        4 => {
-            // #rgba -> #rrggbbaa
-            let mut expanded = String::with_capacity(8);
-            for c in s.chars() {
-                expanded.push(c);
-                expanded.push(c);
-            }
-            let r = u8::from_str_radix(&expanded[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&expanded[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&expanded[4..6], 16).ok()?;
-            let a = u8::from_str_radix(&expanded[6..8], 16).ok()?;
-            Some(Color::from_rgba8(r, g, b, a as f32 / 255.0))
-        }
-        6 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            Some(Color::from_rgb8(r, g, b))
-        }
-        8 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            let a = u8::from_str_radix(&s[6..8], 16).ok()?;
-            Some(Color::from_rgba8(r, g, b, a as f32 / 255.0))
-        }
-        _ => None,
-    }
-}
+pub(crate) use crate::theming::parse_hex_color;
 
 /// Parse a color from a JSON value. Accepts:
 /// - A hex string: "#rrggbb" or "#rrggbbaa"
@@ -705,12 +523,6 @@ pub(crate) fn auto_derive_disabled_shadow(shadow: Shadow) -> Shadow {
         color: alpha_color(shadow.color, 0.5),
         ..shadow
     }
-}
-
-/// Parse a color prop from a props map by key. Accepts hex strings and
-/// {r,g,b,a} objects, same as `parse_color`.
-pub(crate) fn prop_color(props: Props<'_>, key: &str) -> Option<Color> {
-    props?.get(key).and_then(parse_color)
 }
 
 /// Apply style map fields to a button style. Background wraps in `Some`,
@@ -1144,6 +956,7 @@ pub(crate) fn parse_pick_list_handle(props: Props<'_>) -> Option<pick_list::Hand
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::Fill;
     use serde_json::json;
 
     /// Helper: build a Props from a json! value. The value must be an object.
