@@ -984,6 +984,71 @@ pub(crate) fn parse_wrapping(props: Props<'_>) -> Option<Wrapping> {
     }
 }
 
+pub(crate) fn parse_ellipsis(props: Props<'_>) -> Option<iced::widget::text::Ellipsis> {
+    use iced::widget::text::Ellipsis;
+    let s = prop_str(props, "ellipsis")?;
+    match s.to_ascii_lowercase().as_str() {
+        "none" => Some(Ellipsis::None),
+        "start" => Some(Ellipsis::Start),
+        "middle" => Some(Ellipsis::Middle),
+        "end" => Some(Ellipsis::End),
+        _ => {
+            log::warn!("unknown ellipsis value {:?}, ignoring", s);
+            None
+        }
+    }
+}
+
+/// Parsed menu style overrides for pick_list/combo_box dropdown menus.
+#[derive(Clone)]
+pub(crate) struct MenuStyleOverrides {
+    pub background: Option<iced::Background>,
+    pub text_color: Option<Color>,
+    pub selected_text_color: Option<Color>,
+    pub selected_background: Option<iced::Background>,
+    pub border: Option<Border>,
+    pub shadow: Option<Shadow>,
+}
+
+/// Parse a `menu_style` prop into overrides for dropdown menu styling.
+pub(crate) fn parse_menu_style(props: Props<'_>) -> Option<MenuStyleOverrides> {
+    let obj = props?.get("menu_style")?.as_object()?;
+
+    Some(MenuStyleOverrides {
+        background: obj.get("background").and_then(parse_background),
+        text_color: obj.get("text_color").and_then(parse_color),
+        selected_text_color: obj.get("selected_text_color").and_then(parse_color),
+        selected_background: obj.get("selected_background").and_then(parse_background),
+        border: obj.get("border").map(parse_border),
+        shadow: obj.get("shadow").map(parse_shadow),
+    })
+}
+
+/// Apply `MenuStyleOverrides` on top of a base `menu::Style`.
+pub(crate) fn apply_menu_style_overrides(
+    style: &mut iced::overlay::menu::Style,
+    ov: &MenuStyleOverrides,
+) {
+    if let Some(bg) = ov.background {
+        style.background = bg;
+    }
+    if let Some(tc) = ov.text_color {
+        style.text_color = tc;
+    }
+    if let Some(stc) = ov.selected_text_color {
+        style.selected_text_color = stc;
+    }
+    if let Some(sbg) = ov.selected_background {
+        style.selected_background = sbg;
+    }
+    if let Some(brd) = ov.border {
+        style.border = brd;
+    }
+    if let Some(shd) = ov.shadow {
+        style.shadow = shd;
+    }
+}
+
 /// Parse a text_input::Icon from a JSON value.
 pub(crate) fn parse_text_input_icon(value: &Value) -> Option<text_input::Icon<Font>> {
     let obj = value.as_object()?;

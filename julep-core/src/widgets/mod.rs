@@ -5,9 +5,9 @@ mod input;
 mod interactive;
 mod layout;
 mod table;
-#[cfg(debug_assertions)]
 mod validate;
 use helpers::*;
+pub use validate::{is_validate_props_enabled, set_validate_props};
 
 // Re-alias iced canvas to avoid shadowing by the `canvas` submodule.
 use iced::widget::canvas as iced_canvas;
@@ -418,8 +418,9 @@ pub fn render<'a>(
             .into();
     }
 
-    #[cfg(debug_assertions)]
-    validate::validate_props(node);
+    if validate::is_validate_props_enabled() {
+        validate::validate_props(node);
+    }
 
     let element = match node.type_name.as_str() {
         // Layout widgets

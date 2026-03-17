@@ -1,5 +1,23 @@
+use std::sync::OnceLock;
+
 use crate::protocol::TreeNode;
 use serde_json::Value;
+
+/// Global flag to enable prop validation in release builds.
+/// Set via `set_validate_props(true)` during settings init.
+/// In debug builds, validation always runs regardless of this flag.
+static VALIDATE_PROPS: OnceLock<bool> = OnceLock::new();
+
+/// Enable or disable prop validation at runtime. Called once during
+/// settings initialization. Returns false if already set.
+pub fn set_validate_props(enabled: bool) -> bool {
+    VALIDATE_PROPS.set(enabled).is_ok()
+}
+
+/// Returns true if prop validation is enabled (debug build OR explicit opt-in).
+pub fn is_validate_props_enabled() -> bool {
+    cfg!(debug_assertions) || *VALIDATE_PROPS.get().unwrap_or(&false)
+}
 
 /// Prop type expectations for validation.
 #[derive(Debug, Clone, Copy)]
@@ -215,7 +233,7 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("on_scroll", Bool),
             ("cursor", Str),
         ],
-        "sensor" => &[("delay", Number)],
+        "sensor" => &[("delay", Number), ("anticipate", Number)],
         "space" => &[("width", Length), ("height", Length)],
         "rule" => &[
             ("direction", Str),
@@ -236,6 +254,8 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("line_height", Number),
             ("shaping", Str),
             ("handle", Any),
+            ("ellipsis", Str),
+            ("menu_style", Any),
             ("style", Any),
             ("on_open", Bool),
             ("on_close", Bool),
@@ -253,6 +273,8 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("on_option_hovered", Bool),
             ("on_open", Bool),
             ("on_close", Bool),
+            ("ellipsis", Str),
+            ("menu_style", Any),
         ],
         "text_editor" => &[
             ("placeholder", Str),

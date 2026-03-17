@@ -83,6 +83,20 @@ impl Core {
         }
     }
 
+    /// Compute a SHA-256 hash of the current tree (serialized as JSON).
+    /// Returns the hex-encoded hash string, or an empty string if no tree.
+    pub fn tree_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        match &self.tree.root() {
+            Some(root) => {
+                let json = serde_json::to_string(root).unwrap_or_default();
+                let hash = Sha256::digest(json.as_bytes());
+                format!("{:x}", hash)
+            }
+            None => String::new(),
+        }
+    }
+
     /// Resolve and cache a theme from a JSON prop value. Only re-resolves
     /// when the serialized JSON differs from the cached version.
     fn resolve_and_cache_theme(

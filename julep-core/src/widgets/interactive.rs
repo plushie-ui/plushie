@@ -227,6 +227,9 @@ pub(crate) fn render_sensor<'a>(
     if let Some(d) = prop_f64(props, "delay") {
         s = s.delay(Duration::from_millis(d as u64));
     }
+    if let Some(a) = prop_f32(props, "anticipate") {
+        s = s.anticipate(a);
+    }
 
     s.into()
 }

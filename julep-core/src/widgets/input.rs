@@ -1270,6 +1270,18 @@ pub(crate) fn render_pick_list<'a>(
     if let Some(handle) = parse_pick_list_handle(props) {
         pl = pl.handle(handle);
     }
+    if let Some(e) = parse_ellipsis(props) {
+        pl = pl.ellipsis(e);
+    }
+
+    // Menu style: inline style object for the dropdown menu
+    if let Some(ms) = parse_menu_style(props) {
+        pl = pl.menu_style(move |theme: &iced::Theme| {
+            let mut style = iced::overlay::menu::default(theme);
+            apply_menu_style_overrides(&mut style, &ms);
+            style
+        });
+    }
 
     // Style: string name or style map object
     if let Some(style_val) = props.and_then(|p| p.get("style")) {
@@ -1375,6 +1387,20 @@ pub(crate) fn render_combo_box<'a>(
     {
         cb = cb.icon(icon);
     }
+    if let Some(e) = parse_ellipsis(props) {
+        cb = cb.ellipsis(e);
+    }
+
+    // Menu style: inline overrides for the dropdown menu
+    if let Some(ms) = parse_menu_style(props) {
+        cb = cb.menu_style(move |theme: &iced::Theme| {
+            use iced::overlay::menu;
+            let mut style = menu::default(theme);
+            apply_menu_style_overrides(&mut style, &ms);
+            style
+        });
+    }
+
     if prop_bool_default(props, "on_option_hovered", false) {
         let hover_id = node.id.clone();
         cb = cb.on_option_hovered(move |val| Message::OptionHovered(hover_id.clone(), val));
