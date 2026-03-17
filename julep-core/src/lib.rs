@@ -1,55 +1,35 @@
 //! # julep-core
 //!
-//! Core library for the Julep desktop GUI framework. This crate provides the
-//! rendering engine, wire protocol handling, and widget infrastructure that
-//! powers the `julep` binary. The host process drives state and logic;
-//! this crate turns UI tree descriptions into native iced widgets.
-//!
-//! ## Feature flags
-//!
-//! Feature flags live on this crate and are re-exported by `julep`.
-//!
-//! **Widget features** (all enabled by `builtin-all`, which is on by default):
-//! - `widget-image` -- raster image widget (`iced/image`)
-//! - `widget-svg` -- SVG widget (`iced/svg`)
-//! - `widget-canvas` -- 2D canvas drawing surface (`iced/canvas`)
-//! - `widget-markdown` -- markdown rendering (`iced/markdown`)
-//! - `widget-highlighter` -- syntax highlighting for text_editor (`iced/highlighter`)
-//! - `widget-sysinfo` -- system info queries (`iced/sysinfo`)
-//! - `widget-qr-code` -- QR code generation (`iced/canvas` + `qrcode`)
-//!
-//! **Platform effect features:**
-//! - `dialogs` -- native file dialogs via `rfd`
-//! - `clipboard` -- clipboard read/write via `arboard`
-//! - `notifications` -- OS notifications via `notify-rust`
-//!
-//! Note: `headless` and `test-mode` features are defined in `julep` only,
-//! as they affect the binary entrypoint (iced_test Simulator vs real windows).
-//!
-//! **Feature flag interactions:**
-//! - `builtin-all` enables all `widget-*` features.
-//! - `widget-qr-code` requires `widget-canvas` (both use `iced/canvas`).
-//! - `widget-sysinfo` enables `iced/system` which pulls in additional
-//!   system information dependencies.
-//! - The `a11y` feature is independent and can be disabled without affecting
-//!   widget features: `--no-default-features --features builtin-all,dialogs,...`
+//! Core library for the julep renderer. This crate provides the rendering
+//! engine, wire protocol handling, widget infrastructure, and the extension
+//! SDK that powers the `julep` binary. The host process drives state and
+//! logic; this crate turns UI tree descriptions into native iced widgets.
 //!
 //! ## Module guide
 //!
+//! **Core engine:**
 //! - [`engine`] -- `Core` struct: pure state management decoupled from iced runtime
-//! - [`widgets`] -- tree node to iced widget rendering (all widget types)
-//! - [`protocol`] -- wire message parsing and event serialization
-//! - [`message`] -- `Message` enum, keyboard/mouse serialization helpers
 //! - [`tree`] -- tree data structure, patch application, window discovery
+//! - [`message`] -- `Message` enum, keyboard/mouse serialization helpers
+//!
+//! **Widgets:**
+//! - [`widgets`] -- tree node to iced widget rendering (all widget types)
+//! - [`overlay_widget`] -- custom `Widget` + `Overlay` impl for positioned overlays
+//!
+//! **Protocol:**
+//! - [`protocol`] -- wire message parsing and event serialization
 //! - [`codec`] -- wire codec: JSON + MessagePack encode/decode/framing
+//!
+//! **Platform:**
 //! - [`theming`] -- theme resolution, custom palette parsing, hex colors
 //! - [`effects`] -- platform effect handlers (file dialogs, clipboard, notifications)
 //! - [`image_registry`] -- in-memory image handle storage
-//! - [`overlay_widget`] -- custom `Widget` + `Overlay` impl for positioned overlays
+//!
+//! **Extension SDK:**
 //! - [`extensions`] -- `WidgetExtension` trait, `ExtensionDispatcher`, `ExtensionCaches`
 //! - [`app`] -- `JulepAppBuilder` for registering extensions
-//! - [`prop_helpers`] -- public prop extraction helpers for extension authors
 //! - [`prelude`] -- common re-exports for extension authors
+//! - [`prop_helpers`] -- public prop extraction helpers for extension authors
 //! - [`testing`] -- test factory helpers for extension authors
 
 #![deny(warnings)]
