@@ -124,6 +124,9 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("on_submit", Any),
             ("on_paste", Bool),
             ("align_x", Str),
+            ("placeholder_color", Color),
+            ("selection_color", Color),
+            ("ime_purpose", Str),
         ],
         "slider" => &[
             ("value", Number),
@@ -291,6 +294,9 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("style", Any),
             ("highlight_syntax", Str),
             ("highlight_theme", Str),
+            ("placeholder_color", Color),
+            ("selection_color", Color),
+            ("ime_purpose", Str),
         ],
         "overlay" => &[
             ("position", Str),
@@ -347,7 +353,15 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("sort_by", Str),
             ("sort_order", Str),
         ],
-        "pane_grid" => &[("spacing", Number), ("width", Length), ("height", Length)],
+        "pane_grid" => &[
+            ("spacing", Number),
+            ("width", Length),
+            ("height", Length),
+            ("min_size", Number),
+            ("leeway", Number),
+            ("divider_color", Color),
+            ("divider_width", Number),
+        ],
         "markdown" => &[
             ("content", Str),
             ("text_size", Number),
@@ -357,6 +371,8 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("code_size", Number),
             ("spacing", Number),
             ("width", Length),
+            ("link_color", Color),
+            ("code_theme", Str),
         ],
         "window" => &[("padding", Any), ("width", Length), ("height", Length)],
         _ => return, // Unknown widget type -- skip validation
