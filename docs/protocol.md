@@ -114,6 +114,7 @@ Sent as the first message. Configures the renderer.
     "vsync": true,
     "fonts": ["/path/to/font.ttf"],
     "scale_factor": 1.0,
+    "validate_props": false,
     "extension_config": {}
   }
 }
@@ -121,8 +122,20 @@ Sent as the first message. Configures the renderer.
 
 All fields inside `settings` are optional.
 
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `protocol_version` | number | 1 | Expected protocol version |
+| `default_text_size` | number | 16.0 | Default text size for all text widgets |
+| `default_font` | object | system | Default font descriptor (`{"family": "..."}`) |
+| `antialiasing` | bool | false | Enable anti-aliasing (startup only) |
+| `vsync` | bool | true | Enable VSync (startup only) |
+| `fonts` | array | [] | Paths to font files to load (startup only) |
+| `scale_factor` | number | 1.0 | Global scale factor (startup only) |
+| `validate_props` | bool | false | Enable prop validation warnings in release builds |
+| `extension_config` | object | {} | Configuration passed to widget extensions |
+
 **Startup-only fields** (ignored if sent after the first Settings):
-`antialiasing`, `vsync`, `fonts`, `scale_factor`.
+`antialiasing`, `vsync`, `fonts`, `scale_factor`, `validate_props`.
 
 **Runtime fields** (can be updated by sending Settings again):
 `default_text_size`, `default_font`, `extension_config`.
@@ -311,6 +324,10 @@ Perform an operation on a widget (focus, scroll, etc.).
 | `pane_swap` | `target`, `a`, `b` | Swap two panes |
 | `pane_maximize` | `target`, `pane` | Maximize a pane |
 | `pane_restore` | `target` | Restore maximized pane |
+| `tree_hash` | `tag` (optional) | Compute SHA-256 hash of current tree; response via query |
+| `load_font` | `data` (base64 TTF/OTF) | Load a font at runtime |
+| `list_images` | `tag` (optional) | List all image handle names; response via query |
+| `clear_images` | -- | Remove all in-memory image handles |
 
 ### WindowOp
 
@@ -394,13 +411,28 @@ Request a platform effect (file dialog, clipboard, notification).
 | Kind | Payload | Response |
 |------|---------|----------|
 | `file_open` | title, directory, filters | path |
+| `file_open_multiple` | title, directory, filters | paths (array) |
 | `file_save` | title, directory, filters, file_name | path |
 | `directory_select` | title, directory | path |
+| `directory_select_multiple` | title, directory | paths (array) |
 | `clipboard_read` | -- | text |
 | `clipboard_write` | text | -- |
+| `clipboard_read_html` | -- | html |
+| `clipboard_write_html` | html, alt_text (optional) | -- |
+| `clipboard_clear` | -- | -- |
 | `clipboard_read_primary` | -- | text (Linux only) |
 | `clipboard_write_primary` | text | text (Linux only) |
-| `notification` | title, body | -- |
+| `notification` | title, body, icon, timeout, urgency, sound | -- |
+
+**Notification options.** The `notification` effect accepts optional fields
+beyond `title` and `body`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `icon` | string | Icon name (freedesktop icon spec, e.g. `"dialog-information"`) |
+| `timeout` | number | Timeout in milliseconds |
+| `urgency` | string | `"low"`, `"normal"` (default), or `"critical"` |
+| `sound` | string | Sound theme name (e.g. `"message-new-instant"`) |
 
 ### ImageOp
 
@@ -753,21 +785,33 @@ props.
 
 | Widget | Prop | Type | Description |
 |--------|------|------|-------------|
+| `text` | `ellipsis` | string | Text overflow: `"none"`, `"default"`, or custom string |
+| `rich_text` | `wrapping` | string | Text wrapping mode |
+| `rich_text` | `ellipsis` | string | Text overflow: `"none"`, `"default"`, or custom string |
 | `text_input` | `placeholder_color` | hex color | Placeholder text colour |
 | `text_input` | `selection_color` | hex color | Text selection highlight |
+| `text_input` | `ime_purpose` | string | IME hint: `"terminal"`, `"normal"`, `"password"`, `"url"`, `"email"`, `"number"`, `"phone"`, `"name"` |
 | `text_editor` | `placeholder_color` | hex color | Placeholder text colour |
 | `text_editor` | `selection_color` | hex color | Text selection highlight |
+| `text_editor` | `ime_purpose` | string | IME hint (same values as text_input) |
 | `slider` | `rail_color` | hex color | Track rail colour |
 | `slider` | `rail_width` | number | Track rail thickness |
 | `vertical_slider` | `rail_color` | hex color | Track rail colour |
 | `vertical_slider` | `rail_width` | number | Track rail thickness |
 | `scrollable` | `scrollbar_color` | hex color | Scrollbar track colour |
 | `scrollable` | `scroller_color` | hex color | Scroller handle colour |
+| `pick_list` | `ellipsis` | string | Text overflow for selected value |
+| `pick_list` | `menu_style` | object | StyleMap overrides for the dropdown menu |
+| `combo_box` | `ellipsis` | string | Text overflow for selected value |
+| `combo_box` | `menu_style` | object | StyleMap overrides for the dropdown menu |
+| `combo_box` | `shaping` | string | Text shaping (`"basic"` or `"advanced"`) |
+| `grid` | `fluid` | number | Max cell width for fluid auto-wrapping columns |
 | `table` | `header_text_size` | number | Header row text size |
 | `table` | `row_text_size` | number | Body row text size |
 | `pane_grid` | `divider_color` | hex color | Pane divider colour |
 | `pane_grid` | `divider_width` | number | Pane divider thickness |
 | `markdown` | `link_color` | hex color | Hyperlink colour |
+| `markdown` | `code_theme` | string | Syntax highlighting theme for code blocks |
 
 **StyleMap `base` field.** A StyleMap object can include a `"base"` field
 naming a preset to extend. The style starts from the preset's defaults,
