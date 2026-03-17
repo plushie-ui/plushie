@@ -1012,18 +1012,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
-name = "cryoglyph"
-version = "0.1.0"
-source = "git+https://github.com/iced-rs/cryoglyph.git?rev=1d68895e9c4c9b73739f826e81c2e3012c155cce#1d68895e9c4c9b73739f826e81c2e3012c155cce"
-dependencies = [
- "cosmic-text",
- "etagere",
- "lru",
- "rustc-hash 2.1.1",
- "wgpu",
-]
-
-[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1681,7 +1669,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -2084,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "image",
  "julep-iced-core",
@@ -2100,7 +2088,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -2115,8 +2103,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "julep-iced-cryoglyph"
+version = "0.6.1"
+dependencies = [
+ "cosmic-text",
+ "etagere",
+ "lru",
+ "rustc-hash 2.1.1",
+ "wgpu",
+]
+
+[[package]]
 name = "julep-iced-debug"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-core",
  "julep-iced-futures",
@@ -2125,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-futures"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "futures",
  "julep-iced-core",
@@ -2138,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-graphics"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2158,7 +2157,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-highlighter"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-core",
  "two-face",
@@ -2166,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-program"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-graphics",
  "julep-iced-runtime",
@@ -2174,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-renderer"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-graphics",
  "julep-iced-tiny-skia",
@@ -2185,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-runtime"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bytes",
  "julep-iced-core",
@@ -2196,14 +2195,14 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-selector"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-core",
 ]
 
 [[package]]
 name = "julep-iced-test"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-futures",
  "julep-iced-program",
@@ -2218,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-tiny-skia"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2234,14 +2233,14 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-wgpu"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
- "cryoglyph",
  "futures",
  "glam",
  "guillotiere",
+ "julep-iced-cryoglyph",
  "julep-iced-debug",
  "julep-iced-graphics",
  "log",
@@ -2254,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-widget"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "julep-iced-highlighter",
  "julep-iced-renderer",
@@ -2268,7 +2267,7 @@ dependencies = [
 
 [[package]]
 name = "julep-iced-winit"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -2278,6 +2277,7 @@ dependencies = [
  "julep-iced-runtime",
  "log",
  "mundy",
+ "objc2 0.5.2",
  "rustc-hash 2.1.1",
  "sysinfo",
  "thiserror 2.0.18",
