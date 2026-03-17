@@ -23,8 +23,11 @@ pub use crate::image_registry::ImageRegistry;
 // Prop helpers
 pub use crate::prop_helpers::*;
 
-// Commonly needed iced types (sourced via crate::iced re-export)
-pub use crate::iced::widget::{column, container, row, text};
+// Commonly needed iced widget constructors (sourced via crate::iced re-export)
+pub use crate::iced::widget::{
+    button, canvas, checkbox, column, container, image, pick_list, progress_bar, row, rule,
+    scrollable, slider, space, stack, text, toggler, tooltip,
+};
 pub use crate::iced::{Color, Element, Font, Length, Padding, Pixels, Theme};
 
 // JSON (extensions parse props from serde_json::Value)

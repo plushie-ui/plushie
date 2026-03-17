@@ -88,6 +88,37 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 ///
 /// # Examples
 ///
+/// # Prop helpers
+///
+/// The prelude re-exports typed prop extraction functions from
+/// [`crate::prop_helpers`] for reading values from `TreeNode.props`:
+///
+/// - `prop_str(node, "key") -> Option<String>`
+/// - `prop_f32(node, "key") -> Option<f32>`
+/// - `prop_f64(node, "key") -> Option<f64>`
+/// - `prop_i32(node, "key") -> Option<i32>`
+/// - `prop_i64(node, "key") -> Option<i64>`
+/// - `prop_u32(node, "key") -> Option<u32>`
+/// - `prop_u64(node, "key") -> Option<u64>`
+/// - `prop_usize(node, "key") -> Option<usize>`
+/// - `prop_bool(node, "key") -> Option<bool>`
+/// - `prop_bool_default(node, "key", default) -> bool`
+/// - `prop_length(node, "key", default) -> Length`
+/// - `prop_color(node, "key") -> Option<Color>` (parses `#RRGGBB` / `#RRGGBBAA`)
+/// - `prop_str_array(node, "key") -> Option<Vec<String>>`
+/// - `prop_f32_array(node, "key") -> Option<Vec<f32>>`
+/// - `prop_f64_array(node, "key") -> Option<Vec<f64>>`
+/// - `prop_range_f32(node) -> RangeInclusive<f32>` (reads `"range"` prop)
+/// - `prop_range_f64(node) -> RangeInclusive<f64>` (reads `"range"` prop)
+/// - `prop_object(node, "key") -> Option<&Map<String, Value>>`
+/// - `prop_value(node, "key") -> Option<&Value>` (raw JSON access)
+/// - `prop_horizontal_alignment(node, "key") -> alignment::Horizontal`
+/// - `prop_vertical_alignment(node, "key") -> alignment::Vertical`
+/// - `prop_content_fit(node) -> Option<ContentFit>`
+/// - `value_to_length(val) -> Option<Length>` (lower-level conversion)
+///
+/// # Examples
+///
 /// A minimal render-only extension that displays a greeting:
 ///
 /// ```rust,ignore
@@ -299,7 +330,26 @@ impl Default for ExtensionCaches {
 // WidgetEnv and RenderContext
 // ---------------------------------------------------------------------------
 
-/// Environment passed to extension render().
+/// Context provided to extension `render()` methods.
+///
+/// All fields are immutable references -- mutation happens in `prepare()`,
+/// reads happen here. This mirrors iced's `update()`/`view()` split.
+///
+/// # Available data
+///
+/// - `caches` -- immutable access to extension caches. Use
+///   `caches.get::<T>(config_key, node_id)` to read per-node state
+///   populated in `prepare()`.
+/// - `images` -- read-only access to the image registry for resolving
+///   image handles created via `create_image` commands.
+/// - `theme` -- current iced `Theme`. Use `theme.palette()` for color
+///   access (primary, background, text, etc.).
+/// - `render_ctx` -- render context for recursively rendering child nodes.
+///   Call `render_ctx.render_child(child_node)` to produce an `Element`
+///   for a child `TreeNode`.
+/// - `default_text_size` -- global default text size from the host's
+///   Settings message, if set. `None` means iced's built-in default.
+/// - `default_font` -- global default font from Settings, if set.
 pub struct WidgetEnv<'a> {
     pub caches: &'a ExtensionCaches,
     pub images: &'a ImageRegistry,
