@@ -144,20 +144,18 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
         Message::MouseAreaScroll(id, dx, dy) => {
             Some(OutgoingEvent::mouse_area_scroll(id.clone(), *dx, *dy))
         }
-        Message::ScrollEvent(id, abs_x, abs_y, rel_x, rel_y, bw, bh, cw, ch) => {
-            Some(OutgoingEvent::scroll(
-                id.clone(),
-                *abs_x,
-                *abs_y,
-                *rel_x,
-                *rel_y,
-                *bw,
-                *bh,
-                *cw,
-                *ch,
-            ))
-        }
-        Message::Event(id, data, family) => {
+        Message::ScrollEvent(id, viewport) => Some(OutgoingEvent::scroll(
+            id.clone(),
+            viewport.absolute_x,
+            viewport.absolute_y,
+            viewport.relative_x,
+            viewport.relative_y,
+            viewport.viewport_width,
+            viewport.viewport_height,
+            viewport.content_width,
+            viewport.content_height,
+        )),
+        Message::Event { id, data, family } => {
             let data_opt = if data.is_null() {
                 None
             } else {
@@ -259,11 +257,11 @@ mod tests {
 
     #[test]
     fn message_to_event_generic_event() {
-        let msg = Message::Event(
-            "node1".into(),
-            serde_json::json!({"key": "value"}),
-            "custom_family".into(),
-        );
+        let msg = Message::Event {
+            id: "node1".into(),
+            data: serde_json::json!({"key": "value"}),
+            family: "custom_family".into(),
+        };
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "custom_family");
         assert_eq!(event.id, "node1");
@@ -272,7 +270,11 @@ mod tests {
 
     #[test]
     fn message_to_event_generic_null_data() {
-        let msg = Message::Event("node1".into(), serde_json::Value::Null, "fam".into());
+        let msg = Message::Event {
+            id: "node1".into(),
+            data: serde_json::Value::Null,
+            family: "fam".into(),
+        };
         let event = message_to_event(&msg).unwrap();
         assert!(event.data.is_none());
     }

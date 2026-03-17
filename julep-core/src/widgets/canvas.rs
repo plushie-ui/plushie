@@ -683,45 +683,45 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         match event {
             iced::Event::Mouse(mouse::Event::ButtonPressed(button)) if self.on_press => {
                 let btn_str = serialize_mouse_button_for_canvas(button);
-                Some(iced::widget::Action::publish(Message::CanvasEvent(
-                    self.id.clone(),
-                    "press".to_string(),
-                    position.x,
-                    position.y,
-                    btn_str,
-                )))
+                Some(iced::widget::Action::publish(Message::CanvasEvent {
+                    id: self.id.clone(),
+                    kind: "press".to_string(),
+                    x: position.x,
+                    y: position.y,
+                    extra: btn_str,
+                }))
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(button)) if self.on_release => {
                 let btn_str = serialize_mouse_button_for_canvas(button);
-                Some(iced::widget::Action::publish(Message::CanvasEvent(
-                    self.id.clone(),
-                    "release".to_string(),
-                    position.x,
-                    position.y,
-                    btn_str,
-                )))
+                Some(iced::widget::Action::publish(Message::CanvasEvent {
+                    id: self.id.clone(),
+                    kind: "release".to_string(),
+                    x: position.x,
+                    y: position.y,
+                    extra: btn_str,
+                }))
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.on_move => {
-                Some(iced::widget::Action::publish(Message::CanvasEvent(
-                    self.id.clone(),
-                    "move".to_string(),
-                    position.x,
-                    position.y,
-                    String::new(),
-                )))
+                Some(iced::widget::Action::publish(Message::CanvasEvent {
+                    id: self.id.clone(),
+                    kind: "move".to_string(),
+                    x: position.x,
+                    y: position.y,
+                    extra: String::new(),
+                }))
             }
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) if self.on_scroll => {
                 let (dx, dy) = match delta {
                     mouse::ScrollDelta::Lines { x, y } => (*x, *y),
                     mouse::ScrollDelta::Pixels { x, y } => (*x, *y),
                 };
-                Some(iced::widget::Action::publish(Message::CanvasScroll(
-                    self.id.clone(),
-                    position.x,
-                    position.y,
-                    dx,
-                    dy,
-                )))
+                Some(iced::widget::Action::publish(Message::CanvasScroll {
+                    id: self.id.clone(),
+                    cursor_x: position.x,
+                    cursor_y: position.y,
+                    delta_x: dx,
+                    delta_y: dy,
+                }))
             }
             _ => None,
         }

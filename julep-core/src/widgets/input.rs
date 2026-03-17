@@ -250,11 +250,11 @@ fn parse_binding(val: &Value, id: &str) -> Option<text_editor::Binding<Message>>
             }
             if let Some(tag) = obj.get("custom").and_then(|v| v.as_str()) {
                 let event_id = id.to_string();
-                return Some(Binding::Custom(Message::Event(
-                    event_id,
-                    serde_json::json!(tag),
-                    "key_binding".to_string(),
-                )));
+                return Some(Binding::Custom(Message::Event {
+                    id: event_id,
+                    data: serde_json::json!(tag),
+                    family: "key_binding".to_string(),
+                }));
             }
             if let Some(seq) = obj.get("sequence").and_then(|v| v.as_array()) {
                 let bindings: Vec<_> = seq.iter().filter_map(|v| parse_binding(v, id)).collect();
@@ -1349,11 +1349,19 @@ pub(crate) fn render_pick_list<'a>(
 
     if prop_bool_default(props, "on_open", false) {
         let open_id = node.id.clone();
-        pl = pl.on_open(Message::Event(open_id, Value::Null, "open".into()));
+        pl = pl.on_open(Message::Event {
+            id: open_id,
+            data: Value::Null,
+            family: "open".into(),
+        });
     }
     if prop_bool_default(props, "on_close", false) {
         let close_id = node.id.clone();
-        pl = pl.on_close(Message::Event(close_id, Value::Null, "close".into()));
+        pl = pl.on_close(Message::Event {
+            id: close_id,
+            data: Value::Null,
+            family: "close".into(),
+        });
     }
 
     container(pl).id(widget::Id::from(node.id.clone())).into()
@@ -1437,11 +1445,19 @@ pub(crate) fn render_combo_box<'a>(
     }
     if prop_bool_default(props, "on_open", false) {
         let open_id = node.id.clone();
-        cb = cb.on_open(Message::Event(open_id, Value::Null, "open".into()));
+        cb = cb.on_open(Message::Event {
+            id: open_id,
+            data: Value::Null,
+            family: "open".into(),
+        });
     }
     if prop_bool_default(props, "on_close", false) {
         let close_id = node.id.clone();
-        cb = cb.on_close(Message::Event(close_id, Value::Null, "close".into()));
+        cb = cb.on_close(Message::Event {
+            id: close_id,
+            data: Value::Null,
+            family: "close".into(),
+        });
     }
 
     // Style: string name or style map object (applies to the input field)

@@ -528,14 +528,16 @@ pub(crate) fn render_scrollable<'a>(
             let content_bounds = viewport.content_bounds();
             Message::ScrollEvent(
                 scroll_id.clone(),
-                abs.x,
-                abs.y,
-                rel.x,
-                rel.y,
-                bounds.width,
-                bounds.height,
-                content_bounds.width,
-                content_bounds.height,
+                ScrollViewport {
+                    absolute_x: abs.x,
+                    absolute_y: abs.y,
+                    relative_x: rel.x,
+                    relative_y: rel.y,
+                    viewport_width: bounds.width,
+                    viewport_height: bounds.height,
+                    content_width: content_bounds.width,
+                    content_height: content_bounds.height,
+                },
             )
         });
     }

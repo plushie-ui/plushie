@@ -201,7 +201,11 @@ impl App {
             // need to emit dummy events or return special Tasks to force a
             // redraw; iced already takes care of the update-view-render
             // cycle.
-            Message::Event(ref id, ref data, ref family) => {
+            Message::Event {
+                ref id,
+                ref data,
+                ref family,
+            } => {
                 let result =
                     self.dispatcher
                         .handle_event(id, family, data, &mut self.core.caches.extension);
@@ -371,7 +375,13 @@ impl App {
                 emit_event(OutgoingEvent::sensor_resize(id, width, height));
                 Task::none()
             }
-            Message::CanvasEvent(id, kind, x, y, extra) => {
+            Message::CanvasEvent {
+                id,
+                kind,
+                x,
+                y,
+                extra,
+            } => {
                 match kind.as_str() {
                     "press" => emit_event(OutgoingEvent::canvas_press(id, x, y, extra)),
                     "release" => emit_event(OutgoingEvent::canvas_release(id, x, y, extra)),
@@ -380,8 +390,16 @@ impl App {
                 }
                 Task::none()
             }
-            Message::CanvasScroll(id, cx, cy, dx, dy) => {
-                emit_event(OutgoingEvent::canvas_scroll(id, cx, cy, dx, dy));
+            Message::CanvasScroll {
+                id,
+                cursor_x,
+                cursor_y,
+                delta_x,
+                delta_y,
+            } => {
+                emit_event(OutgoingEvent::canvas_scroll(
+                    id, cursor_x, cursor_y, delta_x, delta_y,
+                ));
                 Task::none()
             }
             Message::PaneResized(grid_id, evt) => self.handle_pane_resized(grid_id, evt),
@@ -394,19 +412,17 @@ impl App {
                 }
                 Task::none()
             }
-            Message::ScrollEvent(
-                id,
-                abs_x,
-                abs_y,
-                rel_x,
-                rel_y,
-                bounds_w,
-                bounds_h,
-                content_w,
-                content_h,
-            ) => {
+            Message::ScrollEvent(id, viewport) => {
                 emit_event(OutgoingEvent::scroll(
-                    id, abs_x, abs_y, rel_x, rel_y, bounds_w, bounds_h, content_w, content_h,
+                    id,
+                    viewport.absolute_x,
+                    viewport.absolute_y,
+                    viewport.relative_x,
+                    viewport.relative_y,
+                    viewport.viewport_width,
+                    viewport.viewport_height,
+                    viewport.content_width,
+                    viewport.content_height,
                 ));
                 Task::none()
             }

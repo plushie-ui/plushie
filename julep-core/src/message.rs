@@ -1,7 +1,14 @@
-// message.rs - Message enum and serialization helpers
-//
-// Extracted from main.rs so that julep-core modules (widgets, overlay_widget,
-// protocol) can reference Message without depending on the binary crate.
+//! Internal message enum and serialization helpers.
+//!
+//! [`Message`] is the iced `Message` type used by the renderer. Every
+//! widget interaction (click, input, slide, toggle, etc.) and every
+//! runtime event (keyboard, mouse, window lifecycle) maps to a variant.
+//! The renderer's `update()` method dispatches on these variants to
+//! emit outgoing events over the wire protocol.
+//!
+//! The serialization helpers convert iced types (keys, modifiers, mouse
+//! buttons, scroll deltas) into the wire-format strings expected by the
+//! host.
 
 use iced::widget::markdown;
 use iced::widget::text_editor;
@@ -11,8 +18,29 @@ use serde_json::Value;
 use crate::protocol::KeyModifiers;
 
 // ---------------------------------------------------------------------------
-// Keyboard event data
+// Event data structs
 // ---------------------------------------------------------------------------
+
+/// Scrollable viewport state, emitted on scroll position changes.
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollViewport {
+    /// Absolute scroll offset on the x axis (pixels from left).
+    pub absolute_x: f32,
+    /// Absolute scroll offset on the y axis (pixels from top).
+    pub absolute_y: f32,
+    /// Relative scroll position on the x axis (0.0 = start, 1.0 = end).
+    pub relative_x: f32,
+    /// Relative scroll position on the y axis (0.0 = top, 1.0 = bottom).
+    pub relative_y: f32,
+    /// Total content width (may exceed viewport).
+    pub content_width: f32,
+    /// Total content height (may exceed viewport).
+    pub content_height: f32,
+    /// Visible viewport width.
+    pub viewport_width: f32,
+    /// Visible viewport height.
+    pub viewport_height: f32,
+}
 
 /// All fields from an iced keyboard event, packed for Message transport.
 #[derive(Debug, Clone)]
@@ -109,10 +137,22 @@ pub enum Message {
     ThemeChanged(iced::theme::Mode),
     /// Sensor widget resize event (id, width, height).
     SensorResize(String, f32, f32),
-    /// Canvas interaction event (id, kind, x, y, extra).
-    CanvasEvent(String, String, f32, f32, String),
-    /// Canvas scroll event (id, cursor_x, cursor_y, delta_x, delta_y).
-    CanvasScroll(String, f32, f32, f32, f32),
+    /// Canvas interaction event (press, release, move).
+    CanvasEvent {
+        id: String,
+        kind: String,
+        x: f32,
+        y: f32,
+        extra: String,
+    },
+    /// Canvas scroll event.
+    CanvasScroll {
+        id: String,
+        cursor_x: f32,
+        cursor_y: f32,
+        delta_x: f32,
+        delta_y: f32,
+    },
     /// PaneGrid pane was resized (grid_id, resize_event).
     PaneResized(String, iced::widget::pane_grid::ResizeEvent),
     /// PaneGrid pane was dragged (grid_id, drag_event).
@@ -121,8 +161,8 @@ pub enum Message {
     PaneClicked(String, iced::widget::pane_grid::Pane),
     /// PaneGrid focus cycle via F6 (grid_id, target_pane).
     PaneFocusCycle(String, iced::widget::pane_grid::Pane),
-    /// Scrollable viewport changed (id, viewport data).
-    ScrollEvent(String, f32, f32, f32, f32, f32, f32, f32, f32),
+    /// Scrollable viewport changed.
+    ScrollEvent(String, ScrollViewport),
     /// Text was pasted into a text_input (id, pasted_text).
     Paste(String, String),
     /// ComboBox option was hovered (combo_id, option_value).
@@ -134,10 +174,13 @@ pub enum Message {
     MouseAreaMove(String, f32, f32),
     /// MouseArea scroll event (id, delta_x, delta_y).
     MouseAreaScroll(String, f32, f32),
-    /// Generic widget event (id, data, family).
-    /// Used for on_open, on_close, sort, and other events that carry a
-    /// family string and optional JSON data payload.
-    Event(String, Value, String),
+    /// Generic widget event. Used for on_open, on_close, sort, and
+    /// other events that carry a family string and optional data.
+    Event {
+        id: String,
+        data: Value,
+        family: String,
+    },
 }
 
 /// What the stdin reader thread sends back.

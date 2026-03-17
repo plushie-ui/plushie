@@ -110,11 +110,11 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                     let click_key = col.key.clone();
                     container(
                         button(text(label_text).size(header_text_size))
-                            .on_press(Message::Event(
-                                click_id,
-                                serde_json::json!({"column": click_key}),
-                                "sort".into(),
-                            ))
+                            .on_press(Message::Event {
+                                id: click_id,
+                                data: serde_json::json!({"column": click_key}),
+                                family: "sort".into(),
+                            })
                             .style(button::text),
                     )
                     .width(col.width)

@@ -36,7 +36,7 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use crate::extensions::ExtensionDispatcher;
-use crate::message::Message;
+use crate::message::{Message, ScrollViewport};
 
 /// Maximum recursion depth for tree walks (render, ensure_caches, prepare).
 /// Prevents stack overflow from pathologically nested trees. Normal UI trees
