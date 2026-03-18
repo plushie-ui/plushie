@@ -1,3 +1,9 @@
+//! Stdout emitters for the wire protocol.
+//!
+//! All renderer output (events, handshake, effect responses, query
+//! responses, screenshots) flows through this module. Each emitter
+//! encodes via the global [`Codec`] and writes to stdout.
+
 use std::io::{self, Write};
 
 use iced::Task;
@@ -29,9 +35,10 @@ pub(crate) fn write_stdout(bytes: &[u8]) -> io::Result<()> {
 // stdout event emitter
 // ---------------------------------------------------------------------------
 
-/// Emit an event to stdout. On failure, log and return an exit task.
-/// This is the standard error-handling pattern for event emission --
-/// a broken stdout pipe means the host is gone and we should shut down.
+/// Emit an event and return `Task::none()`, or log the error and return
+/// `iced::exit()` if the write fails. This is the standard pattern for
+/// event emission from `update()` -- a broken stdout pipe means the host
+/// is gone and we should shut down.
 pub(crate) fn emit_or_exit(event: OutgoingEvent) -> Task<Message> {
     if let Err(e) = emit_event(event) {
         log::error!("write error: {e}");
@@ -40,6 +47,8 @@ pub(crate) fn emit_or_exit(event: OutgoingEvent) -> Task<Message> {
     Task::none()
 }
 
+/// Encode and write an [`OutgoingEvent`] to stdout. Returns the I/O
+/// result so the caller can decide whether to exit or continue.
 pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(&event).map_err(io::Error::other)?;
@@ -69,6 +78,8 @@ pub(crate) fn emit_hello() -> io::Result<()> {
 // stdout effect response emitter
 // ---------------------------------------------------------------------------
 
+/// Encode and write an [`EffectResponse`](julep_core::protocol::EffectResponse)
+/// to stdout (file dialog results, clipboard data, etc.).
 pub(crate) fn emit_effect_response(
     response: julep_core::protocol::EffectResponse,
 ) -> io::Result<()> {
