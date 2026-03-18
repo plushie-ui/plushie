@@ -1,3 +1,10 @@
+//! Incoming wire messages and response types.
+//!
+//! [`IncomingMessage`] is the top-level enum deserialized from stdin.
+//! Each variant corresponds to a message type in the wire protocol
+//! (see `docs/protocol.md`). Response types ([`EffectResponse`],
+//! [`QueryResponse`], etc.) are serialized to stdout.
+
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -11,38 +18,35 @@ pub const PROTOCOL_VERSION: u32 = 1;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
-    Snapshot {
-        tree: TreeNode,
-    },
-    Patch {
-        ops: Vec<PatchOp>,
-    },
+    /// Replace the entire UI tree with a new snapshot.
+    Snapshot { tree: TreeNode },
+    /// Apply incremental changes to the retained UI tree.
+    Patch { ops: Vec<PatchOp> },
+    /// Request a platform effect (file dialog, clipboard, notification).
     EffectRequest {
         id: String,
         kind: String,
         payload: Value,
     },
+    /// Perform a widget operation (focus, scroll, select, etc.).
     WidgetOp {
         op: String,
         #[serde(default)]
         payload: Value,
     },
-    SubscriptionRegister {
-        kind: String,
-        tag: String,
-    },
-    SubscriptionUnregister {
-        kind: String,
-    },
+    /// Subscribe to a runtime event source (keyboard, mouse, window, etc.).
+    SubscriptionRegister { kind: String, tag: String },
+    /// Unsubscribe from a runtime event source.
+    SubscriptionUnregister { kind: String },
+    /// Perform a window operation (resize, move, close, etc.).
     WindowOp {
         op: String,
         window_id: String,
         #[serde(default)]
         settings: Value,
     },
-    Settings {
-        settings: Value,
-    },
+    /// Apply or update renderer settings.
+    Settings { settings: Value },
     /// Query the current tree or find a widget.
     Query {
         id: String,
@@ -60,6 +64,8 @@ pub enum IncomingMessage {
         payload: Value,
     },
     /// Capture a structural tree snapshot (hash of JSON tree).
+    // Used by the binary crate's headless and test modes. Appears dead
+    // from julep-core's perspective because the usage is in julep/.
     #[allow(dead_code)]
     SnapshotCapture {
         id: String,
@@ -80,9 +86,7 @@ pub enum IncomingMessage {
         height: Option<u32>,
     },
     /// Reset the app state.
-    Reset {
-        id: String,
-    },
+    Reset { id: String },
     /// Image operation (create, update, delete in-memory image handles).
     ///
     /// Binary fields (`data`, `pixels`) accept either raw bytes (from msgpack)
@@ -108,14 +112,10 @@ pub enum IncomingMessage {
         payload: Value,
     },
     /// A batch of extension commands processed in one cycle.
-    ExtensionCommandBatch {
-        commands: Vec<ExtensionCommandItem>,
-    },
+    ExtensionCommandBatch { commands: Vec<ExtensionCommandItem> },
     /// Advance the animation clock by one frame (headless/test mode).
     /// Emits an `animation_frame` event if `on_animation_frame` is subscribed.
-    AdvanceFrame {
-        timestamp: u64,
-    },
+    AdvanceFrame { timestamp: u64 },
 }
 
 /// A single item within an `ExtensionCommandBatch`.
@@ -141,6 +141,7 @@ pub struct EffectResponse {
 }
 
 impl EffectResponse {
+    /// The effect completed successfully with the given result.
     pub fn ok(id: String, result: Value) -> Self {
         Self {
             message_type: "effect_response",
@@ -151,6 +152,7 @@ impl EffectResponse {
         }
     }
 
+    /// The effect failed with the given reason.
     pub fn error(id: String, reason: String) -> Self {
         Self {
             message_type: "effect_response",
@@ -161,6 +163,7 @@ impl EffectResponse {
         }
     }
 
+    /// The requested effect kind is not supported.
     pub fn unsupported(id: String) -> Self {
         Self::error(id, "unsupported".to_string())
     }
@@ -279,6 +282,8 @@ impl ScreenshotResponseEmpty {
     }
 }
 
+// NOTE: This function lives in incoming.rs (alongside the response types it
+// references) but writes to stdout. A future refactor may move it to outgoing.rs.
 /// Emit a screenshot response with RGBA pixel data to stdout.
 ///
 /// Uses native msgpack binary (`rmpv::Value::Binary`) for pixel data when the
@@ -492,8 +497,21 @@ mod tests {
 
     #[test]
     fn deserialize_snapshot_nested_tree() {
-        let json = r#"{"type":"snapshot","tree":{"id":"root","type":"column","props":{"spacing":10},"children":[{"id":"c1","type":"text","props":{"content":"hello"},"children":[]}]}}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "snapshot",
+            "tree": {
+                "id": "root",
+                "type": "column",
+                "props": { "spacing": 10 },
+                "children": [{
+                    "id": "c1",
+                    "type": "text",
+                    "props": { "content": "hello" },
+                    "children": []
+                }]
+            }
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::Snapshot { tree } => {
                 assert_eq!(tree.children.len(), 1);
@@ -507,8 +525,20 @@ mod tests {
 
     #[test]
     fn deserialize_patch_replace_node() {
-        let json = r#"{"type":"patch","ops":[{"op":"replace_node","path":[0],"node":{"id":"x","type":"text","props":{},"children":[]}}]}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "patch",
+            "ops": [{
+                "op": "replace_node",
+                "path": [0],
+                "node": {
+                    "id": "x",
+                    "type": "text",
+                    "props": {},
+                    "children": []
+                }
+            }]
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::Patch { ops } => {
                 assert_eq!(ops.len(), 1);
@@ -522,8 +552,14 @@ mod tests {
 
     #[test]
     fn deserialize_patch_multiple_ops() {
-        let json = r#"{"type":"patch","ops":[{"op":"update_props","path":[0],"props":{"color":"red"}},{"op":"remove_child","path":[],"index":2}]}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "patch",
+            "ops": [
+                { "op": "update_props", "path": [0], "props": { "color": "red" } },
+                { "op": "remove_child", "path": [], "index": 2 }
+            ]
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::Patch { ops } => {
                 assert_eq!(ops.len(), 2);
@@ -550,8 +586,13 @@ mod tests {
 
     #[test]
     fn deserialize_effect_request_with_payload() {
-        let json = r#"{"type":"effect_request","id":"e2","kind":"clipboard_write","payload":{"text":"copied"}}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "effect_request",
+            "id": "e2",
+            "kind": "clipboard_write",
+            "payload": { "text": "copied" }
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::EffectRequest { id, kind, payload } => {
                 assert_eq!(id, "e2");
@@ -627,8 +668,13 @@ mod tests {
 
     #[test]
     fn deserialize_window_op() {
-        let json = r#"{"type":"window_op","op":"resize","window_id":"main","settings":{"width":800,"height":600}}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "window_op",
+            "op": "resize",
+            "window_id": "main",
+            "settings": { "width": 800, "height": 600 }
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::WindowOp {
                 op,
@@ -731,8 +777,13 @@ mod tests {
 
     #[test]
     fn extension_command_deserializes() {
-        let json = r#"{"type":"extension_command","node_id":"term-1","op":"write","payload":{"data":"hello"}}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "extension_command",
+            "node_id": "term-1",
+            "op": "write",
+            "payload": { "data": "hello" }
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::ExtensionCommand {
                 node_id,
@@ -749,8 +800,14 @@ mod tests {
 
     #[test]
     fn extension_command_batch_deserializes() {
-        let json = r#"{"type":"extension_command_batch","commands":[{"node_id":"term-1","op":"write","payload":{"data":"a"}},{"node_id":"log-1","op":"append","payload":{"line":"x"}}]}"#;
-        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "extension_command_batch",
+            "commands": [
+                { "node_id": "term-1", "op": "write", "payload": { "data": "a" } },
+                { "node_id": "log-1", "op": "append", "payload": { "line": "x" } }
+            ]
+        }))
+        .unwrap();
         match msg {
             IncomingMessage::ExtensionCommandBatch { commands } => {
                 assert_eq!(commands.len(), 2);
