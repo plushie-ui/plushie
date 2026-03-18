@@ -1,4 +1,4 @@
-//! Incoming wire messages deserialized from stdin.
+//! Incoming wire messages from the host process.
 
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;

@@ -1,32 +1,49 @@
-//! Outgoing wire messages: events and response types written to stdout.
+//! Outgoing wire messages: events and response types.
 //!
 //! [`OutgoingEvent`] is the main event struct emitted by the renderer.
 //! Response types ([`EffectResponse`], [`QueryResponse`], etc.) are
-//! serialized to stdout in reply to incoming messages.
+//! serialized in reply to incoming messages.
 
 use serde::Serialize;
 use serde_json::Value;
 
-/// Events written to stdout by the renderer.
+/// An event written to stdout by the renderer.
+///
+/// All events share a flat struct with optional fields. There are two
+/// constructor patterns:
+///
+/// - **Widget events** (click, input, toggle, etc.) use `id` to identify
+///   the source widget. Built via [`bare`](Self::bare).
+/// - **Subscription events** (key_press, cursor_moved, window_opened,
+///   etc.) use `tag` to identify the subscription that requested them.
+///   Built via [`tagged`](Self::tagged). The `id` field is empty.
+///
+/// Extension authors emit custom events via
+/// [`extension_event`](Self::extension_event).
 #[derive(Debug, Serialize)]
 pub struct OutgoingEvent {
+    /// Always `"event"`.
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    /// Event type (e.g. `"click"`, `"key_press"`, `"window_opened"`).
     pub family: String,
+    /// Source widget node ID (widget events) or empty (subscription events).
     pub id: String,
+    /// Primary value payload (e.g. input text, slider value, selected option).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
+    /// Subscription tag identifying which subscription requested this event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Keyboard modifier state at the time of the event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifiers: Option<KeyModifiers>,
     /// Flexible extra data for events that carry additional fields beyond
-    /// the standard id/value/tag/modifiers shape.  Serialized as a nested
-    /// `"data"` object.
+    /// the standard id/value/tag/modifiers shape.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
     /// Whether the event was captured (consumed) by an iced widget before
-    /// reaching the subscription listener.  Present on keyboard, mouse,
+    /// reaching the subscription listener. Present on keyboard, mouse,
     /// touch, and IME events; absent on widget-level events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub captured: Option<bool>,

@@ -1,7 +1,8 @@
 //! Wire protocol types for host-renderer communication.
 //!
-//! The renderer reads [`IncomingMessage`]s from stdin and writes
-//! [`OutgoingEvent`]s (plus response structs) to stdout.
+//! [`IncomingMessage`] is deserialized from the host. [`OutgoingEvent`]
+//! and response types are serialized back. The transport (stdin/stdout,
+//! socket, test harness) is handled by the binary crate, not here.
 
 mod incoming;
 mod outgoing;
