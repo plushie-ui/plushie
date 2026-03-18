@@ -1,3 +1,10 @@
+//! iced::daemon application: the main rendering loop.
+//!
+//! `App` owns the [`Core`](julep_core::engine::Core) state, reads
+//! messages from stdin, renders the UI tree, and emits events to
+//! stdout. Submodules handle stdin I/O, window operations, widget
+//! operations, and event emission.
+
 pub(crate) mod emitters;
 mod stdin;
 mod widget_ops;
