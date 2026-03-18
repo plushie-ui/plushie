@@ -1,3 +1,10 @@
+//! Main render dispatch: maps a [`TreeNode`] to an iced [`Element`].
+//!
+//! This is the immutable side of the ensure_caches/render split. All
+//! mutable cache state must be pre-populated by [`super::ensure_caches`]
+//! before calling [`render`]. Recursion depth is bounded by a
+//! thread-local counter.
+
 use std::cell::Cell;
 
 use iced::widget::{Space, container, text};
