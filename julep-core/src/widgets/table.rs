@@ -1,3 +1,5 @@
+//! Table widget: scrollable data grid with sortable columns.
+
 use iced::widget::{button, column, container, row, rule, scrollable, text};
 use iced::{Element, Fill, Length, alignment};
 use serde_json::Value;
