@@ -285,7 +285,7 @@ fn search_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<Value> {
     None
 }
 
-fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> {
+pub(crate) fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> {
     if depth > MAX_SEARCH_DEPTH {
         return None;
     }
@@ -307,7 +307,7 @@ fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> 
     None
 }
 
-fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String> {
+pub(crate) fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String> {
     if depth > MAX_SEARCH_DEPTH {
         return None;
     }
@@ -332,7 +332,7 @@ fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String
     None
 }
 
-fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
+pub(crate) fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
     if depth > MAX_SEARCH_DEPTH {
         return None;
     }
@@ -352,7 +352,7 @@ fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
     None
 }
 
-fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> {
+pub(crate) fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> {
     if depth > MAX_SEARCH_DEPTH {
         return None;
     }
