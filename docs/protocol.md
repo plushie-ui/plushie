@@ -760,6 +760,130 @@ headless modes for programmatic inspection and interaction:
 These are commonly used for integration testing but are always
 available as part of the standard protocol.
 
+### Interact flow
+
+The Interact message simulates user input. The renderer converts
+the action into iced events, injects them into the widget tree,
+and captures the resulting widget Messages.
+
+```json
+{
+  "type": "interact",
+  "session": "s1",
+  "id": "i1",
+  "action": "click",
+  "selector": {"by": "id", "value": "submit_btn"},
+  "payload": {}
+}
+```
+
+**Actions and their iced event mappings:**
+
+| Action | Iced events injected | Typical widget response |
+|--------|---------------------|------------------------|
+| `click` | CursorMoved, ButtonPressed, ButtonReleased | Click |
+| `toggle` | CursorMoved, ButtonPressed, ButtonReleased | Toggle |
+| `select` | CursorMoved, ButtonPressed, ButtonReleased | Select |
+| `type_text` | KeyPressed + KeyReleased per character | Input per char |
+| `type_key` | KeyPressed, KeyReleased | Depends on widget |
+| `press` | KeyPressed | Depends on widget |
+| `release` | KeyReleased | Depends on widget |
+| `submit` | KeyPressed(Enter), KeyReleased(Enter) | Submit |
+| `scroll` | WheelScrolled | Scroll |
+| `move_to` | CursorMoved | -- |
+| `slide` | synthetic only | Slide |
+| `paste` | synthetic only | Paste |
+| `sort` | synthetic only | Sort |
+| `canvas_press` | synthetic only | Canvas press |
+| `canvas_release` | synthetic only | Canvas release |
+| `canvas_move` | synthetic only | Canvas move |
+| `pane_focus_cycle` | synthetic only | Pane focus cycle |
+
+Actions marked **synthetic only** have no iced event equivalent
+(e.g. slider requires a precise mouse drag, paste has no iced
+input event). The renderer produces synthetic OutgoingEvents
+directly without widget processing.
+
+In **daemon mode**, all actions produce synthetic events regardless
+-- the interact protocol is a scripting convenience, not a
+substitute for real user input via iced subscriptions.
+
+#### Headless mode: iterative interact with round-trips
+
+In `--headless` mode, the renderer injects iced events one at a
+time. When an event produces widget Messages, the renderer emits
+an `interact_step` and waits for the host to process the events
+and send back a Snapshot with the updated tree before continuing.
+This matches production behaviour where each event triggers a full
+host round-trip.
+
+```
+Host -> Renderer:  interact(type_key, ...)
+Renderer -> Host:  interact_step(events: [key_press])
+Host -> Renderer:  snapshot(updated_tree)
+Renderer -> Host:  interact_step(events: [key_release])
+Host -> Renderer:  snapshot(updated_tree)
+Renderer -> Host:  interact_response(events: [])
+```
+
+The final `interact_response` carries an empty events list when
+steps were used (events were already delivered via steps). For
+actions with no iced events (synthetic-only), no steps are emitted
+and all events are in the final response.
+
+**interact_step:**
+
+```json
+{
+  "type": "interact_step",
+  "session": "s1",
+  "id": "i1",
+  "events": [{"type": "event", "session": "s1", "family": "click", "id": "btn1"}]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Always `"interact_step"` |
+| `session` | string | Session that produced this step |
+| `id` | string | Matches the interact request id |
+| `events` | array | OutgoingEvent objects captured from this iced event |
+
+The host must process the events (update model, re-render tree)
+and send a Snapshot or Patch back to the renderer before the next
+event is injected.
+
+**interact_response (final):**
+
+```json
+{
+  "type": "interact_response",
+  "session": "s1",
+  "id": "i1",
+  "events": []
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Always `"interact_response"` |
+| `session` | string | Session that produced this response |
+| `id` | string | Matches the interact request id |
+| `events` | array | Empty when steps were used; contains all events for synthetic/mock actions |
+
+The `interact_response` signals the interaction is complete. In
+headless mode with steps, the events list is empty (all events
+were delivered via prior `interact_step` messages). In mock mode
+or for synthetic-only actions, no steps are emitted and all events
+are in this final response.
+
+#### Mock mode: synthetic events
+
+In `--mock` mode, there is no iced renderer. All events are
+synthetic -- constructed from the action name and selector without
+widget processing. No `interact_step` messages are emitted. All
+events are in the final `interact_response`.
+
 ---
 
 ## Accessibility props
