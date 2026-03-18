@@ -1,3 +1,7 @@
+//! Widget operations: focus, scroll, cursor, pane grid, font loading,
+//! tree hash queries, image management. Dispatched from [`CoreEffect::WidgetOp`]
+//! via the `op` string and JSON `payload`.
+
 use iced::widget::pane_grid;
 use iced::{Task, window};
 
@@ -12,6 +16,9 @@ use super::emitters::emit_event;
 // ---------------------------------------------------------------------------
 
 impl App {
+    /// Dispatch a widget operation by name. Called when Core produces a
+    /// `WidgetOp` effect. Returns an iced `Task` for operations that
+    /// need async completion (focus, scroll, font load).
     pub(super) fn handle_widget_op(
         &mut self,
         op: &str,
@@ -224,23 +231,22 @@ impl App {
                 Task::none()
             }
             "find_focused" => {
-                // find_focused is not available in this iced version.
-                // Emit an empty response so the host doesn't hang.
                 let tag = payload
                     .get("tag")
                     .and_then(|v| v.as_str())
                     .unwrap_or("find_focused")
                     .to_string();
-                log::warn!("find_focused: not supported in this iced version");
-                if let Err(e) = super::emitters::emit_query_response(
-                    "find_focused",
-                    &tag,
-                    serde_json::json!({"focused": null, "error": "not supported"}),
-                ) {
-                    log::error!("write error: {e}");
-                    return iced::exit();
-                }
-                Task::none()
+                iced::widget::operation::find_focused().map(move |maybe_id| {
+                    let focused = maybe_id.map(|id| id.to_string());
+                    if let Err(e) = super::emitters::emit_query_response(
+                        "find_focused",
+                        &tag,
+                        serde_json::json!({"focused": focused}),
+                    ) {
+                        log::error!("write error: {e}");
+                    }
+                    Message::NoOp
+                })
             }
             "load_font" => {
                 let data = payload
@@ -313,6 +319,8 @@ impl App {
     // Image operations
     // -----------------------------------------------------------------------
 
+    /// Apply an image operation (create, update, remove) to the
+    /// in-memory image registry. Emits an error event on failure.
     pub(super) fn handle_image_op(
         &mut self,
         op: &str,
