@@ -328,7 +328,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -350,7 +352,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -375,7 +379,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -395,7 +401,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -415,7 +423,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -435,7 +445,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -464,7 +476,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -566,7 +580,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -592,7 +608,9 @@ impl App {
                             data["request_id"] = rid.clone();
                         }
                         let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
-                        emit_effect_response(resp);
+                        if let Err(e) = emit_effect_response(resp) {
+                            log::error!("write error: {e}");
+                        }
                         Message::NoOp
                     })
                 } else {
@@ -612,7 +630,11 @@ impl App {
                         iced::theme::Mode::Dark => "dark",
                         iced::theme::Mode::None => "none",
                     };
-                    emit_query_response("system_theme", &tag, serde_json::json!(mode_str));
+                    if let Err(e) =
+                        emit_query_response("system_theme", &tag, serde_json::json!(mode_str))
+                    {
+                        log::error!("write error: {e}");
+                    }
                     Message::NoOp
                 })
             }
@@ -635,7 +657,9 @@ impl App {
                         "graphics_backend": info.graphics_backend,
                         "graphics_adapter": info.graphics_adapter,
                     });
-                    emit_query_response("system_info", &tag, data);
+                    if let Err(e) = emit_query_response("system_info", &tag, data) {
+                        log::error!("write error: {e}");
+                    }
                     Message::NoOp
                 })
             }

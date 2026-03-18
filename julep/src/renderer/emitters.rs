@@ -8,43 +8,29 @@ use julep_core::protocol::OutgoingEvent;
 // stdout write helper
 // ---------------------------------------------------------------------------
 
-/// Write pre-encoded bytes to stdout. Exits the process on broken pipe
-/// (the host process has gone away and there's nothing useful to do).
+/// Write pre-encoded bytes to stdout, returning any I/O error to the
+/// caller (including broken pipe). The caller decides whether to shut
+/// down or log-and-continue.
 ///
 /// Each call acquires the stdout lock and flushes. This is correct for
 /// the common case (one event per update cycle) but suboptimal when
 /// apply() produces multiple effects. A future optimization could batch
 /// writes within apply() using a single lock/flush cycle.
-pub(crate) fn write_stdout(bytes: &[u8]) {
+pub(crate) fn write_stdout(bytes: &[u8]) -> io::Result<()> {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    if let Err(e) = handle.write_all(bytes) {
-        if e.kind() == io::ErrorKind::BrokenPipe {
-            log::error!("stdout broken pipe -- shutting down");
-            std::process::exit(0);
-        }
-        log::error!("stdout write error: {e}");
-        return;
-    }
-    if let Err(e) = handle.flush() {
-        if e.kind() == io::ErrorKind::BrokenPipe {
-            log::error!("stdout broken pipe on flush -- shutting down");
-            std::process::exit(0);
-        }
-        log::error!("stdout flush error: {e}");
-    }
+    handle.write_all(bytes)?;
+    handle.flush()
 }
 
 // ---------------------------------------------------------------------------
 // stdout event emitter
 // ---------------------------------------------------------------------------
 
-pub(crate) fn emit_event(event: OutgoingEvent) {
+pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
     let codec = Codec::get_global();
-    match codec.encode(&event) {
-        Ok(bytes) => write_stdout(&bytes),
-        Err(e) => log::error!("failed to serialize event: {e}"),
-    }
+    let bytes = codec.encode(&event).map_err(io::Error::other)?;
+    write_stdout(&bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +40,7 @@ pub(crate) fn emit_event(event: OutgoingEvent) {
 /// Emit a `hello` handshake message to stdout immediately after codec
 /// negotiation. This tells the host which protocol version and
 /// renderer build it is talking to.
-pub(crate) fn emit_hello() {
+pub(crate) fn emit_hello() -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "hello",
         "protocol": julep_core::protocol::PROTOCOL_VERSION,
@@ -62,27 +48,29 @@ pub(crate) fn emit_hello() {
         "name": "julep",
     });
     let codec = Codec::get_global();
-    match codec.encode(&msg) {
-        Ok(bytes) => write_stdout(&bytes),
-        Err(e) => log::error!("failed to serialize hello: {e}"),
-    }
+    let bytes = codec.encode(&msg).map_err(io::Error::other)?;
+    write_stdout(&bytes)
 }
 
 // ---------------------------------------------------------------------------
 // stdout effect response emitter
 // ---------------------------------------------------------------------------
 
-pub(crate) fn emit_effect_response(response: julep_core::protocol::EffectResponse) {
+pub(crate) fn emit_effect_response(
+    response: julep_core::protocol::EffectResponse,
+) -> io::Result<()> {
     let codec = Codec::get_global();
-    match codec.encode(&response) {
-        Ok(bytes) => write_stdout(&bytes),
-        Err(e) => log::error!("failed to serialize effect response: {e}"),
-    }
+    let bytes = codec.encode(&response).map_err(io::Error::other)?;
+    write_stdout(&bytes)
 }
 
 /// Emit a query_response message to stdout. Used for system-level queries
 /// (system_info, system_theme) that are not window-specific.
-pub(crate) fn emit_query_response(kind: &str, tag: &str, data: serde_json::Value) {
+pub(crate) fn emit_query_response(
+    kind: &str,
+    tag: &str,
+    data: serde_json::Value,
+) -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "query_response",
         "kind": kind,
@@ -90,10 +78,8 @@ pub(crate) fn emit_query_response(kind: &str, tag: &str, data: serde_json::Value
         "data": data,
     });
     let codec = Codec::get_global();
-    match codec.encode(&msg) {
-        Ok(bytes) => write_stdout(&bytes),
-        Err(e) => log::error!("failed to serialize query response: {e}"),
-    }
+    let bytes = codec.encode(&msg).map_err(io::Error::other)?;
+    write_stdout(&bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +96,7 @@ pub(crate) fn emit_screenshot_response(
     width: u32,
     height: u32,
     rgba_bytes: &[u8],
-) {
+) -> io::Result<()> {
     use serde_json::json;
 
     let mut map = serde_json::Map::new();
@@ -127,10 +113,10 @@ pub(crate) fn emit_screenshot_response(
         Some(("rgba", rgba_bytes))
     };
     let codec = Codec::get_global();
-    match codec.encode_binary_message(map, binary) {
-        Ok(bytes) => write_stdout(&bytes),
-        Err(e) => log::error!("failed to encode screenshot response: {e}"),
-    }
+    let bytes = codec
+        .encode_binary_message(map, binary)
+        .map_err(io::Error::other)?;
+    write_stdout(&bytes)
 }
 
 // ---------------------------------------------------------------------------

@@ -233,11 +233,14 @@ impl App {
                     .unwrap_or("find_focused")
                     .to_string();
                 log::warn!("find_focused: not supported in this iced version");
-                super::emitters::emit_query_response(
+                if let Err(e) = super::emitters::emit_query_response(
                     "find_focused",
                     &tag,
                     serde_json::json!({"focused": null, "error": "not supported"}),
-                );
+                ) {
+                    log::error!("write error: {e}");
+                    return iced::exit();
+                }
                 Task::none()
             }
             "load_font" => {
@@ -269,11 +272,14 @@ impl App {
                     .unwrap_or("tree_hash")
                     .to_string();
                 let hash = self.core.tree_hash();
-                super::emitters::emit_query_response(
+                if let Err(e) = super::emitters::emit_query_response(
                     "tree_hash",
                     &tag,
                     serde_json::json!({"hash": hash}),
-                );
+                ) {
+                    log::error!("write error: {e}");
+                    return iced::exit();
+                }
                 Task::none()
             }
             "list_images" => {
@@ -283,11 +289,14 @@ impl App {
                     .unwrap_or("list_images")
                     .to_string();
                 let handles: Vec<String> = self.image_registry.handle_names();
-                super::emitters::emit_query_response(
+                if let Err(e) = super::emitters::emit_query_response(
                     "image_list",
                     &tag,
                     serde_json::json!({"handles": handles}),
-                );
+                ) {
+                    log::error!("write error: {e}");
+                    return iced::exit();
+                }
                 Task::none()
             }
             "clear_images" => {
@@ -318,11 +327,15 @@ impl App {
             .image_registry
             .apply_op(op, handle, data, pixels, width, height)
         {
-            emit_event(OutgoingEvent::generic(
+            // Best-effort error notification. If stdout is broken the
+            // next synchronous write in update() will exit cleanly.
+            if let Err(e) = emit_event(OutgoingEvent::generic(
                 "image_error".to_string(),
                 handle.to_string(),
                 Some(serde_json::json!({ "error": error })),
-            ));
+            )) {
+                log::error!("write error: {e}");
+            }
         }
     }
 }

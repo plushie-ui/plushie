@@ -245,7 +245,10 @@ pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: M
     log::info!("wire codec: {codec}");
     Codec::set_global(codec);
 
-    crate::renderer::emit_hello();
+    if let Err(e) = crate::renderer::emit_hello() {
+        log::error!("failed to emit hello: {e}");
+        return;
+    }
 
     loop {
         match codec.read_message(&mut reader) {
@@ -407,7 +410,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
             let h = height
                 .unwrap_or(DEFAULT_SCREENSHOT_HEIGHT)
                 .clamp(1, MAX_SCREENSHOT_DIMENSION);
-            handle_screenshot_capture(s, id, name, w, h);
+            handle_screenshot_capture(s, id, name, w, h)?;
         }
         IncomingMessage::Reset { id } => {
             s.dispatcher.reset(&mut s.ext_caches);
@@ -465,11 +468,16 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
 /// In headless mode, uses the persistent renderer and UI cache to
 /// produce real RGBA pixel data via tiny-skia. In mock mode, returns
 /// an empty stub.
-fn handle_screenshot_capture(s: &mut Session, id: String, name: String, width: u32, height: u32) {
+fn handle_screenshot_capture(
+    s: &mut Session,
+    id: String,
+    name: String,
+    width: u32,
+    height: u32,
+) -> io::Result<()> {
     if s.ui.is_none() {
         // Mock mode: stub screenshot.
-        crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
-        return;
+        return crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
     }
 
     use iced_test::core::theme::Base;
@@ -483,8 +491,7 @@ fn handle_screenshot_capture(s: &mut Session, id: String, name: String, width: u
     let root = match s.core.tree.root() {
         Some(r) => r,
         None => {
-            crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
-            return;
+            return crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
         }
     };
 
@@ -545,5 +552,5 @@ fn handle_screenshot_capture(s: &mut Session, id: String, name: String, width: u
         format!("{:x}", hasher.finalize())
     };
 
-    crate::renderer::emitters::emit_screenshot_response(&id, &name, &hash, width, height, &rgba);
+    crate::renderer::emitters::emit_screenshot_response(&id, &name, &hash, width, height, &rgba)
 }
