@@ -97,10 +97,12 @@ pub(crate) fn emit_query_response(kind: &str, tag: &str, data: serde_json::Value
 }
 
 // ---------------------------------------------------------------------------
-// stdout screenshot response emitter -- delegates to shared protocol function
+// stdout screenshot response emitter
 // ---------------------------------------------------------------------------
 
-/// Emit a screenshot_response to stdout (thin wrapper around shared function).
+/// Emit a screenshot_response to stdout. Uses `Codec::encode_binary_message`
+/// so that RGBA pixel data is encoded as native msgpack binary (avoiding
+/// ~33% base64 overhead) while remaining valid base64 over JSON.
 pub(crate) fn emit_screenshot_response(
     id: &str,
     name: &str,
@@ -109,7 +111,26 @@ pub(crate) fn emit_screenshot_response(
     height: u32,
     rgba_bytes: &[u8],
 ) {
-    julep_core::protocol::emit_screenshot_response(id, name, hash, width, height, rgba_bytes);
+    use serde_json::json;
+
+    let mut map = serde_json::Map::new();
+    map.insert("type".to_string(), json!("screenshot_response"));
+    map.insert("id".to_string(), json!(id));
+    map.insert("name".to_string(), json!(name));
+    map.insert("hash".to_string(), json!(hash));
+    map.insert("width".to_string(), json!(width));
+    map.insert("height".to_string(), json!(height));
+
+    let binary = if rgba_bytes.is_empty() {
+        None
+    } else {
+        Some(("rgba", rgba_bytes))
+    };
+    let codec = Codec::get_global();
+    match codec.encode_binary_message(map, binary) {
+        Ok(bytes) => write_stdout(&bytes),
+        Err(e) => log::error!("failed to encode screenshot response: {e}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

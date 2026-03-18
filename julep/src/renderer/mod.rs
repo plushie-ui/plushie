@@ -1,4 +1,4 @@
-mod emitters;
+pub(crate) mod emitters;
 mod stdin;
 mod widget_ops;
 mod window_ops;

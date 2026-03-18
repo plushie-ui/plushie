@@ -85,6 +85,69 @@ impl Codec {
         }
     }
 
+    /// Encode a JSON map with an optional binary field to wire bytes.
+    ///
+    /// For MsgPack: binary fields are encoded as native msgpack binary
+    /// (`rmpv::Value::Binary`), avoiding the ~33% size overhead of
+    /// base64. The map is built via `rmpv::Value::Map` to preserve
+    /// the binary type.
+    ///
+    /// For JSON: binary fields are base64-encoded as strings.
+    ///
+    /// This is used for screenshot responses where pixel data must be
+    /// transmitted efficiently over msgpack while remaining valid over JSON.
+    pub fn encode_binary_message(
+        &self,
+        mut map: serde_json::Map<String, serde_json::Value>,
+        binary_field: Option<(&str, &[u8])>,
+    ) -> Result<Vec<u8>, String> {
+        match self {
+            Codec::Json => {
+                if let Some((key, bytes)) = binary_field
+                    && !bytes.is_empty()
+                {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    map.insert(key.to_string(), serde_json::Value::String(b64));
+                }
+                let val = serde_json::Value::Object(map);
+                let mut bytes =
+                    serde_json::to_vec(&val).map_err(|e| format!("json encode: {e}"))?;
+                bytes.push(b'\n');
+                Ok(bytes)
+            }
+            Codec::MsgPack => {
+                use rmpv::Value as V;
+
+                let mut entries: Vec<(V, V)> = map
+                    .into_iter()
+                    .map(|(k, v)| (V::String(k.into()), json_to_rmpv(v)))
+                    .collect();
+
+                if let Some((key, bytes)) = binary_field
+                    && !bytes.is_empty()
+                {
+                    entries.push((V::String(key.into()), V::Binary(bytes.to_vec())));
+                }
+
+                let msg = V::Map(entries);
+                let mut payload = Vec::new();
+                rmpv::encode::write_value(&mut payload, &msg)
+                    .map_err(|e| format!("msgpack encode: {e}"))?;
+                let len = u32::try_from(payload.len()).map_err(|_| {
+                    format!(
+                        "payload exceeds 4 GiB frame limit ({} bytes)",
+                        payload.len()
+                    )
+                })?;
+                let mut bytes = Vec::with_capacity(4 + payload.len());
+                bytes.extend_from_slice(&len.to_be_bytes());
+                bytes.extend_from_slice(&payload);
+                Ok(bytes)
+            }
+        }
+    }
+
     /// Decode a raw payload (framing already stripped) into a typed value.
     ///
     /// For JSON, `bytes` is the UTF-8 JSON text (without the trailing newline).
@@ -517,6 +580,35 @@ fn rmpv_to_json_inner(val: rmpv::Value, depth: usize) -> serde_json::Value {
             );
             serde_json::Value::Null
         }
+    }
+}
+
+/// Convert a serde_json::Value to rmpv::Value for msgpack encoding.
+/// Used by `encode_binary_message` to build rmpv maps from JSON maps.
+fn json_to_rmpv(val: serde_json::Value) -> rmpv::Value {
+    match val {
+        serde_json::Value::Null => rmpv::Value::Nil,
+        serde_json::Value::Bool(b) => rmpv::Value::Boolean(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                rmpv::Value::Integer(i.into())
+            } else if let Some(u) = n.as_u64() {
+                rmpv::Value::Integer(u.into())
+            } else if let Some(f) = n.as_f64() {
+                rmpv::Value::F64(f)
+            } else {
+                rmpv::Value::Nil
+            }
+        }
+        serde_json::Value::String(s) => rmpv::Value::String(s.into()),
+        serde_json::Value::Array(arr) => {
+            rmpv::Value::Array(arr.into_iter().map(json_to_rmpv).collect())
+        }
+        serde_json::Value::Object(map) => rmpv::Value::Map(
+            map.into_iter()
+                .map(|(k, v)| (rmpv::Value::String(k.into()), json_to_rmpv(v)))
+                .collect(),
+        ),
     }
 }
 

@@ -160,16 +160,24 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_response_empty_has_correct_structure() {
-        use julep_core::protocol::ScreenshotResponseEmpty;
+    fn screenshot_response_empty_via_codec() {
+        use julep_core::codec::Codec;
 
-        let resp = ScreenshotResponseEmpty::new("sc1".to_string(), "test_shot".to_string());
-        assert_eq!(resp.message_type, "screenshot_response");
-        assert_eq!(resp.hash, "");
-        assert_eq!(resp.width, 0);
-        assert_eq!(resp.height, 0);
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), serde_json::json!("screenshot_response"));
+        map.insert("id".to_string(), serde_json::json!("sc1"));
+        map.insert("name".to_string(), serde_json::json!("test_shot"));
+        map.insert("hash".to_string(), serde_json::json!(""));
+        map.insert("width".to_string(), serde_json::json!(0));
+        map.insert("height".to_string(), serde_json::json!(0));
 
-        let json = serde_json::to_value(&resp).unwrap();
-        assert_eq!(json.get("type").unwrap(), "screenshot_response");
+        let bytes = Codec::Json.encode_binary_message(map, None).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+        assert_eq!(json["type"], "screenshot_response");
+        assert_eq!(json["id"], "sc1");
+        assert_eq!(json["name"], "test_shot");
+        assert_eq!(json["hash"], "");
+        assert_eq!(json["width"], 0);
+        assert_eq!(json["height"], 0);
     }
 }

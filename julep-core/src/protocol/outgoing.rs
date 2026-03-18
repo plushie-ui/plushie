@@ -230,48 +230,31 @@ impl OutgoingEvent {
     // Touch events
     // -----------------------------------------------------------------------
 
-    pub fn finger_pressed(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
+    fn touch_event(family: &str, tag: String, finger_id: u64, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
                 "finger_id": finger_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
-            ..Self::tagged("finger_pressed", tag)
+            ..Self::tagged(family, tag)
         }
+    }
+
+    pub fn finger_pressed(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
+        Self::touch_event("finger_pressed", tag, finger_id, x, y)
     }
 
     pub fn finger_moved(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
-        Self {
-            data: Some(serde_json::json!({
-                "finger_id": finger_id,
-                "x": sanitize_f32(x),
-                "y": sanitize_f32(y),
-            })),
-            ..Self::tagged("finger_moved", tag)
-        }
+        Self::touch_event("finger_moved", tag, finger_id, x, y)
     }
 
     pub fn finger_lifted(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
-        Self {
-            data: Some(serde_json::json!({
-                "finger_id": finger_id,
-                "x": sanitize_f32(x),
-                "y": sanitize_f32(y),
-            })),
-            ..Self::tagged("finger_lifted", tag)
-        }
+        Self::touch_event("finger_lifted", tag, finger_id, x, y)
     }
 
     pub fn finger_lost(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
-        Self {
-            data: Some(serde_json::json!({
-                "finger_id": finger_id,
-                "x": sanitize_f32(x),
-                "y": sanitize_f32(y),
-            })),
-            ..Self::tagged("finger_lost", tag)
-        }
+        Self::touch_event("finger_lost", tag, finger_id, x, y)
     }
 
     // -----------------------------------------------------------------------
@@ -792,156 +775,6 @@ impl SnapshotCaptureResponse {
 }
 
 /// Empty screenshot response for backends that cannot capture pixels.
-///
-/// Used by headless mode. The full backend uses a format-aware emit function
-/// instead (native binary for msgpack, base64 for JSON).
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-pub struct ScreenshotResponseEmpty {
-    #[serde(rename = "type")]
-    pub message_type: &'static str,
-    pub id: String,
-    pub name: String,
-    pub hash: String,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[allow(dead_code)]
-impl ScreenshotResponseEmpty {
-    pub fn new(id: String, name: String) -> Self {
-        Self {
-            message_type: "screenshot_response",
-            id,
-            name,
-            hash: String::new(),
-            width: 0,
-            height: 0,
-        }
-    }
-}
-
-/// Emit a screenshot response with RGBA pixel data to stdout.
-///
-/// Uses native msgpack binary (`rmpv::Value::Binary`) for pixel data when the
-/// wire codec is MsgPack, and base64-encoded string when JSON. This avoids the
-/// ~33% size overhead of base64 on the hot path.
-///
-/// Shared between test-mode (main.rs) and headless (headless.rs).
-#[allow(dead_code)]
-pub fn emit_screenshot_response(
-    id: &str,
-    name: &str,
-    hash: &str,
-    width: u32,
-    height: u32,
-    rgba_bytes: &[u8],
-) {
-    use std::io::Write;
-
-    let codec = crate::codec::Codec::get_global();
-    let bytes = match codec {
-        crate::codec::Codec::MsgPack => {
-            use rmpv::Value as RmpvValue;
-
-            let mut entries = vec![
-                (
-                    RmpvValue::String("type".into()),
-                    RmpvValue::String("screenshot_response".into()),
-                ),
-                (RmpvValue::String("id".into()), RmpvValue::String(id.into())),
-                (
-                    RmpvValue::String("name".into()),
-                    RmpvValue::String(name.into()),
-                ),
-                (
-                    RmpvValue::String("hash".into()),
-                    RmpvValue::String(hash.into()),
-                ),
-                (
-                    RmpvValue::String("width".into()),
-                    RmpvValue::Integer((width as i64).into()),
-                ),
-                (
-                    RmpvValue::String("height".into()),
-                    RmpvValue::Integer((height as i64).into()),
-                ),
-            ];
-            if !rgba_bytes.is_empty() {
-                entries.push((
-                    RmpvValue::String("rgba".into()),
-                    RmpvValue::Binary(rgba_bytes.to_vec()),
-                ));
-            }
-            let map = RmpvValue::Map(entries);
-
-            let mut payload = Vec::new();
-            if let Err(e) = rmpv::encode::write_value(&mut payload, &map) {
-                log::error!("msgpack encode screenshot: {e}");
-                return;
-            }
-            let len = match u32::try_from(payload.len()) {
-                Ok(n) => n,
-                Err(_) => {
-                    log::error!(
-                        "screenshot payload exceeds u32::MAX ({} bytes)",
-                        payload.len()
-                    );
-                    return;
-                }
-            };
-            let mut bytes = Vec::with_capacity(4 + payload.len());
-            bytes.extend_from_slice(&len.to_be_bytes());
-            bytes.extend_from_slice(&payload);
-            bytes
-        }
-        crate::codec::Codec::Json => {
-            use base64::Engine;
-
-            let mut map = serde_json::json!({
-                "type": "screenshot_response",
-                "id": id,
-                "name": name,
-                "hash": hash,
-                "width": width,
-                "height": height,
-            });
-            if !rgba_bytes.is_empty() {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(rgba_bytes);
-                map["rgba"] = serde_json::Value::String(b64);
-            }
-            match serde_json::to_vec(&map) {
-                Ok(mut bytes) => {
-                    bytes.push(b'\n');
-                    bytes
-                }
-                Err(e) => {
-                    log::error!("json encode screenshot: {e}");
-                    return;
-                }
-            }
-        }
-    };
-
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
-    if let Err(e) = handle.write_all(&bytes) {
-        if e.kind() == std::io::ErrorKind::BrokenPipe {
-            log::error!("stdout broken pipe -- shutting down");
-            std::process::exit(0);
-        }
-        log::error!("stdout write error: {e}");
-        return;
-    }
-    if let Err(e) = handle.flush() {
-        if e.kind() == std::io::ErrorKind::BrokenPipe {
-            log::error!("stdout broken pipe on flush -- shutting down");
-            std::process::exit(0);
-        }
-        log::error!("stdout flush error: {e}");
-    }
-}
-
 /// Response to a Reset message.
 #[derive(Debug, Serialize)]
 pub struct ResetResponse {

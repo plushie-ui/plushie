@@ -6,7 +6,7 @@ pub mod headless_mode {
 
     use julep_core::codec::Codec;
     use julep_core::engine::Core;
-    use julep_core::protocol::{IncomingMessage, ScreenshotResponseEmpty};
+    use julep_core::protocol::IncomingMessage;
 
     /// Default screenshot width when not specified by the caller.
     const DEFAULT_SCREENSHOT_WIDTH: u32 = 1024;
@@ -262,7 +262,7 @@ pub mod headless_mode {
         let root = match core.tree.root() {
             Some(r) => r,
             None => {
-                crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
+                crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
                 return;
             }
         };
@@ -283,7 +283,7 @@ pub mod headless_mode {
                 Some(r) => r,
                 None => {
                     log::error!("failed to create headless renderer");
-                    crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
+                    crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
                     return;
                 }
             };
@@ -315,6 +315,8 @@ pub mod headless_mode {
             format!("{:x}", hasher.finalize())
         };
 
-        julep_core::protocol::emit_screenshot_response(&id, &name, &hash, width, height, &rgba);
+        crate::renderer::emitters::emit_screenshot_response(
+            &id, &name, &hash, width, height, &rgba,
+        );
     }
 }
