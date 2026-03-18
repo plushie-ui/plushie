@@ -1,3 +1,10 @@
+//! Theme resolution and hex color parsing.
+//!
+//! Converts JSON theme values (string names or custom palette objects)
+//! into iced [`Theme`]s. Supports all built-in iced themes by name
+//! (case-insensitive) and custom themes with hex color overrides for
+//! seed colors and individual palette shades.
+
 use iced::theme::palette;
 use iced::{Color, Theme};
 use serde_json::Value;
@@ -6,25 +13,15 @@ use serde_json::Value;
 // Theme resolution
 // ---------------------------------------------------------------------------
 
-/// Result of resolving a theme from JSON.
-pub struct ThemeResult {
-    pub theme: Theme,
-}
-
-/// Resolve a JSON value into an iced Theme.
+/// Resolve a JSON value into an iced [`Theme`].
 ///
 /// Accepts a string name (case-insensitive, underscored) or a JSON object
-/// describing a custom palette. Unknown values fall back to Dark.
-pub fn resolve_theme(value: &Value) -> ThemeResult {
+/// describing a custom palette. Unknown values fall back to [`Theme::Dark`].
+pub fn resolve_theme(value: &Value) -> Theme {
     match value {
-        Value::String(s) => ThemeResult {
-            theme: resolve_builtin(s),
-        },
-        Value::Object(map) => {
-            let theme = custom_theme_from_object(map);
-            ThemeResult { theme }
-        }
-        _ => ThemeResult { theme: Theme::Dark },
+        Value::String(s) => resolve_builtin(s),
+        Value::Object(map) => custom_theme_from_object(map),
+        _ => Theme::Dark,
     }
 }
 
@@ -35,7 +32,7 @@ pub fn resolve_theme_only(value: &Value) -> Option<Theme> {
     {
         return None;
     }
-    Some(resolve_theme(value).theme)
+    Some(resolve_theme(value))
 }
 
 // ---------------------------------------------------------------------------
@@ -285,10 +282,10 @@ mod tests {
 
     #[test]
     fn resolve_builtin_themes() {
-        assert!(matches!(resolve_theme(&json!("Dark")).theme, Theme::Dark));
-        assert!(matches!(resolve_theme(&json!("nord")).theme, Theme::Nord));
+        assert!(matches!(resolve_theme(&json!("Dark")), Theme::Dark));
+        assert!(matches!(resolve_theme(&json!("nord")), Theme::Nord));
         assert!(matches!(
-            resolve_theme(&json!("CATPPUCCIN_MOCHA")).theme,
+            resolve_theme(&json!("CATPPUCCIN_MOCHA")),
             Theme::CatppuccinMocha
         ));
     }
@@ -307,17 +304,14 @@ mod tests {
 
     #[test]
     fn unknown_string_falls_back_to_dark() {
-        assert!(matches!(
-            resolve_theme(&json!("neon_pink")).theme,
-            Theme::Dark
-        ));
+        assert!(matches!(resolve_theme(&json!("neon_pink")), Theme::Dark));
     }
 
     #[test]
     fn custom_theme_minimal() {
         let val = json!({"name": "Mine"});
         let result = resolve_theme(&val);
-        assert_eq!(format!("{}", result.theme), "Mine");
+        assert_eq!(format!("{}", result), "Mine");
     }
 
     #[test]
@@ -331,7 +325,7 @@ mod tests {
             "danger": "#f7768e"
         });
         let result = resolve_theme(&val);
-        let seed = result.theme.seed();
+        let seed = result.seed();
         assert_eq!(seed.background, Color::from_rgb8(0x1a, 0x1b, 0x26));
         assert_eq!(seed.text, Color::from_rgb8(0xc0, 0xca, 0xf5));
         assert_eq!(seed.primary, Color::from_rgb8(0x7a, 0xa2, 0xf7));
@@ -343,7 +337,7 @@ mod tests {
     fn custom_theme_with_warning_color() {
         let val = json!({"warning": "#f9e2af"});
         let result = resolve_theme(&val);
-        let seed = result.theme.seed();
+        let seed = result.seed();
         assert_eq!(seed.warning, Color::from_rgb8(0xf9, 0xe2, 0xaf));
     }
 
@@ -351,7 +345,7 @@ mod tests {
     fn custom_theme_with_base() {
         let val = json!({"base": "Nord", "primary": "#88c0d0"});
         let result = resolve_theme(&val);
-        let seed = result.theme.seed();
+        let seed = result.seed();
         // Primary should be overridden.
         assert_eq!(seed.primary, Color::from_rgb8(0x88, 0xc0, 0xd0));
         // Background should come from Nord's seed.
@@ -363,7 +357,7 @@ mod tests {
     fn custom_theme_defaults_name_to_custom() {
         let val = json!({"primary": "#ff0000"});
         let result = resolve_theme(&val);
-        assert_eq!(format!("{}", result.theme), "Custom");
+        assert_eq!(format!("{}", result), "Custom");
     }
 
     #[test]
@@ -412,7 +406,7 @@ mod tests {
     fn bad_color_field_is_ignored() {
         let val = json!({"background": "not-a-color", "text": "#ffffff"});
         let result = resolve_theme(&val);
-        let seed = result.theme.seed();
+        let seed = result.seed();
         // text should be set, background should remain the dark default.
         assert_eq!(seed.text, Color::from_rgb8(0xff, 0xff, 0xff));
         assert_eq!(seed.background, palette::Seed::DARK.background);
@@ -425,7 +419,7 @@ mod tests {
             "primary_strong": "#1a5276"
         });
         let result = resolve_theme(&val);
-        let pal = result.theme.palette();
+        let pal = result.palette();
         assert_eq!(pal.primary.strong.color, Color::from_rgb8(0x1a, 0x52, 0x76));
     }
 
@@ -436,7 +430,7 @@ mod tests {
             "primary_strong_text": "#ffffff"
         });
         let result = resolve_theme(&val);
-        let pal = result.theme.palette();
+        let pal = result.palette();
         assert_eq!(pal.primary.strong.text, Color::from_rgb8(0xff, 0xff, 0xff));
     }
 
@@ -445,10 +439,10 @@ mod tests {
         // No shade keys -- should use Theme::custom (standard generation).
         let val = json!({"primary": "#ff0000"});
         let result = resolve_theme(&val);
-        let pal = result.theme.palette();
+        let pal = result.palette();
         // The generated palette should match what Palette::generate
         // produces for the same seed.
-        let expected = palette::Palette::generate(result.theme.seed());
+        let expected = palette::Palette::generate(result.seed());
         assert_eq!(pal.primary.strong.color, expected.primary.strong.color);
         assert_eq!(pal.primary.weak.color, expected.primary.weak.color);
     }
@@ -461,7 +455,7 @@ mod tests {
             "background_weakest_text": "#aaaaaa"
         });
         let result = resolve_theme(&val);
-        let pal = result.theme.palette();
+        let pal = result.palette();
         assert_eq!(
             pal.background.weakest.color,
             Color::from_rgb8(0x0d, 0x0d, 0x1a)
