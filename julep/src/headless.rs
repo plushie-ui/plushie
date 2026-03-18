@@ -20,6 +20,7 @@
 //! collects responses from all sessions and writes them to stdout.
 //! Each session is fully isolated (own Core, caches, extensions, UI).
 
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write as _};
 use std::sync::mpsc;
 use std::thread;
@@ -31,10 +32,12 @@ use serde::Serialize;
 
 use julep_core::codec::Codec;
 use julep_core::engine::Core;
-use julep_core::extensions::{ExtensionCaches, ExtensionDispatcher, RenderCtx};
+use julep_core::extensions::{EventResult, ExtensionCaches, ExtensionDispatcher, RenderCtx};
 use julep_core::image_registry::ImageRegistry;
-use julep_core::protocol::{IncomingMessage, SessionMessage};
+use julep_core::message::Message;
+use julep_core::protocol::{IncomingMessage, OutgoingEvent, SessionMessage};
 
+use crate::renderer::emitters::message_to_event;
 use crate::scripting::{interaction_to_iced_events, resolve_widget_id};
 
 /// Default screenshot width when not specified by the caller.
@@ -150,6 +153,8 @@ struct Session {
     ext_caches: ExtensionCaches,
     images: ImageRegistry,
     writer: WireWriter,
+    /// Slider value tracking for SlideRelease (mirrors App.last_slide_values).
+    last_slide_values: HashMap<String, f64>,
     /// None in --mock mode (no rendering).
     ui: Option<UiState>,
 }
@@ -185,6 +190,7 @@ impl Session {
             ext_caches: ExtensionCaches::new(),
             images: ImageRegistry::new(),
             writer,
+            last_slide_values: HashMap::new(),
             ui,
         }
     }
@@ -262,22 +268,164 @@ impl Session {
         }
     }
 
-    /// Inject a sequence of iced events into the persistent UI.
-    fn inject_events(&mut self, events: &[Event]) {
+    /// Inject iced events one at a time, capturing the Messages that
+    /// widgets produce. Settles the UI between each event so widget
+    /// state updates are visible to subsequent events. This matches
+    /// the production flow where each raw iced event gets a full
+    /// processing cycle.
+    ///
+    /// Returns the captured Messages converted to OutgoingEvents
+    /// using the same conversion logic as the daemon's `update()`.
+    /// Only available in headless mode (returns empty in mock mode).
+    fn inject_and_capture(&mut self, events: &[Event]) -> Vec<OutgoingEvent> {
         if self.ui.is_none() || events.is_empty() {
-            return;
+            return vec![];
         }
-        if let Some(ui_state) = &mut self.ui {
-            for event in events {
-                if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
-                    ui_state.cursor = mouse::Cursor::Available(*position);
+
+        let mut all_events = Vec::new();
+
+        for event in events {
+            // Update cursor from CursorMoved events before injection.
+            if let Event::Mouse(mouse::Event::CursorMoved { position }) = event
+                && let Some(ui_state) = &mut self.ui
+            {
+                ui_state.cursor = mouse::Cursor::Available(*position);
+            }
+
+            // Inject ONE event and capture the Messages iced produces.
+            let messages = self
+                .with_ui(|ui, renderer, cursor| {
+                    let mut messages = Vec::new();
+                    let _status =
+                        ui.update(std::slice::from_ref(event), cursor, renderer, &mut messages);
+                    messages
+                })
+                .unwrap_or_default();
+
+            // Convert captured Messages to OutgoingEvents using
+            // the same logic as the daemon's update().
+            all_events.extend(self.process_captured_messages(messages));
+
+            // Settle the UI so widget state (layout, text cursors,
+            // focus) updates before the next event is processed.
+            self.settle_ui();
+        }
+
+        all_events
+    }
+
+    /// Convert iced Messages to OutgoingEvents using the same
+    /// conversion logic as the daemon's `update()` method.
+    ///
+    /// Handles all Message variants that produce user-visible events:
+    /// - Simple widget events via `message_to_event()` (click, input, etc.)
+    /// - Slider with value tracking (SlideRelease needs the last value)
+    /// - TextEditorAction with editor content mutation
+    /// - Extension events via dispatcher routing
+    /// - Pane grid events
+    fn process_captured_messages(&mut self, messages: Vec<Message>) -> Vec<OutgoingEvent> {
+        let mut events = Vec::new();
+
+        for msg in messages {
+            match msg {
+                // Simple widget events -- stateless conversion.
+                ref m @ (Message::Click(_)
+                | Message::Input(..)
+                | Message::Submit(..)
+                | Message::Toggle(..)
+                | Message::Select(..)
+                | Message::Paste(..)
+                | Message::OptionHovered(..)
+                | Message::SensorResize(..)
+                | Message::ScrollEvent(..)
+                | Message::MouseAreaEvent(..)
+                | Message::MouseAreaMove(..)
+                | Message::MouseAreaScroll(..)
+                | Message::CanvasEvent { .. }
+                | Message::CanvasScroll { .. }) => {
+                    if let Some(event) = message_to_event(m) {
+                        events.push(event);
+                    }
                 }
+
+                // Slider -- needs value tracking for SlideRelease.
+                Message::Slide(ref id, value) => {
+                    self.last_slide_values.insert(id.clone(), value);
+                    events.push(OutgoingEvent::slide(id.clone(), value));
+                }
+                Message::SlideRelease(ref id) => {
+                    let value = self.last_slide_values.remove(id).unwrap_or(0.0);
+                    events.push(OutgoingEvent::slide_release(id.clone(), value));
+                }
+
+                // Text editor -- apply action to editor content, emit new text.
+                Message::TextEditorAction(ref id, ref action) => {
+                    if action.is_edit()
+                        && let Some(content) = self.core.caches.editor_content_mut(id)
+                    {
+                        content.perform(action.clone());
+                        let new_text = content.text();
+                        events.push(OutgoingEvent::input(id.clone(), new_text));
+                    }
+                }
+
+                // Extension events -- route through dispatcher.
+                Message::Event {
+                    ref id,
+                    ref data,
+                    ref family,
+                } => {
+                    let result =
+                        self.dispatcher
+                            .handle_event(id, family, data, &mut self.ext_caches);
+                    match result {
+                        EventResult::PassThrough => {
+                            let data_opt = if data.is_null() {
+                                None
+                            } else {
+                                Some(data.clone())
+                            };
+                            events.push(OutgoingEvent::generic(
+                                family.clone(),
+                                id.clone(),
+                                data_opt,
+                            ));
+                        }
+                        EventResult::Consumed(ext_events) => {
+                            events.extend(ext_events);
+                        }
+                        EventResult::Observed(ext_events) => {
+                            let data_opt = if data.is_null() {
+                                None
+                            } else {
+                                Some(data.clone())
+                            };
+                            events.push(OutgoingEvent::generic(
+                                family.clone(),
+                                id.clone(),
+                                data_opt,
+                            ));
+                            events.extend(ext_events);
+                        }
+                    }
+                }
+
+                // Pane grid events -- need pane state lookup.
+                Message::PaneFocusCycle(ref grid_id, pane) => {
+                    if let Some(state) = self.core.caches.pane_grid_state(grid_id) {
+                        let pane_id = state.get(pane).cloned().unwrap_or_default();
+                        events.push(OutgoingEvent::pane_focus_cycle(grid_id.clone(), pane_id));
+                    }
+                }
+
+                // Internal messages and subscription events -- skip.
+                // Subscription events (KeyPressed, CursorMoved, etc.) don't
+                // appear from ui.update() in the interact path.
+                _ => {}
             }
         }
-        self.with_ui(|ui, renderer, cursor| {
-            let mut messages = Vec::new();
-            let _status = ui.update(events, cursor, renderer, &mut messages);
-        });
+
+        events
     }
 }
 
@@ -397,12 +545,45 @@ fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io
                     .unwrap_or(mouse::Cursor::Unavailable);
             let iced_events =
                 interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor);
-            if !iced_events.is_empty() {
-                s.inject_events(&iced_events);
-            }
+
+            let events = if s.ui.is_some() && !iced_events.is_empty() {
+                // Headless mode: inject real iced events one at a time,
+                // capture the Messages widgets produce, and convert them
+                // using the same logic as the daemon's update(). This
+                // gives faithful event output without synthetic construction.
+                let mut captured = s.inject_and_capture(&iced_events);
+
+                // Some actions have no iced equivalent (paste, sort,
+                // canvas, slide, pane_focus_cycle). For these,
+                // interaction_to_iced_events returns empty and we fall
+                // through to synthetic events below.
+                if captured.is_empty() {
+                    // Fall back to synthetic for this action.
+                    captured = crate::scripting::build_interact_response(
+                        &s.core,
+                        id.clone(),
+                        action,
+                        selector,
+                        payload,
+                    )
+                    .events;
+                }
+                captured
+            } else {
+                // Mock mode (no UI) or action with no iced events:
+                // use synthetic event construction.
+                crate::scripting::build_interact_response(
+                    &s.core,
+                    id.clone(),
+                    action,
+                    selector,
+                    payload,
+                )
+                .events
+            };
+
             let resp =
-                crate::scripting::build_interact_response(&s.core, id, action, selector, payload)
-                    .with_session(session_id);
+                julep_core::protocol::InteractResponse::new(id, events).with_session(session_id);
             s.writer.emit(&resp)?;
         }
         IncomingMessage::SnapshotCapture { id, name, .. } => {
@@ -428,6 +609,7 @@ fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io
             s.dispatcher.reset(&mut s.ext_caches);
             s.images = ImageRegistry::new();
             s.theme = Theme::Dark;
+            s.last_slide_values.clear();
             if let Some(ui_state) = &mut s.ui {
                 ui_state.ui_cache = UiCache::default();
                 ui_state.cursor = mouse::Cursor::Unavailable;
