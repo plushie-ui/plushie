@@ -150,19 +150,12 @@ struct Session {
     ext_caches: ExtensionCaches,
     images: ImageRegistry,
     writer: WireWriter,
-    /// Session ID echoed on all outgoing messages.
-    session_id: String,
     /// None in --mock mode (no rendering).
     ui: Option<UiState>,
 }
 
 impl Session {
-    fn new(
-        dispatcher: ExtensionDispatcher,
-        mode: Mode,
-        writer: WireWriter,
-        session_id: String,
-    ) -> Self {
+    fn new(dispatcher: ExtensionDispatcher, mode: Mode, writer: WireWriter) -> Self {
         let ui = if matches!(mode, Mode::Headless) {
             let renderer_settings = iced::advanced::renderer::Settings {
                 default_font: iced::Font::DEFAULT,
@@ -192,14 +185,8 @@ impl Session {
             ext_caches: ExtensionCaches::new(),
             images: ImageRegistry::new(),
             writer,
-            session_id,
             ui,
         }
-    }
-
-    /// Encode a serializable value, tag it with the session ID, and write it.
-    fn emit<T: Serialize>(&self, value: &T) -> io::Result<()> {
-        self.writer.emit(value)
     }
 
     /// Rebuild the renderer when default font/text size changes.
@@ -300,13 +287,13 @@ impl Session {
 
 /// Process one incoming message through a session.
 ///
-/// All output goes through `session.writer`. The session ID is set on
-/// every outgoing message.
-fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
+/// All output goes through `session.writer`. The `session_id` is
+/// echoed on every outgoing message to identify which session
+/// produced it.
+fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io::Result<()> {
     let is_snapshot = matches!(msg, IncomingMessage::Snapshot { .. });
     let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
     let is_settings = matches!(msg, IncomingMessage::Settings { .. });
-    let session_id = s.session_id.clone();
 
     match msg {
         IncomingMessage::Snapshot { .. }
@@ -324,10 +311,10 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
                 use julep_core::engine::CoreEffect;
                 match effect {
                     CoreEffect::EmitEvent(event) => {
-                        s.emit(&event.with_session(session_id.clone()))?;
+                        s.writer.emit(&event.with_session(session_id))?;
                     }
                     CoreEffect::EmitEffectResponse(response) => {
-                        s.emit(&response.with_session(session_id.clone()))?;
+                        s.writer.emit(&response.with_session(session_id))?;
                     }
                     CoreEffect::SpawnAsyncEffect {
                         request_id,
@@ -339,12 +326,12 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
                             "{mode}: async effect {effect_type} returning cancelled \
                              (no display)"
                         );
-                        s.emit(
+                        s.writer.emit(
                             &julep_core::protocol::EffectResponse::error(
                                 request_id,
                                 "cancelled".to_string(),
                             )
-                            .with_session(session_id.clone()),
+                            .with_session(session_id),
                         )?;
                     }
                     CoreEffect::ThemeChanged(t) => {
@@ -395,7 +382,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
         } => {
             let resp = crate::scripting::build_query_response(&s.core, id, target, selector)
                 .with_session(session_id);
-            s.emit(&resp)?;
+            s.writer.emit(&resp)?;
         }
         IncomingMessage::Interact {
             id,
@@ -416,12 +403,12 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
             let resp =
                 crate::scripting::build_interact_response(&s.core, id, action, selector, payload)
                     .with_session(session_id);
-            s.emit(&resp)?;
+            s.writer.emit(&resp)?;
         }
         IncomingMessage::SnapshotCapture { id, name, .. } => {
             let resp = crate::scripting::build_snapshot_capture_response(&s.core, id, name)
                 .with_session(session_id);
-            s.emit(&resp)?;
+            s.writer.emit(&resp)?;
         }
         IncomingMessage::ScreenshotCapture {
             id,
@@ -435,7 +422,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
             let h = height
                 .unwrap_or(DEFAULT_SCREENSHOT_HEIGHT)
                 .clamp(1, MAX_SCREENSHOT_DIMENSION);
-            handle_screenshot_capture(s, &session_id, id, name, w, h)?;
+            handle_screenshot_capture(s, session_id, id, name, w, h)?;
         }
         IncomingMessage::Reset { id } => {
             s.dispatcher.reset(&mut s.ext_caches);
@@ -448,7 +435,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
             s.rebuild_renderer();
             let resp =
                 crate::scripting::build_reset_response(&mut s.core, id).with_session(session_id);
-            s.emit(&resp)?;
+            s.writer.emit(&resp)?;
         }
         IncomingMessage::ExtensionCommand {
             node_id,
@@ -459,7 +446,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
                 .dispatcher
                 .handle_command(&node_id, &op, &payload, &mut s.ext_caches);
             for event in events {
-                s.emit(&event.with_session(session_id.clone()))?;
+                s.writer.emit(&event.with_session(session_id))?;
             }
         }
         IncomingMessage::ExtensionCommandBatch { commands } => {
@@ -471,7 +458,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
                     &mut s.ext_caches,
                 );
                 for event in events {
-                    s.emit(&event.with_session(session_id.clone()))?;
+                    s.writer.emit(&event.with_session(session_id))?;
                 }
             }
         }
@@ -481,7 +468,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
                 .active_subscriptions
                 .get(crate::renderer::constants::SUB_ANIMATION_FRAME)
             {
-                s.emit(
+                s.writer.emit(
                     &julep_core::protocol::OutgoingEvent::animation_frame(
                         tag.clone(),
                         timestamp as u128,
@@ -508,9 +495,7 @@ fn handle_screenshot_capture(
     height: u32,
 ) -> io::Result<()> {
     let emit_stub = |s: &Session| {
-        let mut map = screenshot_map(session_id, &id, &name, "", 0, 0);
-        // Ensure no rgba field on stubs
-        map.remove("rgba");
+        let map = screenshot_map(session_id, &id, &name, "", 0, 0);
         s.writer.emit_binary(map, None)
     };
 
@@ -671,7 +656,7 @@ fn run_single(
     mode: Mode,
     reader: &mut impl BufRead,
 ) {
-    let mut session = Session::new(dispatcher, mode, WireWriter::stdout(), String::new());
+    let mut session = Session::new(dispatcher, mode, WireWriter::stdout());
 
     loop {
         match codec.read_message(reader) {
@@ -692,12 +677,7 @@ fn run_single(
                     }
                 };
 
-                // Pick up the session ID from the first message that provides one.
-                if session.session_id.is_empty() && !sm.session.is_empty() {
-                    session.session_id = sm.session;
-                }
-
-                if let Err(e) = handle_message(&mut session, sm.message) {
+                if let Err(e) = handle_message(&mut session, &sm.session, sm.message) {
                     log::error!("write error: {e}");
                     break;
                 }
@@ -779,14 +759,14 @@ fn run_multiplexed(
                     let sid = session_id.clone();
 
                     let handle = thread::spawn(move || {
-                        let mut session = Session::new(dispatcher, mode, writer, sid);
+                        let mut session = Session::new(dispatcher, mode, writer);
                         for msg in rx {
-                            if let Err(e) = handle_message(&mut session, msg) {
-                                log::error!("session '{}': write error: {e}", session.session_id);
+                            if let Err(e) = handle_message(&mut session, &sid, msg) {
+                                log::error!("session '{sid}': write error: {e}");
                                 break;
                             }
                         }
-                        log::debug!("session '{}' thread exiting", session.session_id);
+                        log::debug!("session '{sid}' thread exiting");
                     });
 
                     sessions.insert(session_id.clone(), tx.clone());

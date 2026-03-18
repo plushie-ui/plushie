@@ -59,8 +59,8 @@ impl OutgoingEvent {
     }
 
     /// Set the session ID for this event.
-    pub fn with_session(mut self, session: String) -> Self {
-        self.session = session;
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
         self
     }
 }
@@ -766,8 +766,8 @@ impl EffectResponse {
     }
 
     /// Set the session ID for this response.
-    pub fn with_session(mut self, session: String) -> Self {
-        self.session = session;
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
         self
     }
 }
@@ -795,8 +795,8 @@ impl QueryResponse {
     }
 
     /// Set the session ID for this response.
-    pub fn with_session(mut self, session: String) -> Self {
-        self.session = session;
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
         self
     }
 }
@@ -821,8 +821,12 @@ impl InteractResponse {
         }
     }
 
-    /// Set the session ID for this response.
-    pub fn with_session(mut self, session: String) -> Self {
+    /// Set the session ID for this response and all contained events.
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        let session = session.into();
+        for event in &mut self.events {
+            event.session.clone_from(&session);
+        }
         self.session = session;
         self
     }
@@ -860,13 +864,12 @@ impl SnapshotCaptureResponse {
     }
 
     /// Set the session ID for this response.
-    pub fn with_session(mut self, session: String) -> Self {
-        self.session = session;
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
         self
     }
 }
 
-/// Empty screenshot response for backends that cannot capture pixels.
 /// Response to a Reset message.
 #[derive(Debug, Serialize)]
 pub struct ResetResponse {
@@ -888,8 +891,8 @@ impl ResetResponse {
     }
 
     /// Set the session ID for this response.
-    pub fn with_session(mut self, session: String) -> Self {
-        self.session = session;
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
         self
     }
 }

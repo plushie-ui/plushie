@@ -126,8 +126,39 @@ mod tests {
 
     #[test]
     fn reset_response_includes_session() {
-        let resp = ResetResponse::ok("r1".to_string()).with_session("s3".to_string());
+        let resp = ResetResponse::ok("r1".to_string()).with_session("s3");
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["session"], "s3");
+    }
+
+    #[test]
+    fn interact_response_propagates_session_to_events() {
+        let events = vec![
+            OutgoingEvent::click("btn".to_string()),
+            OutgoingEvent::input("inp".to_string(), "text".to_string()),
+        ];
+        let resp = InteractResponse::new("i1".to_string(), events).with_session("s4");
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["session"], "s4");
+        assert_eq!(json["events"][0]["session"], "s4");
+        assert_eq!(json["events"][1]["session"], "s4");
+    }
+
+    #[test]
+    fn session_message_rejects_non_object() {
+        let val = json!([1, 2, 3]);
+        let result = SessionMessage::from_value(val);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn session_message_ignores_non_string_session() {
+        let val = json!({
+            "session": 42,
+            "type": "reset",
+            "id": "r1"
+        });
+        let sm = SessionMessage::from_value(val).unwrap();
+        assert_eq!(sm.session, "");
     }
 }
