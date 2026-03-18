@@ -27,6 +27,9 @@ impl Default for WindowState {
     }
 }
 
+/// Bidirectional julep ID <-> iced window::Id mapping with per-window
+/// state. All mutations keep both maps in sync -- callers cannot
+/// accidentally desync the forward and reverse maps.
 pub(super) struct WindowMap {
     /// Julep window ID -> (iced window ID, per-window state).
     forward: HashMap<String, (window::Id, WindowState)>,
@@ -42,7 +45,13 @@ impl WindowMap {
         }
     }
 
+    /// Insert a new window mapping. If the julep_id already exists,
+    /// the old iced_id is removed from the reverse map to prevent
+    /// dangling entries.
     pub(super) fn insert(&mut self, julep_id: String, iced_id: window::Id) {
+        if let Some((old_iced_id, _)) = self.forward.get(&julep_id) {
+            self.reverse.remove(old_iced_id);
+        }
         self.forward
             .insert(julep_id.clone(), (iced_id, WindowState::default()));
         self.reverse.insert(iced_id, julep_id);
