@@ -65,6 +65,7 @@ pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
 pub(crate) fn emit_hello() -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "hello",
+        "session": "",
         "protocol": julep_core::protocol::PROTOCOL_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
         "name": "julep",
@@ -97,6 +98,7 @@ pub(crate) fn emit_query_response(
 ) -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "query_response",
+        "session": "",
         "kind": kind,
         "tag": tag,
         "data": data,
@@ -125,6 +127,7 @@ pub(crate) fn emit_screenshot_response(
 
     let mut map = serde_json::Map::new();
     map.insert("type".to_string(), json!("screenshot_response"));
+    map.insert("session".to_string(), json!(""));
     map.insert("id".to_string(), json!(id));
     map.insert("name".to_string(), json!(name));
     map.insert("hash".to_string(), json!(hash));

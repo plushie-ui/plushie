@@ -30,11 +30,20 @@ pub(crate) fn run(builder: julep_core::app::JulepAppBuilder) -> iced::Result {
         None
     };
 
+    // Parse --max-sessions N for concurrent session support.
+    let max_sessions = args
+        .windows(2)
+        .find(|w| w[0] == "--max-sessions")
+        .and_then(|w| w[1].parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+
     if has_flag("--mock") {
         crate::headless::run(
             forced_codec,
             builder.build_dispatcher(),
             crate::headless::Mode::Mock,
+            max_sessions,
         );
         return Ok(());
     }
@@ -43,6 +52,7 @@ pub(crate) fn run(builder: julep_core::app::JulepAppBuilder) -> iced::Result {
             forced_codec,
             builder.build_dispatcher(),
             crate::headless::Mode::Headless,
+            max_sessions,
         );
         return Ok(());
     }

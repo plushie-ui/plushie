@@ -11,18 +11,29 @@
 //! No iced daemon, no windows, no GPU. The difference is whether a
 //! persistent iced renderer and UI cache are maintained for real
 //! screenshot capture (`--headless`) or omitted for speed (`--mock`).
+//!
+//! # Session multiplexing
+//!
+//! When `max_sessions > 1`, multiple sessions run concurrently in
+//! separate threads. A reader thread dispatches incoming messages by
+//! the `session` field to per-session threads. A writer thread
+//! collects responses from all sessions and writes them to stdout.
+//! Each session is fully isolated (own Core, caches, extensions, UI).
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write as _};
+use std::sync::mpsc;
+use std::thread;
 
 use iced::advanced::renderer::Headless as HeadlessTrait;
 use iced::mouse;
 use iced::{Event, Size, Theme};
+use serde::Serialize;
 
 use julep_core::codec::Codec;
 use julep_core::engine::Core;
 use julep_core::extensions::{ExtensionCaches, ExtensionDispatcher, RenderCtx};
 use julep_core::image_registry::ImageRegistry;
-use julep_core::protocol::IncomingMessage;
+use julep_core::protocol::{IncomingMessage, SessionMessage};
 
 use crate::scripting::{interaction_to_iced_events, resolve_widget_id};
 
@@ -36,12 +47,85 @@ const DEFAULT_SCREENSHOT_HEIGHT: u32 = 768;
 const MAX_SCREENSHOT_DIMENSION: u32 = 16384;
 
 /// Execution mode for the headless/mock event loop.
+#[derive(Clone, Copy)]
 pub(crate) enum Mode {
     /// Real rendering via tiny-skia with persistent widget state.
     Headless,
     /// Protocol-only, no rendering. Stub screenshots.
     Mock,
 }
+
+// ---------------------------------------------------------------------------
+// WireWriter -- abstracts output destination
+// ---------------------------------------------------------------------------
+
+/// Encodes and writes wire messages. Each session owns one.
+///
+/// In single-session mode, writes directly to stdout. In multiplexed
+/// mode, sends encoded bytes through a channel to the writer thread.
+struct WireWriter {
+    inner: WriterInner,
+}
+
+enum WriterInner {
+    /// Write directly to stdout (single-session mode).
+    Stdout,
+    /// Send encoded bytes to the writer thread (multiplexed mode).
+    Channel(mpsc::Sender<Vec<u8>>),
+}
+
+impl WireWriter {
+    fn stdout() -> Self {
+        Self {
+            inner: WriterInner::Stdout,
+        }
+    }
+
+    fn channel(tx: mpsc::Sender<Vec<u8>>) -> Self {
+        Self {
+            inner: WriterInner::Channel(tx),
+        }
+    }
+
+    /// Encode a serializable value and write it.
+    fn emit<T: Serialize>(&self, value: &T) -> io::Result<()> {
+        let codec = Codec::get_global();
+        let bytes = codec.encode(value).map_err(io::Error::other)?;
+        self.write_bytes(&bytes)
+    }
+
+    /// Encode a message with a binary field (e.g. screenshot RGBA data)
+    /// and write it.
+    fn emit_binary(
+        &self,
+        map: serde_json::Map<String, serde_json::Value>,
+        binary: Option<(&str, &[u8])>,
+    ) -> io::Result<()> {
+        let codec = Codec::get_global();
+        let bytes = codec
+            .encode_binary_message(map, binary)
+            .map_err(io::Error::other)?;
+        self.write_bytes(&bytes)
+    }
+
+    fn write_bytes(&self, bytes: &[u8]) -> io::Result<()> {
+        match &self.inner {
+            WriterInner::Stdout => {
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                handle.write_all(bytes)?;
+                handle.flush()
+            }
+            WriterInner::Channel(tx) => tx
+                .send(bytes.to_vec())
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "writer channel closed")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
 
 type UiCache = iced_test::runtime::user_interface::Cache;
 
@@ -65,12 +149,20 @@ struct Session {
     dispatcher: ExtensionDispatcher,
     ext_caches: ExtensionCaches,
     images: ImageRegistry,
+    writer: WireWriter,
+    /// Session ID echoed on all outgoing messages.
+    session_id: String,
     /// None in --mock mode (no rendering).
     ui: Option<UiState>,
 }
 
 impl Session {
-    fn new(dispatcher: ExtensionDispatcher, mode: Mode) -> Self {
+    fn new(
+        dispatcher: ExtensionDispatcher,
+        mode: Mode,
+        writer: WireWriter,
+        session_id: String,
+    ) -> Self {
         let ui = if matches!(mode, Mode::Headless) {
             let renderer_settings = iced::advanced::renderer::Settings {
                 default_font: iced::Font::DEFAULT,
@@ -99,8 +191,15 @@ impl Session {
             dispatcher,
             ext_caches: ExtensionCaches::new(),
             images: ImageRegistry::new(),
+            writer,
+            session_id,
             ui,
         }
+    }
+
+    /// Encode a serializable value, tag it with the session ID, and write it.
+    fn emit<T: Serialize>(&self, value: &T) -> io::Result<()> {
+        self.writer.emit(value)
     }
 
     /// Rebuild the renderer when default font/text size changes.
@@ -116,16 +215,12 @@ impl Session {
             iced::futures::executor::block_on(iced::Renderer::new(renderer_settings, None))
         {
             ui_state.renderer = r;
-            // The renderer changed, so the old cache is invalid.
             ui_state.ui_cache = UiCache::default();
         }
     }
 
     /// Build a temporary UserInterface from the current tree, run a
     /// closure against it, then store the resulting cache back.
-    ///
-    /// Returns `None` if the tree is empty (no root node) or if
-    /// rendering is disabled (mock mode).
     fn with_ui<R>(
         &mut self,
         f: impl FnOnce(
@@ -168,8 +263,6 @@ impl Session {
     }
 
     /// Process a RedrawRequested event through the UI after a tree change.
-    /// This lets iced widgets settle their internal state (layout, etc.).
-    /// No-op in mock mode.
     fn settle_ui(&mut self) {
         if self.ui.is_some() {
             self.with_ui(|ui, renderer, cursor| {
@@ -178,20 +271,15 @@ impl Session {
                     iced_test::core::time::Instant::now(),
                 ));
                 let _status = ui.update(&[redraw], cursor, renderer, &mut messages);
-                // Messages are discarded -- julep manages state through the
-                // wire protocol, not through iced's message loop.
             });
         }
     }
 
     /// Inject a sequence of iced events into the persistent UI.
-    /// No-op in mock mode.
     fn inject_events(&mut self, events: &[Event]) {
         if self.ui.is_none() || events.is_empty() {
             return;
         }
-        // Update cursor from any CursorMoved events before building the UI
-        // so the cursor position is current when the UI processes the events.
         if let Some(ui_state) = &mut self.ui {
             for event in events {
                 if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
@@ -207,24 +295,340 @@ impl Session {
 }
 
 // ---------------------------------------------------------------------------
-// Event loop
+// Message handling
+// ---------------------------------------------------------------------------
+
+/// Process one incoming message through a session.
+///
+/// All output goes through `session.writer`. The session ID is set on
+/// every outgoing message.
+fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
+    let is_snapshot = matches!(msg, IncomingMessage::Snapshot { .. });
+    let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
+    let is_settings = matches!(msg, IncomingMessage::Settings { .. });
+    let session_id = s.session_id.clone();
+
+    match msg {
+        IncomingMessage::Snapshot { .. }
+        | IncomingMessage::Patch { .. }
+        | IncomingMessage::EffectRequest { .. }
+        | IncomingMessage::WidgetOp { .. }
+        | IncomingMessage::SubscriptionRegister { .. }
+        | IncomingMessage::SubscriptionUnregister { .. }
+        | IncomingMessage::WindowOp { .. }
+        | IncomingMessage::Settings { .. }
+        | IncomingMessage::ImageOp { .. } => {
+            let effects = s.core.apply(msg);
+
+            for effect in effects {
+                use julep_core::engine::CoreEffect;
+                match effect {
+                    CoreEffect::EmitEvent(event) => {
+                        s.emit(&event.with_session(session_id.clone()))?;
+                    }
+                    CoreEffect::EmitEffectResponse(response) => {
+                        s.emit(&response.with_session(session_id.clone()))?;
+                    }
+                    CoreEffect::SpawnAsyncEffect {
+                        request_id,
+                        effect_type,
+                        ..
+                    } => {
+                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
+                        log::debug!(
+                            "{mode}: async effect {effect_type} returning cancelled \
+                             (no display)"
+                        );
+                        s.emit(
+                            &julep_core::protocol::EffectResponse::error(
+                                request_id,
+                                "cancelled".to_string(),
+                            )
+                            .with_session(session_id.clone()),
+                        )?;
+                    }
+                    CoreEffect::ThemeChanged(t) => {
+                        s.theme = t;
+                    }
+                    CoreEffect::ImageOp {
+                        op,
+                        handle,
+                        data,
+                        pixels,
+                        width,
+                        height,
+                    } => {
+                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
+                        if let Err(e) = s.images.apply_op(&op, &handle, data, pixels, width, height)
+                        {
+                            log::warn!("{mode}: image_op {op} failed: {e}");
+                        }
+                    }
+                    CoreEffect::ExtensionConfig(config) => {
+                        s.dispatcher.init_all(&config);
+                    }
+                    CoreEffect::SyncWindows => {}
+                    CoreEffect::WidgetOp { .. } => {}
+                    CoreEffect::WindowOp { .. } => {}
+                    CoreEffect::ThemeFollowsSystem => {}
+                }
+            }
+
+            if is_settings {
+                s.rebuild_renderer();
+            }
+            if is_tree_change {
+                if is_snapshot {
+                    s.dispatcher.clear_poisoned();
+                }
+                if let Some(root) = s.core.tree.root() {
+                    s.dispatcher.prepare_all(root, &mut s.ext_caches, &s.theme);
+                }
+                s.settle_ui();
+            }
+        }
+
+        IncomingMessage::Query {
+            id,
+            target,
+            selector,
+        } => {
+            let resp = crate::scripting::build_query_response(&s.core, id, target, selector)
+                .with_session(session_id);
+            s.emit(&resp)?;
+        }
+        IncomingMessage::Interact {
+            id,
+            action,
+            selector,
+            payload,
+        } => {
+            let widget_id = resolve_widget_id(&s.core, &selector);
+            let cursor =
+                s.ui.as_ref()
+                    .map(|u| u.cursor)
+                    .unwrap_or(mouse::Cursor::Unavailable);
+            let iced_events =
+                interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor);
+            if !iced_events.is_empty() {
+                s.inject_events(&iced_events);
+            }
+            let resp =
+                crate::scripting::build_interact_response(&s.core, id, action, selector, payload)
+                    .with_session(session_id);
+            s.emit(&resp)?;
+        }
+        IncomingMessage::SnapshotCapture { id, name, .. } => {
+            let resp = crate::scripting::build_snapshot_capture_response(&s.core, id, name)
+                .with_session(session_id);
+            s.emit(&resp)?;
+        }
+        IncomingMessage::ScreenshotCapture {
+            id,
+            name,
+            width,
+            height,
+        } => {
+            let w = width
+                .unwrap_or(DEFAULT_SCREENSHOT_WIDTH)
+                .clamp(1, MAX_SCREENSHOT_DIMENSION);
+            let h = height
+                .unwrap_or(DEFAULT_SCREENSHOT_HEIGHT)
+                .clamp(1, MAX_SCREENSHOT_DIMENSION);
+            handle_screenshot_capture(s, &session_id, id, name, w, h)?;
+        }
+        IncomingMessage::Reset { id } => {
+            s.dispatcher.reset(&mut s.ext_caches);
+            s.images = ImageRegistry::new();
+            s.theme = Theme::Dark;
+            if let Some(ui_state) = &mut s.ui {
+                ui_state.ui_cache = UiCache::default();
+                ui_state.cursor = mouse::Cursor::Unavailable;
+            }
+            s.rebuild_renderer();
+            let resp =
+                crate::scripting::build_reset_response(&mut s.core, id).with_session(session_id);
+            s.emit(&resp)?;
+        }
+        IncomingMessage::ExtensionCommand {
+            node_id,
+            op,
+            payload,
+        } => {
+            let events = s
+                .dispatcher
+                .handle_command(&node_id, &op, &payload, &mut s.ext_caches);
+            for event in events {
+                s.emit(&event.with_session(session_id.clone()))?;
+            }
+        }
+        IncomingMessage::ExtensionCommandBatch { commands } => {
+            for cmd in commands {
+                let events = s.dispatcher.handle_command(
+                    &cmd.node_id,
+                    &cmd.op,
+                    &cmd.payload,
+                    &mut s.ext_caches,
+                );
+                for event in events {
+                    s.emit(&event.with_session(session_id.clone()))?;
+                }
+            }
+        }
+        IncomingMessage::AdvanceFrame { timestamp } => {
+            if let Some(tag) = s
+                .core
+                .active_subscriptions
+                .get(crate::renderer::constants::SUB_ANIMATION_FRAME)
+            {
+                s.emit(
+                    &julep_core::protocol::OutgoingEvent::animation_frame(
+                        tag.clone(),
+                        timestamp as u128,
+                    )
+                    .with_session(session_id),
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Screenshot capture
+// ---------------------------------------------------------------------------
+
+fn handle_screenshot_capture(
+    s: &mut Session,
+    session_id: &str,
+    id: String,
+    name: String,
+    width: u32,
+    height: u32,
+) -> io::Result<()> {
+    let emit_stub = |s: &Session| {
+        let mut map = screenshot_map(session_id, &id, &name, "", 0, 0);
+        // Ensure no rgba field on stubs
+        map.remove("rgba");
+        s.writer.emit_binary(map, None)
+    };
+
+    if s.ui.is_none() {
+        return emit_stub(s);
+    }
+
+    use iced_test::core::theme::Base;
+    use sha2::{Digest, Sha256};
+
+    let ui_state = s.ui.as_mut().unwrap();
+    ui_state.viewport_size = Size::new(width as f32, height as f32);
+
+    let root = match s.core.tree.root() {
+        Some(r) => r,
+        None => return emit_stub(s),
+    };
+
+    julep_core::widgets::ensure_caches(root, &mut s.core.caches);
+    let ctx = RenderCtx {
+        caches: &s.core.caches,
+        images: &s.images,
+        theme: &s.theme,
+        extensions: &s.dispatcher,
+        default_text_size: s.core.default_text_size,
+        default_font: s.core.default_font,
+    };
+    let element: iced::Element<'_, julep_core::message::Message> =
+        julep_core::widgets::render(root, ctx);
+
+    let cache = std::mem::take(&mut ui_state.ui_cache);
+    let mut ui = iced_test::runtime::UserInterface::build(
+        element,
+        ui_state.viewport_size,
+        cache,
+        &mut ui_state.renderer,
+    );
+
+    {
+        let cursor = ui_state.cursor;
+        let mut messages = Vec::new();
+        let redraw = Event::Window(iced::window::Event::RedrawRequested(
+            iced_test::core::time::Instant::now(),
+        ));
+        let _status = ui.update(&[redraw], cursor, &mut ui_state.renderer, &mut messages);
+    }
+
+    let base = s.theme.base();
+    ui.draw(
+        &mut ui_state.renderer,
+        &s.theme,
+        &iced_test::core::renderer::Style {
+            text_color: base.text_color,
+        },
+        ui_state.cursor,
+    );
+
+    ui_state.ui_cache = ui.into_cache();
+
+    let phys_size = iced::Size::new(width, height);
+    let rgba = ui_state
+        .renderer
+        .screenshot(phys_size, 1.0, base.background_color);
+
+    let hash = {
+        let mut hasher = Sha256::new();
+        hasher.update(&rgba);
+        format!("{:x}", hasher.finalize())
+    };
+
+    let map = screenshot_map(session_id, &id, &name, &hash, width, height);
+    let binary = if rgba.is_empty() {
+        None
+    } else {
+        Some(("rgba", rgba.as_slice()))
+    };
+    s.writer.emit_binary(map, binary)
+}
+
+/// Build the JSON map for a screenshot_response message.
+fn screenshot_map(
+    session: &str,
+    id: &str,
+    name: &str,
+    hash: &str,
+    width: u32,
+    height: u32,
+) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::json;
+    let mut map = serde_json::Map::new();
+    map.insert("type".to_string(), json!("screenshot_response"));
+    map.insert("session".to_string(), json!(session));
+    map.insert("id".to_string(), json!(id));
+    map.insert("name".to_string(), json!(name));
+    map.insert("hash".to_string(), json!(hash));
+    map.insert("width".to_string(), json!(width));
+    map.insert("height".to_string(), json!(height));
+    map
+}
+
+// ---------------------------------------------------------------------------
+// Entry points
 // ---------------------------------------------------------------------------
 
 /// Run the headless/mock event loop.
 ///
-/// In `Mode::Headless`, a persistent iced renderer and UI cache are
-/// maintained. Interactions inject real iced events so widget state
-/// (scroll positions, focus, text cursors) persists. Screenshots
-/// capture the accumulated widget state.
-///
-/// In `Mode::Mock`, no renderer is created. Screenshots return empty
-/// stubs. This is the fastest option for protocol-level testing.
-pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: Mode) {
-    let mut session = Session::new(dispatcher, mode);
+/// When `max_sessions` is 1, runs a single session on the current
+/// thread (same as the original design). When > 1, spawns reader,
+/// writer, and per-session threads for concurrent multiplexing.
+pub(crate) fn run(
+    forced_codec: Option<Codec>,
+    dispatcher: ExtensionDispatcher,
+    mode: Mode,
+    max_sessions: usize,
+) {
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin.lock());
 
-    // Determine codec: forced by CLI flag, or auto-detected from first byte.
     let codec = match forced_codec {
         Some(c) => c,
         None => {
@@ -250,20 +654,160 @@ pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: M
         return;
     }
 
+    if max_sessions <= 1 {
+        run_single(codec, dispatcher, mode, &mut reader);
+    } else {
+        run_multiplexed(codec, dispatcher, mode, max_sessions, &mut reader);
+    }
+
+    log::info!("stdin closed, exiting");
+}
+
+/// Single-session event loop (max_sessions=1). Behaves like the
+/// original design: one session, direct stdout writes.
+fn run_single(
+    codec: Codec,
+    dispatcher: ExtensionDispatcher,
+    mode: Mode,
+    reader: &mut impl BufRead,
+) {
+    let mut session = Session::new(dispatcher, mode, WireWriter::stdout(), String::new());
+
     loop {
-        match codec.read_message(&mut reader) {
+        match codec.read_message(reader) {
             Ok(None) => break,
-            Ok(Some(bytes)) => match codec.decode::<IncomingMessage>(&bytes) {
-                Ok(msg) => {
-                    if let Err(e) = handle_message(&mut session, msg) {
-                        log::error!("write error: {e}");
-                        break;
+            Ok(Some(bytes)) => {
+                let value: serde_json::Value = match codec.decode(&bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
                     }
+                };
+                let sm = match SessionMessage::from_value(value) {
+                    Ok(sm) => sm,
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
+                    }
+                };
+
+                // Pick up the session ID from the first message that provides one.
+                if session.session_id.is_empty() && !sm.session.is_empty() {
+                    session.session_id = sm.session;
                 }
-                Err(e) => {
-                    log::error!("decode error: {e}");
+
+                if let Err(e) = handle_message(&mut session, sm.message) {
+                    log::error!("write error: {e}");
+                    break;
                 }
-            },
+            }
+            Err(e) => {
+                log::error!("read error: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// Multiplexed event loop (max_sessions > 1). Reader thread dispatches
+/// to per-session threads. Writer thread serializes output to stdout.
+fn run_multiplexed(
+    codec: Codec,
+    template: ExtensionDispatcher,
+    mode: Mode,
+    max_sessions: usize,
+    reader: &mut impl BufRead,
+) {
+    use std::collections::HashMap;
+
+    // Writer thread: drains the channel and writes to stdout.
+    let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
+    let writer_handle = thread::spawn(move || {
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for bytes in writer_rx {
+            if handle.write_all(&bytes).is_err() || handle.flush().is_err() {
+                break;
+            }
+        }
+    });
+
+    // Session dispatch table: session_id -> sender to that session's thread.
+    let mut sessions: HashMap<String, mpsc::Sender<IncomingMessage>> = HashMap::new();
+    let mut session_handles: Vec<thread::JoinHandle<()>> = Vec::new();
+
+    loop {
+        match codec.read_message(reader) {
+            Ok(None) => break,
+            Ok(Some(bytes)) => {
+                let value: serde_json::Value = match codec.decode(&bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
+                    }
+                };
+                let sm = match SessionMessage::from_value(value) {
+                    Ok(sm) => sm,
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
+                    }
+                };
+
+                let session_id = sm.session.clone();
+
+                // Check if this is a Reset -- if so, tear down the session.
+                let is_reset = matches!(sm.message, IncomingMessage::Reset { .. });
+
+                // Get or create the session thread.
+                let tx = if let Some(tx) = sessions.get(&session_id) {
+                    tx.clone()
+                } else {
+                    if sessions.len() >= max_sessions {
+                        log::error!(
+                            "max sessions ({max_sessions}) reached; \
+                             dropping message for session '{session_id}'"
+                        );
+                        continue;
+                    }
+
+                    let (tx, rx) = mpsc::channel::<IncomingMessage>();
+                    let dispatcher = template.clone_for_session();
+                    let writer = WireWriter::channel(writer_tx.clone());
+                    let sid = session_id.clone();
+
+                    let handle = thread::spawn(move || {
+                        let mut session = Session::new(dispatcher, mode, writer, sid);
+                        for msg in rx {
+                            if let Err(e) = handle_message(&mut session, msg) {
+                                log::error!("session '{}': write error: {e}", session.session_id);
+                                break;
+                            }
+                        }
+                        log::debug!("session '{}' thread exiting", session.session_id);
+                    });
+
+                    sessions.insert(session_id.clone(), tx.clone());
+                    session_handles.push(handle);
+                    tx
+                };
+
+                // Send the message to the session thread.
+                if tx.send(sm.message).is_err() {
+                    log::error!("session '{session_id}' channel closed unexpectedly");
+                    sessions.remove(&session_id);
+                    continue;
+                }
+
+                // If this was a Reset, tear down the session after it processes.
+                if is_reset {
+                    // Drop the sender so the session thread exits after
+                    // processing the Reset message.
+                    sessions.remove(&session_id);
+                }
+            }
             Err(e) => {
                 log::error!("read error: {e}");
                 break;
@@ -271,290 +815,13 @@ pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: M
         }
     }
 
-    log::info!("stdin closed, exiting");
-}
+    // Drop all session senders so threads exit.
+    sessions.clear();
+    // Drop the writer sender so the writer thread exits.
+    drop(writer_tx);
 
-fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
-    let is_snapshot = matches!(msg, IncomingMessage::Snapshot { .. });
-    let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
-    let is_settings = matches!(msg, IncomingMessage::Settings { .. });
-
-    match msg {
-        // Messages that go through Core::apply().
-        IncomingMessage::Snapshot { .. }
-        | IncomingMessage::Patch { .. }
-        | IncomingMessage::EffectRequest { .. }
-        | IncomingMessage::WidgetOp { .. }
-        | IncomingMessage::SubscriptionRegister { .. }
-        | IncomingMessage::SubscriptionUnregister { .. }
-        | IncomingMessage::WindowOp { .. }
-        | IncomingMessage::Settings { .. }
-        | IncomingMessage::ImageOp { .. } => {
-            let effects = s.core.apply(msg);
-
-            for effect in effects {
-                use julep_core::engine::CoreEffect;
-                match effect {
-                    CoreEffect::EmitEvent(event) => {
-                        crate::scripting::emit_wire(&event)?;
-                    }
-                    CoreEffect::EmitEffectResponse(response) => {
-                        crate::scripting::emit_wire(&response)?;
-                    }
-                    CoreEffect::SpawnAsyncEffect {
-                        request_id,
-                        effect_type,
-                        ..
-                    } => {
-                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
-                        log::debug!(
-                            "{mode}: async effect {effect_type} returning cancelled \
-                             (no display)"
-                        );
-                        crate::scripting::emit_wire(&julep_core::protocol::EffectResponse::error(
-                            request_id,
-                            "cancelled".to_string(),
-                        ))?;
-                    }
-                    CoreEffect::ThemeChanged(t) => {
-                        s.theme = t;
-                    }
-                    CoreEffect::ImageOp {
-                        op,
-                        handle,
-                        data,
-                        pixels,
-                        width,
-                        height,
-                    } => {
-                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
-                        if let Err(e) = s.images.apply_op(&op, &handle, data, pixels, width, height)
-                        {
-                            log::warn!("{mode}: image_op {op} failed: {e}");
-                        }
-                    }
-                    CoreEffect::ExtensionConfig(config) => {
-                        s.dispatcher.init_all(&config);
-                    }
-                    // No-ops in headless/mock (no windows, no iced widget tree).
-                    CoreEffect::SyncWindows => {}
-                    CoreEffect::WidgetOp { .. } => {}
-                    CoreEffect::WindowOp { .. } => {}
-                    CoreEffect::ThemeFollowsSystem => {}
-                }
-            }
-
-            // Rebuild renderer if defaults changed (Settings message).
-            if is_settings {
-                s.rebuild_renderer();
-            }
-
-            // Prepare extensions after tree changes (Snapshot/Patch).
-            if is_tree_change {
-                if is_snapshot {
-                    s.dispatcher.clear_poisoned();
-                }
-                if let Some(root) = s.core.tree.root() {
-                    s.dispatcher.prepare_all(root, &mut s.ext_caches, &s.theme);
-                }
-                // Settle the UI so widget state reflects the new tree.
-                s.settle_ui();
-            }
-        }
-
-        // Scripting messages
-        IncomingMessage::Query {
-            id,
-            target,
-            selector,
-        } => {
-            crate::scripting::handle_query(&s.core, id, target, selector)?;
-        }
-        IncomingMessage::Interact {
-            id,
-            action,
-            selector,
-            payload,
-        } => {
-            // Resolve the widget ID for synthetic event emission.
-            let widget_id = resolve_widget_id(&s.core, &selector);
-
-            // Inject real iced events into the persistent UI so widget
-            // state (focus, scroll, cursor) updates. No-op in mock mode
-            // (inject_events returns early when ui is None).
-            let cursor =
-                s.ui.as_ref()
-                    .map(|u| u.cursor)
-                    .unwrap_or(mouse::Cursor::Unavailable);
-            let iced_events =
-                interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor);
-            if !iced_events.is_empty() {
-                s.inject_events(&iced_events);
-            }
-
-            // Emit synthetic events back to the host.
-            crate::scripting::handle_interact(&s.core, id, action, selector, payload)?;
-        }
-        IncomingMessage::SnapshotCapture { id, name, .. } => {
-            crate::scripting::handle_snapshot_capture(&s.core, id, name)?;
-        }
-        IncomingMessage::ScreenshotCapture {
-            id,
-            name,
-            width,
-            height,
-        } => {
-            let w = width
-                .unwrap_or(DEFAULT_SCREENSHOT_WIDTH)
-                .clamp(1, MAX_SCREENSHOT_DIMENSION);
-            let h = height
-                .unwrap_or(DEFAULT_SCREENSHOT_HEIGHT)
-                .clamp(1, MAX_SCREENSHOT_DIMENSION);
-            handle_screenshot_capture(s, id, name, w, h)?;
-        }
-        IncomingMessage::Reset { id } => {
-            s.dispatcher.reset(&mut s.ext_caches);
-            s.images = ImageRegistry::new();
-            s.theme = Theme::Dark;
-            if let Some(ui_state) = &mut s.ui {
-                ui_state.ui_cache = UiCache::default();
-                ui_state.cursor = mouse::Cursor::Unavailable;
-            }
-            s.rebuild_renderer();
-            crate::scripting::handle_reset(&mut s.core, id)?;
-        }
-        IncomingMessage::ExtensionCommand {
-            node_id,
-            op,
-            payload,
-        } => {
-            let events = s
-                .dispatcher
-                .handle_command(&node_id, &op, &payload, &mut s.ext_caches);
-            for event in events {
-                crate::scripting::emit_wire(&event)?;
-            }
-        }
-        IncomingMessage::ExtensionCommandBatch { commands } => {
-            for cmd in commands {
-                let events = s.dispatcher.handle_command(
-                    &cmd.node_id,
-                    &cmd.op,
-                    &cmd.payload,
-                    &mut s.ext_caches,
-                );
-                for event in events {
-                    crate::scripting::emit_wire(&event)?;
-                }
-            }
-        }
-        IncomingMessage::AdvanceFrame { timestamp } => {
-            if let Some(tag) = s
-                .core
-                .active_subscriptions
-                .get(crate::renderer::constants::SUB_ANIMATION_FRAME)
-            {
-                crate::scripting::emit_wire(
-                    &julep_core::protocol::OutgoingEvent::animation_frame(
-                        tag.clone(),
-                        timestamp as u128,
-                    ),
-                )?;
-            }
-        }
+    for handle in session_handles {
+        let _ = handle.join();
     }
-
-    Ok(())
-}
-
-/// Handle a ScreenshotCapture message.
-///
-/// In headless mode, uses the persistent renderer and UI cache to
-/// produce real RGBA pixel data via tiny-skia. In mock mode, returns
-/// an empty stub.
-fn handle_screenshot_capture(
-    s: &mut Session,
-    id: String,
-    name: String,
-    width: u32,
-    height: u32,
-) -> io::Result<()> {
-    if s.ui.is_none() {
-        // Mock mode: stub screenshot.
-        return crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
-    }
-
-    use iced_test::core::theme::Base;
-    use sha2::{Digest, Sha256};
-
-    let ui_state = s.ui.as_mut().unwrap();
-
-    // Update viewport size for this screenshot.
-    ui_state.viewport_size = Size::new(width as f32, height as f32);
-
-    let root = match s.core.tree.root() {
-        Some(r) => r,
-        None => {
-            return crate::renderer::emitters::emit_screenshot_response(&id, &name, "", 0, 0, &[]);
-        }
-    };
-
-    // Prepare caches and build the iced Element from the tree.
-    julep_core::widgets::ensure_caches(root, &mut s.core.caches);
-    let ctx = RenderCtx {
-        caches: &s.core.caches,
-        images: &s.images,
-        theme: &s.theme,
-        extensions: &s.dispatcher,
-        default_text_size: s.core.default_text_size,
-        default_font: s.core.default_font,
-    };
-    let element: iced::Element<'_, julep_core::message::Message> =
-        julep_core::widgets::render(root, ctx);
-
-    // Build UI with the persistent cache.
-    let cache = std::mem::take(&mut ui_state.ui_cache);
-    let mut ui = iced_test::runtime::UserInterface::build(
-        element,
-        ui_state.viewport_size,
-        cache,
-        &mut ui_state.renderer,
-    );
-
-    // Process a RedrawRequested so widgets can update their visual state.
-    {
-        let cursor = ui_state.cursor;
-        let mut messages = Vec::new();
-        let redraw = Event::Window(iced::window::Event::RedrawRequested(
-            iced_test::core::time::Instant::now(),
-        ));
-        let _status = ui.update(&[redraw], cursor, &mut ui_state.renderer, &mut messages);
-    }
-
-    let base = s.theme.base();
-    ui.draw(
-        &mut ui_state.renderer,
-        &s.theme,
-        &iced_test::core::renderer::Style {
-            text_color: base.text_color,
-        },
-        ui_state.cursor,
-    );
-
-    // Store cache before taking the screenshot (screenshot doesn't
-    // need the UI, just the renderer).
-    ui_state.ui_cache = ui.into_cache();
-
-    let phys_size = iced::Size::new(width, height);
-    let rgba = ui_state
-        .renderer
-        .screenshot(phys_size, 1.0, base.background_color);
-
-    let hash = {
-        let mut hasher = Sha256::new();
-        hasher.update(&rgba);
-        format!("{:x}", hasher.finalize())
-    };
-
-    crate::renderer::emitters::emit_screenshot_response(&id, &name, &hash, width, height, &rgba)
+    let _ = writer_handle.join();
 }

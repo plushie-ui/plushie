@@ -23,7 +23,8 @@ use serde_json::Value;
 use julep_core::codec::Codec;
 use julep_core::engine::Core;
 use julep_core::protocol::{
-    InteractResponse, OutgoingEvent, QueryResponse, ResetResponse, TreeNode,
+    InteractResponse, OutgoingEvent, QueryResponse, ResetResponse, SnapshotCaptureResponse,
+    TreeNode,
 };
 
 /// Maximum tree search recursion depth (matches MAX_TREE_DEPTH in widgets.rs).
@@ -488,13 +489,13 @@ pub(crate) fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
 // Message handlers
 // ---------------------------------------------------------------------------
 
-/// Handle a Query message: serialize tree or find a widget by selector.
-pub(crate) fn handle_query(
+/// Build a QueryResponse without writing it anywhere.
+pub(crate) fn build_query_response(
     core: &Core,
     id: String,
     target: String,
     selector: Value,
-) -> io::Result<()> {
+) -> QueryResponse {
     let data = match target.as_str() {
         "tree" => match core.tree.root() {
             Some(root) => serde_json::to_value(root).unwrap_or(Value::Null),
@@ -514,7 +515,17 @@ pub(crate) fn handle_query(
         }
     };
 
-    emit_wire(&QueryResponse::new(id, target, data))
+    QueryResponse::new(id, target, data)
+}
+
+/// Build and emit a QueryResponse to stdout.
+pub(crate) fn handle_query(
+    core: &Core,
+    id: String,
+    target: String,
+    selector: Value,
+) -> io::Result<()> {
+    emit_wire(&build_query_response(core, id, target, selector))
 }
 
 /// Resolve a selector to a widget ID without emitting anything.
@@ -537,15 +548,14 @@ pub(crate) fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String>
     }
 }
 
-/// Handle an Interact message: resolve widget ID from selector, build
-/// synthetic events for the requested action.
-pub(crate) fn handle_interact(
+/// Build an InteractResponse without writing it anywhere.
+pub(crate) fn build_interact_response(
     core: &Core,
     id: String,
     action: String,
     selector: Value,
     payload: Value,
-) -> io::Result<()> {
+) -> InteractResponse {
     let widget_id = resolve_widget_id(core, &selector);
 
     let events: Vec<OutgoingEvent> = match (action.as_str(), widget_id) {
@@ -657,18 +667,39 @@ pub(crate) fn handle_interact(
         }
     };
 
-    emit_wire(&InteractResponse::new(id, events))
+    InteractResponse::new(id, events)
 }
 
-/// Reset core to a blank state and emit the response.
-pub(crate) fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
+/// Build and emit an InteractResponse to stdout.
+pub(crate) fn handle_interact(
+    core: &Core,
+    id: String,
+    action: String,
+    selector: Value,
+    payload: Value,
+) -> io::Result<()> {
+    emit_wire(&build_interact_response(
+        core, id, action, selector, payload,
+    ))
+}
+
+/// Reset core to a blank state and return the response.
+pub(crate) fn build_reset_response(core: &mut Core, id: String) -> ResetResponse {
     *core = Core::new();
-    emit_wire(&ResetResponse::ok(id))
+    ResetResponse::ok(id)
 }
 
-/// Hash the current tree and emit a SnapshotCaptureResponse.
-pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) -> io::Result<()> {
-    use julep_core::protocol::SnapshotCaptureResponse;
+/// Reset core and emit the response to stdout.
+pub(crate) fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
+    emit_wire(&build_reset_response(core, id))
+}
+
+/// Build a SnapshotCaptureResponse without writing it anywhere.
+pub(crate) fn build_snapshot_capture_response(
+    core: &Core,
+    id: String,
+    name: String,
+) -> SnapshotCaptureResponse {
     use sha2::{Digest, Sha256};
 
     let tree_json = match core.tree.root() {
@@ -680,7 +711,12 @@ pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) -> 
     hasher.update(tree_json.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
 
-    emit_wire(&SnapshotCaptureResponse::new(id, name, hash, 0, 0))
+    SnapshotCaptureResponse::new(id, name, hash, 0, 0)
+}
+
+/// Build and emit a SnapshotCaptureResponse to stdout.
+pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) -> io::Result<()> {
+    emit_wire(&build_snapshot_capture_response(core, id, name))
 }
 
 // ---------------------------------------------------------------------------

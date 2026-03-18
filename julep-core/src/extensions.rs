@@ -209,6 +209,20 @@ pub trait WidgetExtension: Send + Sync + 'static {
 
     /// Clean up when a node is removed from the tree.
     fn cleanup(&mut self, _node_id: &str, _caches: &mut ExtensionCaches) {}
+
+    /// Create a fresh instance for a new session. Required for
+    /// multiplexed mode (`--max-sessions > 1`). Each session gets its
+    /// own extension instances so mutable state is fully isolated.
+    ///
+    /// The default implementation panics. Extensions that support
+    /// multiplexed sessions must override this.
+    fn new_instance(&self) -> Box<dyn WidgetExtension> {
+        unimplemented!(
+            "extension `{}` does not support multiplexed sessions; \
+             implement new_instance() to enable --max-sessions > 1",
+            self.config_key()
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +513,22 @@ impl ExtensionDispatcher {
             poisoned: vec![false; n],
             render_panic_counts,
         }
+    }
+
+    /// Create a new dispatcher for a multiplexed session.
+    ///
+    /// Calls [`WidgetExtension::new_instance()`] on each registered
+    /// extension to produce independent instances with isolated mutable
+    /// state. The type-name index is rebuilt from the new instances.
+    ///
+    /// Panics if any extension has not implemented `new_instance()`.
+    pub fn clone_for_session(&self) -> Self {
+        let extensions: Vec<Box<dyn WidgetExtension>> = self
+            .extensions
+            .iter()
+            .map(|ext| ext.new_instance())
+            .collect();
+        Self::new(extensions)
     }
 
     /// Check if a node type is handled by an extension.

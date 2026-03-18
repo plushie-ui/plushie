@@ -25,6 +25,8 @@ pub struct OutgoingEvent {
     /// Always `"event"`.
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    /// Session that produced this event.
+    pub session: String,
     /// Event type (e.g. `"click"`, `"key_press"`, `"window_opened"`).
     pub family: String,
     /// Source widget node ID (widget events) or empty (subscription events).
@@ -55,6 +57,12 @@ impl OutgoingEvent {
         self.captured = Some(captured);
         self
     }
+
+    /// Set the session ID for this event.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
+    }
 }
 
 /// Serializable representation of keyboard modifiers.
@@ -76,6 +84,7 @@ impl OutgoingEvent {
     fn bare(family: impl Into<String>, id: String) -> Self {
         Self {
             message_type: "event",
+            session: String::new(),
             family: family.into(),
             id,
             value: None,
@@ -90,6 +99,7 @@ impl OutgoingEvent {
     fn tagged(family: impl Into<String>, tag: String) -> Self {
         Self {
             message_type: "event",
+            session: String::new(),
             family: family.into(),
             id: String::new(),
             value: None,
@@ -702,6 +712,7 @@ fn sanitize_f64(v: f64) -> f64 {
 pub struct EffectResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    pub session: String,
     pub id: String,
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -715,6 +726,7 @@ impl EffectResponse {
     pub fn ok(id: String, result: Value) -> Self {
         Self {
             message_type: "effect_response",
+            session: String::new(),
             id,
             status: "ok",
             result: Some(result),
@@ -726,6 +738,7 @@ impl EffectResponse {
     pub fn error(id: String, reason: String) -> Self {
         Self {
             message_type: "effect_response",
+            session: String::new(),
             id,
             status: "error",
             result: None,
@@ -744,11 +757,18 @@ impl EffectResponse {
     pub fn cancelled(id: String) -> Self {
         Self {
             message_type: "effect_response",
+            session: String::new(),
             id,
             status: "cancelled",
             result: None,
             error: None,
         }
+    }
+
+    /// Set the session ID for this response.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
     }
 }
 
@@ -757,6 +777,7 @@ impl EffectResponse {
 pub struct QueryResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    pub session: String,
     pub id: String,
     pub target: String,
     pub data: Value,
@@ -766,10 +787,17 @@ impl QueryResponse {
     pub fn new(id: String, target: String, data: Value) -> Self {
         Self {
             message_type: "query_response",
+            session: String::new(),
             id,
             target,
             data,
         }
+    }
+
+    /// Set the session ID for this response.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
     }
 }
 
@@ -778,6 +806,7 @@ impl QueryResponse {
 pub struct InteractResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    pub session: String,
     pub id: String,
     pub events: Vec<OutgoingEvent>,
 }
@@ -786,9 +815,16 @@ impl InteractResponse {
     pub fn new(id: String, events: Vec<OutgoingEvent>) -> Self {
         Self {
             message_type: "interact_response",
+            session: String::new(),
             id,
             events,
         }
+    }
+
+    /// Set the session ID for this response.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
     }
 }
 
@@ -801,6 +837,7 @@ impl InteractResponse {
 pub struct SnapshotCaptureResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    pub session: String,
     pub id: String,
     pub name: String,
     pub hash: String,
@@ -813,12 +850,19 @@ impl SnapshotCaptureResponse {
     pub fn new(id: String, name: String, hash: String, width: u32, height: u32) -> Self {
         Self {
             message_type: "snapshot_response",
+            session: String::new(),
             id,
             name,
             hash,
             width,
             height,
         }
+    }
+
+    /// Set the session ID for this response.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
     }
 }
 
@@ -828,6 +872,7 @@ impl SnapshotCaptureResponse {
 pub struct ResetResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
+    pub session: String,
     pub id: String,
     pub status: &'static str,
 }
@@ -836,9 +881,16 @@ impl ResetResponse {
     pub fn ok(id: String) -> Self {
         Self {
             message_type: "reset_response",
+            session: String::new(),
             id,
             status: "ok",
         }
+    }
+
+    /// Set the session ID for this response.
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = session;
+        self
     }
 }
 
