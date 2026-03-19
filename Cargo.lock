@@ -1669,7 +1669,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.61.3",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -4362,7 +4362,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "image",
  "thiserror 2.0.18",
@@ -4378,7 +4378,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -4394,7 +4394,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-cryoglyph"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "cosmic-text",
  "etagere",
@@ -4405,7 +4405,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-debug"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "log",
  "toddy-iced-core",
@@ -4414,7 +4414,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-futures"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "futures",
  "log",
@@ -4427,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-graphics"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -4447,7 +4447,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-highlighter"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "toddy-iced-core",
  "two-face",
@@ -4455,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-program"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "toddy-iced-graphics",
  "toddy-iced-runtime",
@@ -4463,7 +4463,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-renderer"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "log",
  "thiserror 2.0.18",
@@ -4474,7 +4474,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-runtime"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bytes",
  "raw-window-handle",
@@ -4485,14 +4485,14 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-selector"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "toddy-iced-core",
 ]
 
 [[package]]
 name = "toddy-iced-test"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "nom",
  "png 0.18.1",
@@ -4507,7 +4507,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-tiny-skia"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -4523,7 +4523,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-wgpu"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-widget"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "log",
  "num-traits",
@@ -4557,7 +4557,7 @@ dependencies = [
 
 [[package]]
 name = "toddy-iced-winit"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "accesskit",
  "accesskit_winit",
