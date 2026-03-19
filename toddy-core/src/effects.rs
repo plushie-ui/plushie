@@ -450,6 +450,7 @@ fn handle_notification(id: String, payload: &Value) -> EffectResponse {
         notification.timeout(notify_rust::Timeout::Milliseconds(clamped));
     }
 
+    #[cfg(target_os = "linux")]
     if let Some(urgency) = payload.get("urgency").and_then(|v| v.as_str()) {
         let u = match urgency {
             "low" => notify_rust::Urgency::Low,
