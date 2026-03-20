@@ -177,8 +177,8 @@ impl OutgoingEvent {
     pub fn key_press(tag: String, data: &crate::message::KeyEventData) -> Self {
         Self {
             modifiers: Some(crate::message::serialize_modifiers(data.modifiers)),
-            value: Some(Value::String(crate::message::serialize_key(&data.key))),
             data: Some(serde_json::json!({
+                "key": crate::message::serialize_key(&data.key),
                 "modified_key": crate::message::serialize_key(&data.modified_key),
                 "physical_key": crate::message::serialize_physical_key(&data.physical_key),
                 "location": crate::message::serialize_location(&data.location),
@@ -192,8 +192,8 @@ impl OutgoingEvent {
     pub fn key_release(tag: String, data: &crate::message::KeyEventData) -> Self {
         Self {
             modifiers: Some(crate::message::serialize_modifiers(data.modifiers)),
-            value: Some(Value::String(crate::message::serialize_key(&data.key))),
             data: Some(serde_json::json!({
+                "key": crate::message::serialize_key(&data.key),
                 "modified_key": crate::message::serialize_key(&data.modified_key),
                 "physical_key": crate::message::serialize_physical_key(&data.physical_key),
                 "location": crate::message::serialize_location(&data.location),
@@ -260,7 +260,7 @@ impl OutgoingEvent {
     fn touch_event(family: &str, tag: String, finger_id: u64, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "finger_id": finger_id,
+                "id": finger_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
@@ -481,9 +481,12 @@ impl OutgoingEvent {
 
     pub fn canvas_scroll(id: String, x: f32, y: f32, delta_x: f32, delta_y: f32) -> Self {
         Self {
-            data: Some(
-                serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y), "delta_x": sanitize_f32(delta_x), "delta_y": sanitize_f32(delta_y)}),
-            ),
+            data: Some(serde_json::json!({
+                "cursor_x": sanitize_f32(x),
+                "cursor_y": sanitize_f32(y),
+                "delta_x": sanitize_f32(delta_x),
+                "delta_y": sanitize_f32(delta_y),
+            })),
             ..Self::bare("canvas_scroll", id)
         }
     }
@@ -1010,14 +1013,14 @@ mod tests {
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "key_press");
         assert_eq!(json["tag"], "keys");
-        assert_eq!(json["value"], "a");
+        assert!(json.get("value").is_none());
         assert!(json["id"].as_str().unwrap().is_empty());
         assert_eq!(json["modifiers"]["shift"], true);
         assert_eq!(json["modifiers"]["ctrl"], false);
         assert_eq!(json["modifiers"]["alt"], true);
         assert_eq!(json["modifiers"]["logo"], false);
         assert_eq!(json["modifiers"]["command"], false);
-        // New fields (nested under "data")
+        assert_eq!(json["data"]["key"], "a");
         assert_eq!(json["data"]["modified_key"], "A");
         assert_eq!(json["data"]["physical_key"], "KeyA");
         assert_eq!(json["data"]["location"], "standard");
@@ -1031,9 +1034,9 @@ mod tests {
         let evt = OutgoingEvent::key_release("keys".to_string(), &data);
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "key_release");
-        assert_eq!(json["value"], "Escape");
+        assert_eq!(json["data"]["key"], "Escape");
         // key_release should not have text or repeat
-        assert!(json.get("text").is_none() || json["text"].is_null());
+        assert!(json["data"].get("text").is_none());
     }
 
     #[test]
@@ -1116,7 +1119,7 @@ mod tests {
         let evt = OutgoingEvent::finger_pressed("touch".to_string(), 1, 50.0, 75.0);
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "finger_pressed");
-        assert_eq!(json["data"]["finger_id"], 1);
+        assert_eq!(json["data"]["id"], 1);
         assert_eq!(json["data"]["x"], 50.0);
         assert_eq!(json["data"]["y"], 75.0);
     }
@@ -1126,7 +1129,7 @@ mod tests {
         let evt = OutgoingEvent::finger_moved("touch".to_string(), 2, 60.0, 80.0);
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "finger_moved");
-        assert_eq!(json["data"]["finger_id"], 2);
+        assert_eq!(json["data"]["id"], 2);
     }
 
     #[test]
@@ -1141,7 +1144,7 @@ mod tests {
         let evt = OutgoingEvent::finger_lost("touch".to_string(), 3, 0.0, 0.0);
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "finger_lost");
-        assert_eq!(json["data"]["finger_id"], 3);
+        assert_eq!(json["data"]["id"], 3);
     }
 
     // -----------------------------------------------------------------------
@@ -1512,10 +1515,9 @@ mod tests {
         let parsed: Value = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["type"], "event");
         assert_eq!(parsed["family"], "key_press");
-        assert_eq!(parsed["value"], "a");
         assert_eq!(parsed["tag"], "kb");
         assert_eq!(parsed["modifiers"]["shift"], true);
-        // Extra fields from KeyEventData (nested under "data")
+        assert_eq!(parsed["data"]["key"], "a");
         assert!(parsed["data"].get("modified_key").is_some());
         assert!(parsed["data"].get("physical_key").is_some());
         assert!(parsed["data"].get("location").is_some());
