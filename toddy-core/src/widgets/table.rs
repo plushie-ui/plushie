@@ -6,14 +6,28 @@
 //! event with the column key. Separator styling and text sizes are
 //! configurable.
 
+use iced::advanced::widget::operation::accessible;
 use iced::widget::{button, column, container, row, rule, scrollable, text};
 use iced::{Element, Fill, Length, alignment};
 use serde_json::Value;
 
+use super::a11y::{A11yOverride, A11yOverrides};
 use super::helpers::*;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
+
+/// Wrap an element with an accessibility role override.
+fn with_role<'a>(element: Element<'a, Message>, role: accessible::Role) -> Element<'a, Message> {
+    A11yOverride::wrap(
+        element,
+        A11yOverrides {
+            role: Some(role),
+            ..A11yOverrides::default()
+        },
+    )
+    .into()
+}
 
 /// Parsed column descriptor from the "columns" prop.
 struct TableColumn {
@@ -114,7 +128,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
 
                 let label_text = format!("{}{}", col.label, sort_indicator);
 
-                if col.sortable {
+                let cell_elem: Element<'a, Message> = if col.sortable {
                     let click_id = table_id.clone();
                     let click_key = col.key.clone();
                     let mut label = text(label_text);
@@ -139,14 +153,15 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
                         label = label.size(sz);
                     }
                     container(label).width(col.width).align_x(col.align).into()
-                }
+                };
+                with_role(cell_elem, accessible::Role::ColumnHeader)
             })
             .collect();
         let mut header = row(header_cells).width(Fill);
         if let Some(cs) = cell_spacing {
             header = header.spacing(cs);
         }
-        table_rows.push(header.into());
+        table_rows.push(with_role(header.into(), accessible::Role::Row));
 
         // Separator
         let show_separator = prop_bool_default(props, "separator", true);
@@ -183,14 +198,16 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
                 if let Some(sz) = row_text_size {
                     cell = cell.size(sz);
                 }
-                container(cell).width(col.width).align_x(col.align).into()
+                let cell_elem: Element<'a, Message> =
+                    container(cell).width(col.width).align_x(col.align).into();
+                with_role(cell_elem, accessible::Role::Cell)
             })
             .collect();
         let mut data_row_elem = row(cells).width(Fill);
         if let Some(cs) = cell_spacing {
             data_row_elem = data_row_elem.spacing(cs);
         }
-        table_rows.push(data_row_elem.into());
+        table_rows.push(with_role(data_row_elem.into(), accessible::Role::Row));
     }
 
     let mut table_col = column(table_rows).width(width);
@@ -203,5 +220,5 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
         table_col = table_col.padding(p);
     }
 
-    scrollable(table_col).into()
+    with_role(scrollable(table_col).into(), accessible::Role::Table)
 }
