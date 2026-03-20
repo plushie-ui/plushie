@@ -11,7 +11,18 @@ use toddy_core::protocol::OutgoingEvent;
 use super::App;
 use super::emitters::emit_event;
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use super::constants::MAX_FONT_BYTES;
+
+/// Maximum number of runtime font loads per process lifetime. Each
+/// `load_font` call permanently leaks font bytes into iced's global
+/// font system (no unload API). This cap prevents unbounded memory
+/// growth from a misbehaving host.
+const MAX_LOADED_FONTS: u32 = 256;
+
+/// Process-wide counter of runtime font loads (windowed mode).
+static LOADED_FONT_COUNT: AtomicU32 = AtomicU32::new(0);
 
 // ---------------------------------------------------------------------------
 // Widget operations (impl App)
@@ -274,7 +285,14 @@ impl App {
                         MAX_FONT_BYTES
                     );
                     Task::none()
+                } else if LOADED_FONT_COUNT.load(Ordering::Relaxed) >= MAX_LOADED_FONTS {
+                    log::warn!(
+                        "load_font: already loaded {MAX_LOADED_FONTS} fonts, \
+                         rejecting to prevent unbounded memory growth"
+                    );
+                    Task::none()
                 } else {
+                    LOADED_FONT_COUNT.fetch_add(1, Ordering::Relaxed);
                     iced::font::load(data).map(|result| {
                         match result {
                             Ok(()) => log::info!("font loaded successfully"),

@@ -923,6 +923,13 @@ fn load_fonts_from_settings(settings: &serde_json::Value) {
 
 use crate::renderer::constants::MAX_FONT_BYTES;
 
+/// Maximum number of runtime font loads per process lifetime. Each
+/// load permanently leaks font bytes into the global font system.
+const MAX_LOADED_FONTS: u32 = 256;
+
+/// Process-wide counter of runtime font loads (headless mode).
+static LOADED_FONT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// Load a font from a `load_font` WidgetOp payload (base64-encoded data).
 fn load_font_from_payload(payload: &serde_json::Value) {
     let Some(data_str) = payload.get("data").and_then(|v| v.as_str()) else {
@@ -939,6 +946,14 @@ fn load_font_from_payload(payload: &serde_json::Value) {
                 );
                 return;
             }
+            if LOADED_FONT_COUNT.load(std::sync::atomic::Ordering::Relaxed) >= MAX_LOADED_FONTS {
+                log::warn!(
+                    "load_font: already loaded {MAX_LOADED_FONTS} fonts, \
+                     rejecting to prevent unbounded memory growth"
+                );
+                return;
+            }
+            LOADED_FONT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let len = bytes.len();
             load_font_bytes(bytes);
             log::info!("loaded font from base64 ({len} bytes)");
