@@ -117,7 +117,12 @@ impl App {
                     self.handle_image_op(&op, &handle, data, pixels, width, height);
                 }
                 CoreEffect::ExtensionConfig(config) => {
-                    self.dispatcher.init_all(&config);
+                    self.dispatcher.init_all(
+                        &config,
+                        &self.theme,
+                        self.core.default_text_size,
+                        self.core.default_font,
+                    );
                 }
             }
         }

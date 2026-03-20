@@ -266,6 +266,8 @@ mod tests {
             extensions: dispatcher,
             default_text_size: None,
             default_font: None,
+            window_id: "",
+            scale_factor: 1.0,
         }
     }
 

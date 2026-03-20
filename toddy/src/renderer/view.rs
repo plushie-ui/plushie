@@ -34,6 +34,8 @@ impl App {
                     extensions: &self.dispatcher,
                     default_text_size: self.core.default_text_size,
                     default_font: self.core.default_font,
+                    window_id: toddy_id,
+                    scale_factor: self.scale_factor_for_window(window_id),
                 };
                 toddy_core::widgets::render(window_node, ctx)
             }

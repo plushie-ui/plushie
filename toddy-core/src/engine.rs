@@ -116,8 +116,8 @@ pub enum CoreEffect {
 
     /// Extension configuration received from the host's Settings message.
     ///
-    /// The host should call `dispatcher.init_all(&config)` to pass the
-    /// configuration to registered extensions.
+    /// The host should call `dispatcher.init_all(&config, &theme, ...)`
+    /// to pass configuration and context to registered extensions.
     ExtensionConfig(Value),
 }
 

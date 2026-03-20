@@ -235,6 +235,8 @@ impl Session {
             extensions: &self.dispatcher,
             default_text_size: self.core.default_text_size,
             default_font: self.core.default_font,
+            window_id: "",
+            scale_factor: 1.0,
         };
         let element = toddy_core::widgets::render(root, ctx);
 
@@ -379,7 +381,12 @@ impl Session {
                         match effect {
                             CoreEffect::ThemeChanged(t) => self.theme = t,
                             CoreEffect::ExtensionConfig(config) => {
-                                self.dispatcher.init_all(&config);
+                                self.dispatcher.init_all(
+                                    &config,
+                                    &self.theme,
+                                    self.core.default_text_size,
+                                    self.core.default_font,
+                                );
                             }
                             _ => {}
                         }
@@ -527,7 +534,12 @@ fn handle_message(
                         }
                     }
                     CoreEffect::ExtensionConfig(config) => {
-                        s.dispatcher.init_all(&config);
+                        s.dispatcher.init_all(
+                            &config,
+                            &s.theme,
+                            s.core.default_text_size,
+                            s.core.default_font,
+                        );
                     }
                     CoreEffect::SyncWindows => {}
                     CoreEffect::WidgetOp {
@@ -741,6 +753,8 @@ fn handle_screenshot(
         extensions: &s.dispatcher,
         default_text_size: s.core.default_text_size,
         default_font: s.core.default_font,
+        window_id: "",
+        scale_factor: 1.0,
     };
     let element: iced::Element<'_, toddy_core::message::Message> =
         toddy_core::widgets::render(root, ctx);

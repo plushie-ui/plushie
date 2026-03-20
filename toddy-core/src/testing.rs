@@ -117,6 +117,8 @@ impl TestEnv {
             extensions: &self.dispatcher,
             default_text_size: self.default_text_size,
             default_font: self.default_font,
+            window_id: "",
+            scale_factor: 1.0,
         }
     }
 

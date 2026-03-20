@@ -117,7 +117,12 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
             for effect in effects {
                 match effect {
                     toddy_core::engine::CoreEffect::ExtensionConfig(config) => {
-                        app.dispatcher.init_all(&config);
+                        app.dispatcher.init_all(
+                            &config,
+                            &app.theme,
+                            app.core.default_text_size,
+                            app.core.default_font,
+                        );
                     }
                     other => {
                         log::warn!("unexpected effect from initial Settings: {other:?}");

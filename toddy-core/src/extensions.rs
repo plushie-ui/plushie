@@ -163,9 +163,14 @@ pub trait WidgetExtension: Send + Sync + 'static {
     /// `extension_config` object. Must be unique across all extensions.
     fn config_key(&self) -> &str;
 
-    /// Receive configuration from the host. Called on startup and renderer
-    /// restart. Receives `Value::Null` if no config provided.
-    fn init(&mut self, _config: &Value) {}
+    /// Receive configuration and context from the host.
+    ///
+    /// Called on startup and renderer restart. The `ctx` provides the
+    /// extension's config (from `Settings.extension_config[config_key]`),
+    /// the current theme, and text rendering defaults. Extensions that
+    /// need theme-dependent one-time setup can do it here instead of
+    /// deferring to the first `prepare()` call.
+    fn init(&mut self, _ctx: &InitCtx<'_>) {}
 
     /// Initialize or synchronize state for a node. Called in the mutable
     /// phase before view(), every time the tree changes.
@@ -413,9 +418,40 @@ impl<'a> WidgetEnv<'a> {
     pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message> {
         self.ctx.render_child(node)
     }
+    /// The toddy window ID this render is for, or `""` in headless/test.
+    pub fn window_id(&self) -> &'a str {
+        self.ctx.window_id
+    }
+    /// Display scale factor for this window (1.0 = no scaling).
+    pub fn scale_factor(&self) -> f32 {
+        self.ctx.scale_factor
+    }
+}
+
+/// Context passed to [`WidgetExtension::init`].
+///
+/// Provides the extension's config (from the host's Settings message)
+/// along with the current theme and text rendering defaults. This
+/// allows extensions to do theme-dependent initialization without
+/// deferring to the first `prepare()` call.
+#[derive(Debug)]
+pub struct InitCtx<'a> {
+    /// Extension-specific config from `Settings.extension_config[config_key]`.
+    /// `Value::Null` if the host didn't provide config for this extension.
+    pub config: &'a Value,
+    /// The current theme at init time.
+    pub theme: &'a Theme,
+    /// Global default text size, if set by the host.
+    pub default_text_size: Option<f32>,
+    /// Global default font, if set by the host.
+    pub default_font: Option<iced::Font>,
 }
 
 /// Renders child nodes through the main dispatch. Copy-able (all shared refs).
+///
+/// Extensions receive this via [`WidgetEnv`] in their `render()` method.
+/// It carries everything needed for rendering: the widget tree state,
+/// image handles, theme, text defaults, and per-window context.
 #[derive(Clone, Copy)]
 pub struct RenderCtx<'a> {
     pub caches: &'a WidgetCaches,
@@ -424,6 +460,11 @@ pub struct RenderCtx<'a> {
     pub extensions: &'a ExtensionDispatcher,
     pub default_text_size: Option<f32>,
     pub default_font: Option<iced::Font>,
+    /// The toddy window ID this render is for, or `""` in headless/test.
+    pub window_id: &'a str,
+    /// The display scale factor for this window (1.0 = no scaling).
+    /// Useful for DPI-aware canvas rendering.
+    pub scale_factor: f32,
 }
 
 impl<'a> RenderCtx<'a> {
@@ -756,19 +797,34 @@ impl ExtensionDispatcher {
         }
     }
 
-    /// Route configuration to extensions. `config` is the value of the
-    /// `extension_config` key from Settings -- a JSON object keyed by
-    /// each extension's `config_key()`.
-    pub fn init_all(&mut self, config: &Value) {
+    /// Route configuration and context to extensions.
+    ///
+    /// `config` is the value of `extension_config` from Settings -- a
+    /// JSON object keyed by each extension's `config_key()`. Each
+    /// extension receives an [`InitCtx`] with its own config slice plus
+    /// the current theme and text defaults.
+    pub fn init_all(
+        &mut self,
+        config: &Value,
+        theme: &Theme,
+        default_text_size: Option<f32>,
+        default_font: Option<iced::Font>,
+    ) {
         for (idx, ext) in self.extensions.iter_mut().enumerate() {
             if self.poisoned[idx] {
                 continue;
             }
             let key = ext.config_key().to_string();
-            let slice = config.get(&key).unwrap_or(&Value::Null);
+            let ext_config = config.get(&key).unwrap_or(&Value::Null);
+            let ctx = InitCtx {
+                config: ext_config,
+                theme,
+                default_text_size,
+                default_font,
+            };
             if catch_unwind_enabled() {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    ext.init(slice);
+                    ext.init(&ctx);
                 }));
                 if let Err(panic) = result {
                     let msg = panic_message(&panic);
@@ -776,7 +832,7 @@ impl ExtensionDispatcher {
                     self.poisoned[idx] = true;
                 }
             } else {
-                ext.init(slice);
+                ext.init(&ctx);
             }
         }
     }
@@ -1010,7 +1066,7 @@ mod tests {
             self.config_key
         }
 
-        fn init(&mut self, _config: &Value) {
+        fn init(&mut self, _ctx: &InitCtx<'_>) {
             self.init_called = true;
         }
 
@@ -1343,7 +1399,7 @@ mod tests {
         let mut dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
 
         let config = serde_json::json!({"charts": {"color": "red"}});
-        dispatcher.init_all(&config);
+        dispatcher.init_all(&config, &Theme::Dark, None, None);
 
         // Can't easily inspect init_called through the trait object, but
         // at least verify no panic occurred.
@@ -1641,6 +1697,8 @@ mod tests {
                 extensions: &dispatcher,
                 default_text_size: None,
                 default_font: None,
+                window_id: "",
+                scale_factor: 1.0,
             };
             let env = WidgetEnv {
                 caches: &caches,
@@ -1673,6 +1731,8 @@ mod tests {
             extensions: &dispatcher,
             default_text_size: None,
             default_font: None,
+            window_id: "",
+            scale_factor: 1.0,
         };
         let env2 = WidgetEnv {
             caches: &caches,
