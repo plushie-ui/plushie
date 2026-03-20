@@ -62,7 +62,11 @@ pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
 /// Emit a `hello` handshake message to stdout immediately after codec
 /// negotiation. This tells the host which protocol version and
 /// renderer build it is talking to.
-pub(crate) fn emit_hello(mode: &str) -> io::Result<()> {
+///
+/// `backend` identifies the rendering backend: `"wgpu"` for windowed,
+/// `"tiny-skia"` for headless, `"none"` for mock.
+/// `extensions` lists the config keys of registered extensions.
+pub(crate) fn emit_hello(mode: &str, backend: &str, extensions: &[&str]) -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "hello",
         "session": "",
@@ -70,6 +74,8 @@ pub(crate) fn emit_hello(mode: &str) -> io::Result<()> {
         "version": env!("CARGO_PKG_VERSION"),
         "name": "toddy",
         "mode": mode,
+        "backend": backend,
+        "extensions": extensions,
     });
     let codec = Codec::get_global();
     let bytes = codec.encode(&msg).map_err(io::Error::other)?;

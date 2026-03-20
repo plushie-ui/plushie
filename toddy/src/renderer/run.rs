@@ -44,12 +44,21 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
         .unwrap_or(1)
         .max(1);
 
+    // Collect extension keys before building the dispatcher so the hello
+    // message can include them in all modes.
+    let ext_keys = builder
+        .extension_keys()
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+
     if has_flag("--mock") {
         crate::headless::run(
             forced_codec,
             builder.build_dispatcher(),
             crate::headless::Mode::Mock,
             max_sessions,
+            &ext_keys,
         );
         return Ok(());
     }
@@ -59,6 +68,7 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
             builder.build_dispatcher(),
             crate::headless::Mode::Headless,
             max_sessions,
+            &ext_keys,
         );
         return Ok(());
     }
@@ -70,7 +80,8 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
 
     // Send the hello handshake before any other output. The codec is set
     // inside read_initial_settings, so it's safe to emit framed messages now.
-    if let Err(e) = emit_hello("windowed") {
+    let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs) {
         log::error!("failed to emit hello: {e}");
         return Ok(());
     }

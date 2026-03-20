@@ -58,6 +58,11 @@ impl ToddyAppBuilder {
         self
     }
 
+    /// Return the config keys of all registered extensions.
+    pub fn extension_keys(&self) -> Vec<&str> {
+        self.extensions.iter().map(|e| e.config_key()).collect()
+    }
+
     /// Consume the builder and produce an [`ExtensionDispatcher`].
     pub fn build_dispatcher(self) -> ExtensionDispatcher {
         ExtensionDispatcher::new(self.extensions)

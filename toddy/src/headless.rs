@@ -851,6 +851,7 @@ pub(crate) fn run(
     dispatcher: ExtensionDispatcher,
     mode: Mode,
     max_sessions: usize,
+    ext_keys: &[String],
 ) {
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin.lock());
@@ -875,11 +876,12 @@ pub(crate) fn run(
     log::info!("wire codec: {codec}");
     Codec::set_global(codec);
 
-    let mode_str = match mode {
-        Mode::Headless => "headless",
-        Mode::Mock => "mock",
+    let (mode_str, backend) = match mode {
+        Mode::Headless => ("headless", "tiny-skia"),
+        Mode::Mock => ("mock", "none"),
     };
-    if let Err(e) = crate::renderer::emit_hello(mode_str) {
+    let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = crate::renderer::emit_hello(mode_str, backend, &ext_key_refs) {
         log::error!("failed to emit hello: {e}");
         return;
     }
@@ -1188,10 +1190,7 @@ fn run_multiplexed(
                     // Drop the sender so the session thread exits after
                     // processing the Reset message.
                     sessions.remove(&session_id);
-                    log::info!(
-                        "session '{session_id}' reset (active: {})",
-                        sessions.len()
-                    );
+                    log::info!("session '{session_id}' reset (active: {})", sessions.len());
 
                     // Emit a synthetic session_closed event so the host
                     // knows the session thread has been torn down.

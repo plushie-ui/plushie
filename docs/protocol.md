@@ -96,7 +96,9 @@ protocol version:
   "protocol": 1,
   "version": "0.3.0",
   "name": "toddy",
-  "mode": "headless"
+  "mode": "headless",
+  "backend": "tiny-skia",
+  "extensions": ["charts", "editor"]
 }
 ```
 
@@ -106,6 +108,8 @@ protocol version:
 | `version` | string | Renderer build version |
 | `name` | string | Renderer name (always `"toddy"`) |
 | `mode` | string | Execution mode: `"windowed"`, `"headless"`, or `"mock"` |
+| `backend` | string | Rendering backend: `"wgpu"` (windowed), `"tiny-skia"` (headless), `"none"` (mock) |
+| `extensions` | array | Config keys of registered widget extensions (empty array if none) |
 
 The host should check that `protocol` matches the version it expects.
 The `mode` field tells the SDK what capabilities are available (e.g.
@@ -203,6 +207,11 @@ All fields inside `settings` are optional.
 
 **Runtime fields** (can be updated by sending Settings again):
 `default_text_size`, `default_font`, `extension_config`.
+
+**Log level.** Renderer log verbosity is controlled via the `RUST_LOG`
+environment variable on the renderer process, not via a Settings field.
+The renderer's built-in default level is `warn`. Examples:
+`RUST_LOG=toddy=debug`, `RUST_LOG=toddy_core::widgets=trace`.
 
 ### Snapshot
 
@@ -807,6 +816,13 @@ as JSON). Used for structural regression testing.
 
 Response: `tree_hash_response`.
 
+**Scope.** The hash covers tree structure and props only (the
+serialized JSON representation of the node tree). Mutable widget
+state -- editor content, scroll position, slider value, canvas
+cache state, etc. -- is not included. Two trees with identical
+structure and props will produce the same hash even if their
+runtime widget state differs.
+
 ### Screenshot
 
 Capture rendered pixels. In headless mode, renders the tree via
@@ -832,6 +848,13 @@ empty stub.
 | `height` | number | Viewport height in pixels (optional, default 768) |
 
 Response: `screenshot_response`.
+
+**Cross-platform determinism.** Screenshot hashes may differ across
+platforms due to font rendering and hinting. For deterministic
+screenshot comparison in CI, pin fonts via the `fonts` array in
+Settings and avoid relying on system fonts. The headless backend
+(tiny-skia) produces consistent output across Linux environments
+when the same fonts are loaded.
 
 ### Reset
 
@@ -1053,6 +1076,12 @@ tag from the subscription registration.
 | `animation_frame` | tag, data: {timestamp} |
 | `theme_changed` | tag, value (light/dark) |
 | `all_windows_closed` | -- (emitted when last window closes) |
+
+**`animation_frame` timing.** In windowed mode, timestamps are
+monotonic milliseconds since the first animation frame after startup
+(or since the last Reset -- the epoch resets so animations restart
+from zero). In headless/mock mode, `AdvanceFrame` passes timestamps
+through directly and the renderer does not apply any epoch offset.
 
 ### effect_response
 
@@ -1482,3 +1511,39 @@ then remaining fields override individual properties:
   }
 }
 ```
+
+---
+
+## Debugging
+
+### TODDY_NO_CATCH_UNWIND
+
+Set `TODDY_NO_CATCH_UNWIND=1` on the renderer process to disable
+panic isolation for widget extensions. When set, extension panics
+propagate normally instead of being caught by `catch_unwind`, which
+preserves full stack traces and allows debuggers (gdb, lldb) to
+break at the panic site.
+
+**Use this only during development.** In production, `catch_unwind`
+prevents one misbehaving extension from crashing the entire renderer.
+With the env var set, any extension panic takes down the process.
+
+---
+
+## Performance considerations
+
+The renderer is designed for moderate UI complexity (hundreds to low
+thousands of nodes). Practical considerations for large trees:
+
+- **Snapshot vs Patch.** For trees with many nodes, prefer Patch for
+  incremental updates rather than replacing the entire tree with
+  Snapshot on every change. Snapshot triggers a full tree walk for
+  extension prepare, cache invalidation, and window reconciliation.
+- **Tree depth.** Rendering and tree search are bounded to 256 levels
+  of nesting. Deeply nested trees also increase layout cost.
+- **Canvas caching.** Canvas widgets cache per-layer tessellation.
+  Avoid unnecessary shape changes -- only layers whose content hash
+  changes are re-tessellated.
+- **Screenshot size.** Large screenshots allocate proportional RGBA
+  buffers (width * height * 4 bytes). The maximum dimension is
+  16384 px per axis.

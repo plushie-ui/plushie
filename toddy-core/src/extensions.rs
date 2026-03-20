@@ -1039,6 +1039,11 @@ impl ExtensionDispatcher {
     pub fn len(&self) -> usize {
         self.extensions.len()
     }
+
+    /// Return the config keys of all registered extensions.
+    pub fn config_keys(&self) -> Vec<&str> {
+        self.extensions.iter().map(|e| e.config_key()).collect()
+    }
 }
 
 impl Default for ExtensionDispatcher {
