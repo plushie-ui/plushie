@@ -1086,8 +1086,24 @@ fn run_multiplexed(
                     if sessions.len() >= max_sessions {
                         log::error!(
                             "max sessions ({max_sessions}) reached; \
-                             dropping message for session '{session_id}'"
+                             rejecting session '{session_id}'"
                         );
+                        let error = serde_json::json!({
+                            "type": "event",
+                            "session": &session_id,
+                            "family": "session_error",
+                            "id": "",
+                            "data": {
+                                "error": format!(
+                                    "max sessions ({max_sessions}) reached; \
+                                     session '{session_id}' rejected"
+                                )
+                            }
+                        });
+                        let codec = Codec::get_global();
+                        if let Ok(bytes) = codec.encode(&error) {
+                            let _ = writer_tx.send(bytes);
+                        }
                         continue;
                     }
 
@@ -1176,6 +1192,20 @@ fn run_multiplexed(
                         "session '{session_id}' reset (active: {})",
                         sessions.len()
                     );
+
+                    // Emit a synthetic session_closed event so the host
+                    // knows the session thread has been torn down.
+                    let closed = serde_json::json!({
+                        "type": "event",
+                        "session": &session_id,
+                        "family": "session_closed",
+                        "id": "",
+                        "data": { "reason": "reset" }
+                    });
+                    let codec = Codec::get_global();
+                    if let Ok(bytes) = codec.encode(&closed) {
+                        let _ = writer_tx.send(bytes);
+                    }
                 }
             }
             Err(e) => {
