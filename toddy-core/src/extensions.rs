@@ -275,16 +275,39 @@ impl ExtensionCaches {
         format!("{namespace}:{key}")
     }
 
+    /// Look up a cached value by namespace and key.
+    ///
+    /// Returns `None` if the key doesn't exist **or** if the stored type
+    /// doesn't match `T`. A type mismatch logs a warning so extension
+    /// authors can spot accidental type changes during development.
     pub fn get<T: 'static>(&self, namespace: &str, key: &str) -> Option<&T> {
-        self.inner
-            .get(&Self::namespaced_key(namespace, key))?
-            .downcast_ref()
+        let full_key = Self::namespaced_key(namespace, key);
+        let entry = self.inner.get(&full_key)?;
+        let result = entry.downcast_ref();
+        if result.is_none() {
+            log::warn!(
+                "extension cache type mismatch for `{full_key}`: \
+                 stored type does not match requested type"
+            );
+        }
+        result
     }
 
+    /// Look up a cached value mutably by namespace and key.
+    ///
+    /// Returns `None` if the key doesn't exist **or** if the stored type
+    /// doesn't match `T`. A type mismatch logs a warning.
     pub fn get_mut<T: 'static>(&mut self, namespace: &str, key: &str) -> Option<&mut T> {
-        self.inner
-            .get_mut(&Self::namespaced_key(namespace, key))?
-            .downcast_mut()
+        let full_key = Self::namespaced_key(namespace, key);
+        let entry = self.inner.get_mut(&full_key)?;
+        let result = entry.downcast_mut();
+        if result.is_none() {
+            log::warn!(
+                "extension cache type mismatch for `{full_key}`: \
+                 stored type does not match requested type"
+            );
+        }
+        result
     }
 
     pub fn get_or_insert<T: Send + Sync + 'static>(
