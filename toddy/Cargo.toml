@@ -30,3 +30,6 @@ base64 = "0.22"
 tokio = { version = "1", features = ["sync"] }
 iced_test = { version = "0.6", package = "toddy-iced-test" }
 sha2 = "0.10"
+rfd = "0.15"
+arboard = "3"
+notify-rust = "4"

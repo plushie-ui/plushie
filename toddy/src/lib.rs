@@ -20,6 +20,7 @@
 
 #![deny(warnings)]
 
+mod effects;
 mod headless;
 mod renderer;
 mod scripting;

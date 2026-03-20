@@ -26,7 +26,6 @@
 //!
 //! **Platform:**
 //! - [`theming`] -- theme resolution, custom palette parsing, hex colors
-//! - [`effects`] -- platform effect handlers (file dialogs, clipboard, notifications)
 //! - [`image_registry`] -- in-memory image handle storage
 //!
 //! **Extension SDK:**
@@ -48,7 +47,6 @@ compile_error!(
 
 pub mod app;
 pub mod codec;
-pub mod effects;
 pub mod engine;
 pub mod extensions;
 pub mod image_registry;

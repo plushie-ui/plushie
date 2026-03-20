@@ -10,8 +10,7 @@ use std::collections::HashMap;
 use iced::Font;
 use serde_json::Value;
 
-use crate::effects;
-use crate::protocol::{EffectResponse, IncomingMessage, OutgoingEvent};
+use crate::protocol::{IncomingMessage, OutgoingEvent};
 use crate::theming;
 use crate::tree::Tree;
 use crate::widgets::{self, WidgetCaches};
@@ -23,8 +22,18 @@ pub enum CoreEffect {
     SyncWindows,
     /// Emit an event to stdout.
     EmitEvent(OutgoingEvent),
-    /// Emit an effect response to stdout.
-    EmitEffectResponse(EffectResponse),
+    /// Handle a platform effect (file dialog, clipboard, notification).
+    ///
+    /// Core does not execute effects -- it passes the raw request through
+    /// for the host (daemon or headless runner) to dispatch. The host
+    /// decides whether to run the effect synchronously, asynchronously,
+    /// or return a cancellation (e.g. in headless mode where file dialogs
+    /// are unavailable).
+    HandleEffect {
+        request_id: String,
+        kind: String,
+        payload: Value,
+    },
     /// Execute a widget operation (focus, scroll, etc.)
     WidgetOp { op: String, payload: Value },
     /// Execute a window operation (open, close, resize, etc.)
@@ -48,12 +57,6 @@ pub enum CoreEffect {
     },
     /// Extension configuration received from the host.
     ExtensionConfig(Value),
-    /// Spawn an async effect (e.g. file dialogs) via Task::perform.
-    SpawnAsyncEffect {
-        request_id: String,
-        effect_type: String,
-        params: Value,
-    },
 }
 
 /// Pure state core, decoupled from the iced runtime.
@@ -178,16 +181,11 @@ impl Core {
             }
             IncomingMessage::Effect { id, kind, payload } => {
                 log::debug!("effect request: {kind} ({id})");
-                if effects::is_async_effect(&kind) {
-                    effects.push(CoreEffect::SpawnAsyncEffect {
-                        request_id: id,
-                        effect_type: kind,
-                        params: payload,
-                    });
-                } else {
-                    let response = effects::handle_effect(id, &kind, &payload);
-                    effects.push(CoreEffect::EmitEffectResponse(response));
-                }
+                effects.push(CoreEffect::HandleEffect {
+                    request_id: id,
+                    kind,
+                    payload,
+                });
             }
             IncomingMessage::WidgetOp { op, payload } => {
                 log::debug!("widget_op: {op}");

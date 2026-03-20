@@ -63,8 +63,29 @@ impl App {
                     self.pending_tasks.push(task);
                 }
                 CoreEffect::EmitEvent(event) => emit_event(event)?,
-                CoreEffect::EmitEffectResponse(response) => {
-                    emit_effect_response(response)?;
+                CoreEffect::HandleEffect {
+                    request_id,
+                    kind,
+                    payload,
+                } => {
+                    if crate::effects::is_async_effect(&kind) {
+                        let task = Task::perform(
+                            async move {
+                                crate::effects::handle_async_effect(request_id, &kind, &payload)
+                                    .await
+                            },
+                            |response| {
+                                if let Err(e) = emit_effect_response(response) {
+                                    log::error!("write error in async effect: {e}");
+                                }
+                                Message::NoOp
+                            },
+                        );
+                        self.pending_tasks.push(task);
+                    } else {
+                        let response = crate::effects::handle_effect(request_id, &kind, &payload);
+                        emit_effect_response(response)?;
+                    }
                 }
                 CoreEffect::WidgetOp { op, payload } => {
                     let task = self.handle_widget_op(&op, &payload);
@@ -97,32 +118,6 @@ impl App {
                 }
                 CoreEffect::ExtensionConfig(config) => {
                     self.dispatcher.init_all(&config);
-                }
-                CoreEffect::SpawnAsyncEffect {
-                    request_id,
-                    effect_type,
-                    params,
-                } => {
-                    let task = Task::perform(
-                        async move {
-                            toddy_core::effects::handle_async_effect(
-                                request_id,
-                                &effect_type,
-                                &params,
-                            )
-                            .await
-                        },
-                        |response| {
-                            // Inside an async Task callback -- log and
-                            // continue; the next synchronous write will
-                            // detect the broken pipe and exit cleanly.
-                            if let Err(e) = emit_effect_response(response) {
-                                log::error!("write error in async effect: {e}");
-                            }
-                            Message::NoOp
-                        },
-                    );
-                    self.pending_tasks.push(task);
                 }
             }
         }

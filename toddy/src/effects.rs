@@ -16,7 +16,7 @@
 
 use serde_json::{Value, json};
 
-use crate::protocol::EffectResponse;
+use toddy_core::protocol::EffectResponse;
 
 /// Convert a file path to a JSON string value, logging a warning if the path
 /// contains non-UTF-8 bytes and lossy conversion is required.

@@ -649,23 +649,26 @@ fn handle_message(
                     CoreEffect::EmitEvent(event) => {
                         s.writer.emit(&event.with_session(session_id))?;
                     }
-                    CoreEffect::EmitEffectResponse(response) => {
-                        s.writer.emit(&response.with_session(session_id))?;
-                    }
-                    CoreEffect::SpawnAsyncEffect {
+                    CoreEffect::HandleEffect {
                         request_id,
-                        effect_type,
-                        ..
+                        kind,
+                        payload,
                     } => {
-                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
-                        log::debug!(
-                            "{mode}: async effect {effect_type} returning cancelled \
-                             (no display)"
-                        );
-                        s.writer.emit(
-                            &toddy_core::protocol::EffectResponse::cancelled(request_id)
-                                .with_session(session_id),
-                        )?;
+                        if crate::effects::is_async_effect(&kind) {
+                            let mode = if s.ui.is_some() { "headless" } else { "mock" };
+                            log::debug!(
+                                "{mode}: async effect {kind} returning cancelled \
+                                 (no display)"
+                            );
+                            s.writer.emit(
+                                &toddy_core::protocol::EffectResponse::cancelled(request_id)
+                                    .with_session(session_id),
+                            )?;
+                        } else {
+                            let response =
+                                crate::effects::handle_effect(request_id, &kind, &payload);
+                            s.writer.emit(&response.with_session(session_id))?;
+                        }
                     }
                     CoreEffect::ThemeChanged(t) => {
                         let mode_str = if t == iced::Theme::Light {
