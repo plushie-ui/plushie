@@ -7,6 +7,7 @@
 //! sending Snapshot and Patch messages.
 
 use crate::protocol::{PatchOp, TreeNode};
+use crate::widgets::MAX_TREE_DEPTH;
 
 /// Retained tree store. Holds the current root node (if any) and supports
 /// full replacement (snapshot) and incremental patch application.
@@ -33,7 +34,7 @@ impl Tree {
     /// Find a window node by its toddy ID, searching the entire tree recursively.
     pub fn find_window(&self, toddy_id: &str) -> Option<&TreeNode> {
         let root = self.root.as_ref()?;
-        find_window_recursive(root, toddy_id)
+        find_window_recursive(root, toddy_id, 0)
     }
 
     /// Collect the IDs of all window nodes in the tree (recursive search).
@@ -42,7 +43,7 @@ impl Tree {
             return Vec::new();
         };
         let mut ids = Vec::new();
-        collect_window_ids_recursive(root, &mut ids);
+        collect_window_ids_recursive(root, &mut ids, 0);
         ids
     }
 
@@ -170,24 +171,40 @@ impl Tree {
     }
 }
 
-fn find_window_recursive<'a>(node: &'a TreeNode, toddy_id: &str) -> Option<&'a TreeNode> {
+fn find_window_recursive<'a>(
+    node: &'a TreeNode,
+    toddy_id: &str,
+    depth: usize,
+) -> Option<&'a TreeNode> {
+    if depth > MAX_TREE_DEPTH {
+        log::warn!(
+            "find_window_recursive: depth exceeds {MAX_TREE_DEPTH}, stopping search"
+        );
+        return None;
+    }
     if node.type_name == "window" && node.id == toddy_id {
         return Some(node);
     }
     for child in &node.children {
-        if let Some(found) = find_window_recursive(child, toddy_id) {
+        if let Some(found) = find_window_recursive(child, toddy_id, depth + 1) {
             return Some(found);
         }
     }
     None
 }
 
-fn collect_window_ids_recursive(node: &TreeNode, ids: &mut Vec<String>) {
+fn collect_window_ids_recursive(node: &TreeNode, ids: &mut Vec<String>, depth: usize) {
+    if depth > MAX_TREE_DEPTH {
+        log::warn!(
+            "collect_window_ids_recursive: depth exceeds {MAX_TREE_DEPTH}, stopping search"
+        );
+        return;
+    }
     if node.type_name == "window" {
         ids.push(node.id.clone());
     }
     for child in &node.children {
-        collect_window_ids_recursive(child, ids);
+        collect_window_ids_recursive(child, ids, depth + 1);
     }
 }
 
