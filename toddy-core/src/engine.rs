@@ -140,8 +140,10 @@ pub struct Core {
     /// Cached resolved theme from the root node's `theme` prop.
     /// Only re-resolved when the raw JSON value changes.
     pub cached_theme: Option<iced::Theme>,
-    /// Raw JSON of the last resolved theme prop, used for change detection.
-    cached_theme_json: Option<String>,
+    /// Content hash of the last resolved theme prop, used for change
+    /// detection. Replaces the previous `to_string()` approach which
+    /// allocated and compared a full JSON string on every check.
+    cached_theme_hash: Option<u64>,
     /// True after the first Settings message has been applied. Used to
     /// suppress warnings about startup-only fields on the initial Settings.
     settings_applied: bool,
@@ -162,7 +164,7 @@ impl Core {
             default_text_size: None,
             default_font: None,
             cached_theme: None,
-            cached_theme_json: None,
+            cached_theme_hash: None,
             settings_applied: false,
         }
     }
@@ -194,12 +196,18 @@ impl Core {
         theme_val: &serde_json::Value,
         effects: &mut Vec<CoreEffect>,
     ) {
-        let json_str = theme_val.to_string();
-        if self.cached_theme_json.as_deref() == Some(&json_str) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::Hasher;
+
+        let mut hasher = DefaultHasher::new();
+        crate::widgets::hash_json_value(theme_val, &mut hasher);
+        let hash = hasher.finish();
+
+        if self.cached_theme_hash == Some(hash) {
             // Theme prop unchanged -- skip resolution.
             return;
         }
-        self.cached_theme_json = Some(json_str);
+        self.cached_theme_hash = Some(hash);
         match theming::resolve_theme_only(theme_val) {
             Some(theme) => {
                 self.cached_theme = Some(theme.clone());

@@ -19,6 +19,7 @@ mod validate;
 // --- Public re-exports -----------------------------------------------------
 
 pub(crate) use caches::MAX_TREE_DEPTH;
+pub(crate) use caches::hash_json_value;
 pub use caches::{WidgetCaches, ensure_caches};
 pub(crate) use helpers::parse_padding_value;
 pub use render::render;
