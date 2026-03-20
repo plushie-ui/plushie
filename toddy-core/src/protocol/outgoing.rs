@@ -105,12 +105,12 @@ pub struct KeyModifiers {
 
 impl OutgoingEvent {
     /// Helper to build a bare event with only the common fields.
-    fn bare(family: impl Into<String>, id: String) -> Self {
+    fn bare(family: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
             message_type: "event",
             session: String::new(),
             family: family.into(),
-            id,
+            id: id.into(),
             value: None,
             tag: None,
             modifiers: None,
@@ -136,7 +136,7 @@ impl OutgoingEvent {
 
     /// Generic widget event with a family string and optional data payload.
     /// Used for on_open, on_close, sort, and other events.
-    pub fn generic(family: impl Into<String>, id: String, data: Option<Value>) -> Self {
+    pub fn generic(family: impl Into<String>, id: impl Into<String>, data: Option<Value>) -> Self {
         Self {
             data,
             ..Self::bare(family, id)
@@ -144,7 +144,14 @@ impl OutgoingEvent {
     }
 
     /// Convenience constructor for extension-emitted events.
-    pub fn extension_event(family: String, id: String, data: Option<Value>) -> Self {
+    ///
+    /// Identical to [`generic`](Self::generic) -- exists for discoverability
+    /// so extension authors searching docs for "extension" find it.
+    pub fn extension_event(
+        family: impl Into<String>,
+        id: impl Into<String>,
+        data: Option<Value>,
+    ) -> Self {
         Self::generic(family, id, data)
     }
 
