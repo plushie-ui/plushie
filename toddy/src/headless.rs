@@ -565,6 +565,9 @@ fn handle_message(
             if is_tree_change {
                 if is_snapshot {
                     s.dispatcher.clear_poisoned();
+                    // Clear stale slider tracking -- the entire tree was replaced,
+                    // so old node IDs are no longer valid.
+                    s.last_slide_values.clear();
                 }
                 if let Some(root) = s.core.tree.root() {
                     s.dispatcher

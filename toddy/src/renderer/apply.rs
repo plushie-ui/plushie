@@ -145,6 +145,9 @@ impl App {
 
             if is_snapshot {
                 self.dispatcher.clear_poisoned();
+                // Clear stale slider tracking -- the entire tree was replaced,
+                // so old node IDs are no longer valid.
+                self.last_slide_values.clear();
             }
             if let Some(root) = self.core.tree.root() {
                 self.dispatcher
