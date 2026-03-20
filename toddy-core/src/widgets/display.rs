@@ -307,6 +307,15 @@ pub(crate) fn render_image<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // SVG
 // ---------------------------------------------------------------------------
 
+/// Render an SVG widget.
+///
+/// Both windowed (wgpu) and headless (tiny-skia) backends use resvg for
+/// SVG rasterization, so output should be pixel-identical at the same
+/// resolution. However, text within SVGs may render differently across
+/// platforms due to font availability (fontconfig on Linux, CoreText on
+/// macOS, DirectWrite on Windows). For deterministic headless screenshots,
+/// ensure SVG text uses fonts available on the CI platform or embed fonts
+/// in the SVG.
 pub(crate) fn render_svg<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     use iced::widget::Svg;
 

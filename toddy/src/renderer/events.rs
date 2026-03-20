@@ -147,6 +147,12 @@ impl App {
         })
     }
 
+    // IME (Input Method Editor) events for CJK and complex input.
+    //
+    // Platform support: Windows (Microsoft IME, Google Japanese, etc.),
+    // macOS (built-in input methods), Linux/X11 (XIM/IBus), Linux/Wayland
+    // (text-input-v3 protocol -- compositor support varies). The preedit
+    // cursor range may be None on some older X11 IME implementations.
     pub(super) fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_opened)
     }

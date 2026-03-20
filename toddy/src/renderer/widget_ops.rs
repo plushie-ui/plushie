@@ -248,6 +248,11 @@ impl App {
                     Message::NoOp
                 })
             }
+            // Load a font from base64-encoded data at runtime. Supports
+            // TrueType (.ttf), OpenType (.otf), and TrueType Collections
+            // (.ttc). Variable fonts are supported. Format detection is
+            // handled by fontdb (via cosmic-text) -- no explicit format
+            // field is needed.
             "load_font" => {
                 let data = payload
                     .get("data")

@@ -10,9 +10,29 @@
 //! The sync [`handle_effect`] fallback exists for headless/blocking
 //! contexts. Clipboard and notification effects are always synchronous.
 //!
-//! **File paths:** All file path strings returned by dialog handlers use
-//! OS-native path separators (`/` on Unix, `\` on Windows). Cross-platform
-//! consumers should normalize paths before comparing or storing them.
+//! # Platform notes
+//!
+//! **File paths:** Returned paths use OS-native separators (`/` on Unix,
+//! `\` on Windows). On macOS, paths may arrive in NFD (decomposed Unicode)
+//! form. Hosts should normalize paths for comparison if needed.
+//!
+//! **File dialogs (rfd):** On Wayland, rfd uses the xdg-desktop-portal.
+//! On compositors without a portal service, dialogs return None (cancelled).
+//! On X11 without a portal, rfd falls back to GTK dialogs which may block
+//! a tokio worker thread. Filter extensions should be simple (e.g. "png",
+//! "jpg") without wildcards for best cross-platform compatibility.
+//!
+//! **Clipboard (arboard):** The clipboard instance is lazily initialized
+//! in a static Mutex and may be created from a worker thread. On Wayland,
+//! arboard spawns a background thread for clipboard serving -- dropping the
+//! Clipboard would lose served data, so it persists for process lifetime.
+//! On Linux, primary selection is routed via `LinuxClipboardKind::Primary`.
+//!
+//! **Notifications (notify-rust):** On macOS, notifications require an app
+//! bundle identifier (bare binaries may fail). The `icon` field only works
+//! on Linux (freedesktop icon name); on macOS it is ignored, on Windows
+//! the app icon is used instead. The `urgency` field is Linux-only
+//! (freedesktop notification spec).
 
 use serde_json::{Value, json};
 
@@ -20,6 +40,13 @@ use toddy_core::protocol::EffectResponse;
 
 /// Convert a file path to a JSON string value, logging a warning if the path
 /// contains non-UTF-8 bytes and lossy conversion is required.
+///
+/// **Platform notes:** Windows UNC paths (`\\?\C:\...`) are valid UTF-8 and
+/// pass through cleanly. macOS HFS+ paths may arrive in NFD (decomposed
+/// Unicode) form -- this is valid UTF-8 but the host should normalize for
+/// comparison. Non-UTF-8 filenames are rare on modern systems (NTFS is
+/// UTF-16, HFS+ is UTF-8, ext4 allows arbitrary bytes but tooling
+/// discourages it).
 fn path_to_json_string(path: &std::path::Path) -> String {
     match path.to_str() {
         Some(s) => s.to_string(),
@@ -430,10 +457,14 @@ fn handle_clipboard_write_primary(id: String, payload: &Value) -> EffectResponse
 ///
 /// **Platform quirks:**
 /// - **macOS:** Requires the app to be signed or have an Info.plist for
-///   notifications to appear. Notifications go to macOS Notification Center.
+///   notifications to appear. The `icon` field is ignored (macOS uses the
+///   app icon). Notifications go to macOS Notification Center.
 /// - **Linux:** Depends on the desktop environment's notification daemon
-///   (e.g. dunst, mako, GNOME notifications). Behavior varies by DE.
-/// - **Windows:** Uses the Windows toast notification system.
+///   (e.g. dunst, mako, GNOME notifications). The `icon` field is a
+///   freedesktop icon name (e.g. "dialog-information"). `urgency` is
+///   Linux-only.
+/// - **Windows:** Uses the Windows toast notification system. The `icon`
+///   field is ignored (Windows uses the app icon).
 fn handle_notification(id: String, payload: &Value) -> EffectResponse {
     let title = payload
         .get("title")
