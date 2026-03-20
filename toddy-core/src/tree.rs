@@ -990,4 +990,124 @@ mod tests {
         // Child should still be present -- the op failed gracefully
         assert_eq!(tree.root().unwrap().children.len(), 1);
     }
+
+    // -----------------------------------------------------------------------
+    // Multi-op patch tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn patch_multi_op_mixed_types() {
+        let mut tree = Tree::new();
+        let root = node_with_children(
+            "root",
+            "column",
+            vec![
+                node_with_props("a", "text", json!({"content": "hello"})),
+                node("b", "button"),
+            ],
+        );
+        tree.snapshot(root);
+
+        let ops = vec![
+            // Insert a third child at index 2
+            make_patch_op(
+                "insert_child",
+                vec![],
+                json!({
+                    "index": 2,
+                    "node": {"id": "c", "type": "text", "props": {"content": "new"}, "children": []}
+                }),
+            ),
+            // Remove the first child (index 0 = "a")
+            make_patch_op("remove_child", vec![], json!({"index": 0})),
+            // Update props on current index 0 (was "b", now shifted to front)
+            make_patch_op(
+                "update_props",
+                vec![0],
+                json!({"props": {"label": "updated"}}),
+            ),
+        ];
+        tree.apply_patch(ops);
+
+        let children = &tree.root().unwrap().children;
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].id, "b");
+        assert_eq!(children[0].props["label"], "updated");
+        assert_eq!(children[1].id, "c");
+    }
+
+    #[test]
+    fn patch_remove_shifts_indices() {
+        let mut tree = Tree::new();
+        let root = node_with_children(
+            "root",
+            "column",
+            vec![
+                node("first", "text"),
+                node("second", "button"),
+                node("third", "text"),
+            ],
+        );
+        tree.snapshot(root);
+
+        let ops = vec![
+            // Remove child at index 0 ("first")
+            make_patch_op("remove_child", vec![], json!({"index": 0})),
+            // Replace node at index 0, which is now "second" after removal
+            make_patch_op(
+                "replace_node",
+                vec![0],
+                json!({
+                    "node": {"id": "replaced", "type": "row", "props": {}, "children": []}
+                }),
+            ),
+        ];
+        tree.apply_patch(ops);
+
+        let children = &tree.root().unwrap().children;
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].id, "replaced");
+        assert_eq!(children[0].type_name, "row");
+        assert_eq!(children[1].id, "third");
+    }
+
+    #[test]
+    fn patch_bad_middle_op_continues() {
+        let mut tree = Tree::new();
+        let root = node_with_children(
+            "root",
+            "column",
+            vec![
+                node_with_props("a", "text", json!({"content": "original"})),
+                node("b", "button"),
+            ],
+        );
+        tree.snapshot(root);
+
+        let ops = vec![
+            // First op: update props on child "a" (valid)
+            make_patch_op(
+                "update_props",
+                vec![0],
+                json!({"props": {"content": "changed"}}),
+            ),
+            // Second op: invalid path (out of bounds)
+            make_patch_op(
+                "update_props",
+                vec![99, 0],
+                json!({"props": {"content": "nope"}}),
+            ),
+            // Third op: update props on child "b" (valid)
+            make_patch_op(
+                "update_props",
+                vec![1],
+                json!({"props": {"label": "click me"}}),
+            ),
+        ];
+        tree.apply_patch(ops);
+
+        let children = &tree.root().unwrap().children;
+        assert_eq!(children[0].props["content"], "changed");
+        assert_eq!(children[1].props["label"], "click me");
+    }
 }

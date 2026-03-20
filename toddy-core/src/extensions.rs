@@ -291,6 +291,16 @@ pub enum EventResult {
 /// between extensions that happen to use the same cache key string. All
 /// public methods accept a `namespace` parameter (the extension's
 /// `config_key()`) which is prefixed onto the raw key internally.
+///
+/// # Thread-safety invariant
+///
+/// `ExtensionCaches` is `Send + Sync` because all stored values are
+/// `Any + Send + Sync`. However, the struct itself is only ever accessed
+/// from a single thread at a time: mutation happens during `update()`
+/// (the mutable phase), and reads happen during `view()` (the immutable
+/// phase). In `--max-sessions` mode each session gets its own
+/// `ExtensionCaches` instance, so there is no cross-thread sharing. No
+/// internal locking is needed.
 pub struct ExtensionCaches {
     inner: HashMap<String, Box<dyn Any + Send + Sync>>,
 }
@@ -1823,5 +1833,60 @@ mod tests {
             result.is_err(),
             "after clearing poison, render should call the extension again (which panics)"
         );
+    }
+
+    // -- new_instance ---------------------------------------------------------
+
+    /// Extension that implements new_instance() for session cloning.
+    struct CloneableExtension {
+        label: &'static str,
+    }
+
+    impl CloneableExtension {
+        fn new(label: &'static str) -> Self {
+            Self { label }
+        }
+    }
+
+    impl WidgetExtension for CloneableExtension {
+        fn type_names(&self) -> &[&str] {
+            &["cloneable_widget"]
+        }
+        fn config_key(&self) -> &str {
+            "cloneable"
+        }
+        fn render<'a>(&self, _node: &'a TreeNode, _env: &WidgetEnv<'a>) -> Element<'a, Message> {
+            use iced::widget::text;
+            text(self.label).into()
+        }
+        fn new_instance(&self) -> Box<dyn WidgetExtension> {
+            Box::new(CloneableExtension::new(self.label))
+        }
+    }
+
+    #[test]
+    fn new_instance_default_panics() {
+        let ext = TestExtension::new(vec!["sparkline"], "charts");
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            ext.new_instance();
+        }));
+        assert!(result.is_err(), "default new_instance() should panic");
+    }
+
+    #[test]
+    fn new_instance_custom_returns_fresh_instance() {
+        let ext = CloneableExtension::new("original");
+        let fresh = ext.new_instance();
+        assert_eq!(fresh.type_names(), &["cloneable_widget"]);
+        assert_eq!(fresh.config_key(), "cloneable");
+    }
+
+    #[test]
+    fn clone_for_session_uses_new_instance() {
+        let ext = CloneableExtension::new("session");
+        let dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let cloned = dispatcher.clone_for_session();
+        assert!(cloned.handles_type("cloneable_widget"));
+        assert_eq!(cloned.len(), 1);
     }
 }

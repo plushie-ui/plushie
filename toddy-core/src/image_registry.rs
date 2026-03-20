@@ -393,4 +393,26 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn delete_then_recreate_same_handle() {
+        let mut reg = ImageRegistry::new();
+        // Create from bytes
+        assert!(
+            reg.create_from_bytes("reused", vec![0x89, 0x50, 0x4e, 0x47])
+                .is_ok()
+        );
+        assert!(reg.get("reused").is_some());
+
+        // Delete
+        reg.delete("reused");
+        assert!(reg.get("reused").is_none());
+
+        // Recreate with same name, but from RGBA this time
+        assert!(
+            reg.create_from_rgba("reused", 1, 1, vec![255, 0, 0, 255])
+                .is_ok()
+        );
+        assert!(reg.get("reused").is_some());
+    }
 }

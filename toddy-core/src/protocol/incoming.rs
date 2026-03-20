@@ -474,4 +474,86 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Scripting message deserialization
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn deserialize_query() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "query",
+            "id": "q1",
+            "target": "tree"
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::Query { .. }));
+    }
+
+    #[test]
+    fn deserialize_query_with_selector() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "query",
+            "id": "q2",
+            "target": "find",
+            "selector": {"by": "id", "value": "btn1"}
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::Query { .. }));
+    }
+
+    #[test]
+    fn deserialize_interact() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "interact",
+            "id": "i1",
+            "action": "click",
+            "selector": {"by": "id", "value": "btn1"},
+            "payload": {}
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::Interact { .. }));
+    }
+
+    #[test]
+    fn deserialize_tree_hash() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "tree_hash",
+            "id": "th1",
+            "name": "check"
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::TreeHash { .. }));
+    }
+
+    #[test]
+    fn deserialize_screenshot() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "screenshot",
+            "id": "ss1",
+            "name": "test"
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::Screenshot { .. }));
+    }
+
+    #[test]
+    fn deserialize_reset() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "reset",
+            "id": "r1"
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::Reset { .. }));
+    }
+
+    #[test]
+    fn deserialize_advance_frame() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "advance_frame",
+            "timestamp": 16
+        }))
+        .unwrap();
+        assert!(matches!(msg, IncomingMessage::AdvanceFrame { .. }));
+    }
 }

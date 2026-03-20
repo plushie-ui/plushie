@@ -1593,4 +1593,33 @@ mod tests {
         );
         assert_eq!(release.len(), 1);
     }
+
+    // -- malformed payload tests --
+
+    #[test]
+    fn handle_interact_slide_string_value_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "bad1".to_string(),
+            "slide".to_string(),
+            json!({"by": "id", "value": "slider1"}),
+            json!({"value": "not_a_number"}),
+        );
+    }
+
+    #[test]
+    fn parse_key_and_modifiers_null_key() {
+        let map: serde_json::Map<String, Value> =
+            serde_json::from_value(json!({"key": null})).unwrap();
+        let (key, mods) = parse_key_and_modifiers(Some(&map));
+        assert_eq!(key, "");
+        assert_eq!(mods["ctrl"], false);
+    }
+
+    #[test]
+    fn parse_selector_null_value() {
+        let sel = json!({"by": "id", "value": null});
+        assert!(parse_selector(&sel).is_none());
+    }
 }
