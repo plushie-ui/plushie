@@ -123,6 +123,7 @@ protocol version:
   "name": "toddy",
   "mode": "headless",
   "backend": "tiny-skia",
+  "transport": "stdio",
   "extensions": ["charts", "editor"]
 }
 ```
@@ -134,6 +135,7 @@ protocol version:
 | `name` | string | Renderer name (always `"toddy"`) |
 | `mode` | string | Execution mode: `"windowed"`, `"headless"`, or `"mock"` |
 | `backend` | string | Rendering backend: `"wgpu"` (windowed), `"tiny-skia"` (headless), `"none"` (mock) |
+| `transport` | string | Transport backend: `"stdio"` (default) or `"exec"` (future: `"connect"`, `"listen"`) |
 | `extensions` | array | Config keys of registered widget extensions (empty array if none) |
 
 The host should check that `protocol` matches the version it expects.
@@ -1370,6 +1372,29 @@ No rendering. Protocol-only. Fastest mode for testing.
 - Effects always return `"cancelled"` status.
 - Subscriptions register/unregister but no events are emitted.
 - Window operations and widget operations (focus, scroll) are no-ops.
+
+---
+
+## Transport modes
+
+The `transport` field in the hello message reports how the renderer
+is connected to the host.
+
+### stdio (default)
+
+The renderer reads from stdin and writes to stdout. The host spawns
+toddy as a subprocess and communicates over the pipe.
+
+### exec (`--exec <command>`)
+
+The renderer spawns a command via the system shell (`sh -c` on Unix,
+`cmd /c` on Windows) and uses its stdin/stdout as the protocol
+channel. The child's stderr is forwarded to toddy's stderr with a
+`[remote]` prefix.
+
+This enables remote rendering scenarios (e.g. `--exec "ssh host toddy"`)
+where the host process runs on a different machine. All modes
+(windowed, headless, mock) work with `--exec`.
 
 ---
 
