@@ -29,7 +29,9 @@ pub use crate::iced::widget::{
     button, canvas, checkbox, column, container, image, pick_list, progress_bar, row, rule,
     scrollable, slider, space, stack, text, toggler, tooltip,
 };
-pub use crate::iced::{Color, Element, Font, Length, Padding, Pixels, Theme};
+pub use crate::iced::{
+    Color, Element, Font, Length, Padding, Pixels, Point, Size, Theme, alignment,
+};
 
 // -- JSON (extensions parse props from serde_json::Value) --
 pub use serde_json::Value;

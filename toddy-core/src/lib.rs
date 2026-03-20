@@ -45,18 +45,33 @@ compile_error!(
      Extension panic isolation via catch_unwind is a no-op with panic=\"abort\"."
 );
 
+// -- Public SDK modules (stable API for extension authors) --
 pub mod app;
-pub mod codec;
-pub mod engine;
 pub mod extensions;
-pub mod image_registry;
-pub mod message;
 pub mod prelude;
 pub mod prop_helpers;
-pub mod protocol;
 pub mod testing;
+
+// -- Internal modules used by the toddy binary --
+//
+// These are public so the binary crate can access them, but they are
+// NOT part of the stable extension SDK. Extension authors should use
+// the prelude and `toddy_core::iced::*` instead.
+#[doc(hidden)]
+pub mod codec;
+#[doc(hidden)]
+pub mod engine;
+#[doc(hidden)]
+pub mod image_registry;
+#[doc(hidden)]
+pub mod message;
+#[doc(hidden)]
+pub mod protocol;
+#[doc(hidden)]
 pub mod theming;
+#[doc(hidden)]
 pub mod tree;
+#[doc(hidden)]
 pub mod widgets;
 
 // Re-export iced so extension crates can use `toddy_core::iced::*` without
