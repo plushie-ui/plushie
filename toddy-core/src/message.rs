@@ -181,6 +181,10 @@ pub enum Message {
         data: Value,
         family: String,
     },
+    /// Internal: flush the event coalesce buffer. Fired by a timer
+    /// task scheduled by the EventEmitter when rate-limited events
+    /// are pending.
+    FlushCoalesce,
 }
 
 /// What the stdin reader thread sends back.

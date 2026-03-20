@@ -55,6 +55,14 @@ impl App {
             IncomingMessage::Snapshot { .. } | IncomingMessage::Patch { .. }
         );
 
+        // Flush pending widget events before a snapshot replaces the
+        // tree (widget IDs may change). Clear cached widget rates
+        // since the tree is being replaced.
+        if is_snapshot {
+            let _ = self.emitter.flush();
+            self.emitter.clear_widget_rates();
+        }
+
         let effects = self.core.apply(message);
         for effect in effects {
             match effect {

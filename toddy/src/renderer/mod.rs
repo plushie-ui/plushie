@@ -8,6 +8,7 @@
 mod app;
 mod apply;
 pub(crate) mod constants;
+mod emitter;
 mod events;
 mod run;
 mod subscriptions;

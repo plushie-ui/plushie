@@ -12,6 +12,7 @@ use toddy_core::message::{
 use toddy_core::protocol::OutgoingEvent;
 
 use super::App;
+use super::emitter::CoalesceStrategy;
 use super::constants::*;
 use super::emitters::emit_event;
 
@@ -45,17 +46,17 @@ impl App {
     }
 
     pub(super) fn handle_modifiers_changed(
-        &self,
+        &mut self,
         mods: iced::keyboard::Modifiers,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription(SUB_MODIFIERS_CHANGED, captured, |tag| {
+        self.coalesce_subscription(SUB_MODIFIERS_CHANGED, captured, CoalesceStrategy::Replace, |tag| {
             OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods))
         })
     }
 
-    pub(super) fn handle_cursor_moved(&self, pos: Point, captured: bool) -> Task<Message> {
-        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
+    pub(super) fn handle_cursor_moved(&mut self, pos: Point, captured: bool) -> Task<Message> {
+        self.coalesce_subscription(SUB_MOUSE_MOVE, captured, CoalesceStrategy::Replace, |tag| {
             OutgoingEvent::cursor_moved(tag, pos.x, pos.y)
         })
     }
@@ -93,11 +94,11 @@ impl App {
     }
 
     pub(super) fn handle_wheel_scrolled(
-        &self,
+        &mut self,
         delta: iced::mouse::ScrollDelta,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription(SUB_MOUSE_SCROLL, captured, |tag| {
+        self.coalesce_subscription(SUB_MOUSE_SCROLL, captured, CoalesceStrategy::AccumulateDeltas, |tag| {
             let (dx, dy, unit) = serialize_scroll_delta(&delta);
             OutgoingEvent::wheel_scrolled(tag, dx, dy, unit)
         })
@@ -115,12 +116,12 @@ impl App {
     }
 
     pub(super) fn handle_finger_moved(
-        &self,
+        &mut self,
         finger: iced::touch::Finger,
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription(SUB_TOUCH, captured, |tag| {
+        self.coalesce_subscription(SUB_TOUCH, captured, CoalesceStrategy::Replace, |tag| {
             OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y)
         })
     }

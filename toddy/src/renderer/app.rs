@@ -13,6 +13,7 @@ use toddy_core::message::Message;
 use toddy_core::protocol::OutgoingEvent;
 
 use super::constants::*;
+use super::emitter::{CoalesceKey, CoalesceStrategy, EventEmitter};
 use super::emitters;
 use super::window_map;
 
@@ -62,6 +63,8 @@ pub(super) struct App {
     /// the first AnimationFrame and cleared on Reset so the next
     /// animation starts from zero.
     pub(super) animation_epoch: Option<iced::time::Instant>,
+    /// Rate-limited event emitter with coalescing.
+    pub(super) emitter: EventEmitter,
 }
 
 impl App {
@@ -78,6 +81,7 @@ impl App {
             last_slide_values: HashMap::new(),
             dispatcher,
             animation_epoch: None,
+            emitter: EventEmitter::new(),
         }
     }
 
@@ -132,7 +136,7 @@ impl App {
 
     /// Check if a subscription event should be emitted, and if so, emit it.
     /// Falls back to the catch-all "on_event" subscription if the specific
-    /// key isn't registered.
+    /// key isn't registered. Non-coalescable events go through here.
     pub(super) fn emit_subscription(
         &self,
         key: &str,
@@ -149,5 +153,28 @@ impl App {
         } else {
             Task::none()
         }
+    }
+
+    /// Emit a coalescable subscription event through the EventEmitter.
+    /// The emitter applies rate limiting and coalescing. Falls back to
+    /// the catch-all "on_event" subscription if the specific key isn't
+    /// registered.
+    pub(super) fn coalesce_subscription(
+        &mut self,
+        key: &str,
+        captured: bool,
+        strategy: CoalesceStrategy,
+        event_fn: impl FnOnce(String) -> OutgoingEvent,
+    ) -> Task<Message> {
+        let (sub_key, tag) = if let Some(tag) = self.core.active_subscriptions.get(key) {
+            (key.to_string(), tag.clone())
+        } else if let Some(tag) = self.core.active_subscriptions.get(SUB_EVENT) {
+            (SUB_EVENT.to_string(), tag.clone())
+        } else {
+            return Task::none();
+        };
+        let event = event_fn(tag).with_captured(captured);
+        self.emitter
+            .coalesce(CoalesceKey::Subscription(sub_key), event, strategy)
     }
 }

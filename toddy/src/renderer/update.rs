@@ -8,6 +8,7 @@ use toddy_core::protocol::{IncomingMessage, OutgoingEvent};
 
 use super::App;
 use super::constants::*;
+use super::emitter;
 use super::emitters::{self, emit_event, emit_screenshot_response};
 
 impl App {
@@ -15,6 +16,7 @@ impl App {
         match message {
             Message::Stdin(event) => self.handle_stdin(event),
             Message::NoOp => Task::none(),
+            Message::FlushCoalesce => self.emitter.flush(),
 
             // Widget messages shared between daemon and headless modes.
             // The shared processor handles slider tracking, text editor
@@ -52,13 +54,18 @@ impl App {
                     &mut self.dispatcher,
                     &mut self.last_slide_values,
                 );
+                let mut task = Task::none();
                 for event in events {
-                    if let Err(e) = emit_event(event) {
-                        log::error!("write error: {e}");
-                        return iced::exit();
-                    }
+                    let t = if emitter::is_coalescable_widget_event(&event) {
+                        let key = emitter::widget_coalesce_key(&event);
+                        let strategy = emitter::widget_coalesce_strategy(&event);
+                        self.emitter.coalesce(key, event, strategy)
+                    } else {
+                        self.emitter.emit_immediate(event)
+                    };
+                    task = Task::batch([task, t]);
                 }
-                Task::none()
+                task
             }
             Message::MarkdownUrl(url) => {
                 log::debug!("markdown link clicked: {url}");
@@ -161,7 +168,12 @@ impl App {
                 if let Some(tag) = self.core.active_subscriptions.get(SUB_ANIMATION_FRAME) {
                     let epoch = *self.animation_epoch.get_or_insert(instant);
                     let millis = instant.duration_since(epoch).as_millis();
-                    emitters::emit_or_exit(OutgoingEvent::animation_frame(tag.clone(), millis))
+                    let event = OutgoingEvent::animation_frame(tag.clone(), millis);
+                    self.emitter.coalesce(
+                        emitter::CoalesceKey::Subscription(SUB_ANIMATION_FRAME.to_string()),
+                        event,
+                        emitter::CoalesceStrategy::Replace,
+                    )
                 } else {
                     Task::none()
                 }
@@ -179,10 +191,12 @@ impl App {
                         iced::theme::Mode::Dark => "dark",
                         _ => "system",
                     };
-                    emitters::emit_or_exit(OutgoingEvent::theme_changed(
-                        tag.clone(),
-                        mode_str.to_string(),
-                    ))
+                    let event = OutgoingEvent::theme_changed(tag.clone(), mode_str.to_string());
+                    self.emitter.coalesce(
+                        emitter::CoalesceKey::Subscription(SUB_THEME_CHANGE.to_string()),
+                        event,
+                        emitter::CoalesceStrategy::Replace,
+                    )
                 } else {
                     Task::none()
                 }
@@ -193,6 +207,10 @@ impl App {
     pub(super) fn handle_stdin(&mut self, event: StdinEvent) -> Task<Message> {
         match event {
             StdinEvent::Message(incoming) => {
+                // Flush pending coalesced events on any incoming message.
+                // This serves as a "host is ready" signal and provides
+                // adaptive throughput matching.
+                let _ = self.emitter.flush();
                 // Handle scripting messages directly instead of passing
                 // them to Core::apply. All other messages fall through.
                 match incoming {
@@ -224,6 +242,9 @@ impl App {
                         Task::none()
                     }
                     IncomingMessage::Reset { id } => {
+                        // Flush any pending coalesced events before reset.
+                        let _ = self.emitter.flush();
+
                         // Clean up extension state before wiping core.
                         self.dispatcher.reset(&mut self.core.caches.extension);
 
@@ -249,6 +270,7 @@ impl App {
                         self.last_slide_values.clear();
                         self.pending_tasks.clear();
                         self.animation_epoch = None;
+                        self.emitter = super::emitter::EventEmitter::new();
 
                         Task::batch(close_tasks)
                     }
