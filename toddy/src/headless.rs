@@ -553,6 +553,44 @@ fn handle_message(
                     } if op == "load_font" => {
                         load_font_from_payload(payload);
                     }
+                    CoreEffect::WidgetOp {
+                        ref op,
+                        ref payload,
+                    } if op == "announce" => {
+                        let announce_text = payload
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let event = toddy_core::protocol::OutgoingEvent::generic(
+                            "announce",
+                            "",
+                            Some(serde_json::json!({"text": announce_text})),
+                        );
+                        let _ = s.writer.emit(&event.with_session(session_id));
+                    }
+                    CoreEffect::WidgetOp {
+                        ref op,
+                        ref payload,
+                    } if op == "find_focused" => {
+                        // In headless mode we cannot query iced's focus state
+                        // (no persistent widget operation runtime). Emit a
+                        // response with null to indicate focus tracking is
+                        // unavailable.
+                        let tag = payload
+                            .get("tag")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("find_focused")
+                            .to_string();
+                        let resp = serde_json::json!({
+                            "type": "op_query_response",
+                            "session": session_id,
+                            "kind": "find_focused",
+                            "tag": tag,
+                            "data": {"focused": null}
+                        });
+                        let _ = s.writer.emit(&resp);
+                    }
                     CoreEffect::WidgetOp { .. } => {}
                     CoreEffect::WindowOp { .. } => {}
                     CoreEffect::ThemeFollowsSystem => {}
