@@ -3,9 +3,17 @@
 //! All renderer output (events, handshake, effect responses, query
 //! responses, screenshots) flows through this module. Each emitter
 //! encodes via the global [`Codec`] and writes to stdout.
+//!
+//! In windowed mode, a [`ChannelWriter`] decouples the iced event
+//! loop from pipe writes: `write_output` fills a buffer and flushes
+//! it through a bounded channel to a background writer thread that
+//! owns the actual transport. This prevents GUI stalls when the pipe
+//! blocks (e.g. over SSH with high latency).
 
 use std::io::{self, Write};
+use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 
 use iced::Task;
 
@@ -19,7 +27,65 @@ use toddy_core::protocol::OutgoingEvent;
 
 static OUTPUT_WRITER: OnceLock<Mutex<Box<dyn Write + Send>>> = OnceLock::new();
 
+/// Channel capacity for the background writer thread. 256 messages
+/// gives ample headroom before the event loop would block on send.
+const WRITER_CHANNEL_CAPACITY: usize = 256;
+
+/// A [`Write`] adapter that buffers bytes and sends them through a
+/// bounded channel on flush. The background writer thread receives
+/// the chunks and performs the actual (potentially blocking) I/O.
+pub(crate) struct ChannelWriter {
+    tx: mpsc::SyncSender<Vec<u8>>,
+    buffer: Vec<u8>,
+}
+
+impl Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+        let bytes = std::mem::take(&mut self.buffer);
+        self.tx.send(bytes).map_err(|_| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "writer thread exited")
+        })
+    }
+}
+
+/// Spawn a background writer thread and return a [`ChannelWriter`]
+/// that sends encoded bytes to it. The thread owns the transport
+/// writer and performs blocking I/O without stalling the caller.
+pub(crate) fn spawn_writer_thread(writer: Box<dyn Write + Send>) -> ChannelWriter {
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(WRITER_CHANNEL_CAPACITY);
+
+    thread::Builder::new()
+        .name("toddy-writer".into())
+        .spawn(move || {
+            let mut writer = writer;
+            for bytes in rx {
+                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                    break;
+                }
+            }
+        })
+        .expect("failed to spawn writer thread");
+
+    ChannelWriter {
+        tx,
+        buffer: Vec::new(),
+    }
+}
+
 /// Initialize the global output writer. Must be called once at startup.
+///
+/// In windowed mode, pass a [`ChannelWriter`] (from [`spawn_writer_thread`])
+/// so the iced event loop never blocks on pipe writes. In headless mode,
+/// pass the raw transport writer directly -- headless events are host-paced
+/// and don't need background I/O.
 pub(crate) fn init_output(writer: Box<dyn Write + Send>) {
     if OUTPUT_WRITER.set(Mutex::new(writer)).is_err() {
         panic!("output writer already initialized");
@@ -28,10 +94,9 @@ pub(crate) fn init_output(writer: Box<dyn Write + Send>) {
 
 /// Write bytes to the protocol output channel (stdout or transport writer).
 ///
-/// Each call acquires the writer lock and flushes. This is correct for
-/// the common case (one event per update cycle) but suboptimal when
-/// apply() produces multiple effects. A future optimization could batch
-/// writes within apply() using a single lock/flush cycle.
+/// Each call acquires the writer lock and flushes. When the global writer
+/// is a [`ChannelWriter`], flush sends the bytes through a bounded channel
+/// to the background writer thread -- the actual pipe write happens there.
 ///
 /// Falls back to direct stdout if the global writer has not been
 /// initialized yet (only possible during very early startup errors).
@@ -269,6 +334,69 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_writer_sends_on_flush() {
+        let (tx, rx) = mpsc::sync_channel(16);
+        let mut w = ChannelWriter {
+            tx,
+            buffer: Vec::new(),
+        };
+        w.write_all(b"hello").unwrap();
+        assert!(rx.try_recv().is_err(), "nothing sent before flush");
+        w.flush().unwrap();
+        let received = rx.recv().unwrap();
+        assert_eq!(received, b"hello");
+    }
+
+    #[test]
+    fn channel_writer_empty_flush_is_noop() {
+        let (tx, rx) = mpsc::sync_channel(16);
+        let mut w = ChannelWriter {
+            tx,
+            buffer: Vec::new(),
+        };
+        w.flush().unwrap();
+        assert!(rx.try_recv().is_err(), "empty flush should send nothing");
+    }
+
+    #[test]
+    fn channel_writer_broken_pipe_on_closed_receiver() {
+        let (tx, rx) = mpsc::sync_channel(16);
+        drop(rx);
+        let mut w = ChannelWriter {
+            tx,
+            buffer: Vec::new(),
+        };
+        w.write_all(b"data").unwrap();
+        let result = w.flush();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn spawn_writer_thread_delivers_bytes() {
+        let (inner_tx, inner_rx) = mpsc::sync_channel::<Vec<u8>>(16);
+        // Use a simple writer that forwards to a channel so we can
+        // observe what the background thread wrote.
+        struct TestWriter(mpsc::SyncSender<Vec<u8>>);
+        impl Write for TestWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0
+                    .send(buf.to_vec())
+                    .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "closed"))?;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut cw = spawn_writer_thread(Box::new(TestWriter(inner_tx)));
+        cw.write_all(b"test data").unwrap();
+        cw.flush().unwrap();
+        let received = inner_rx.recv().unwrap();
+        assert_eq!(received, b"test data");
+    }
 
     #[test]
     fn message_to_event_click() {

@@ -64,7 +64,17 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
     let (reader, writer, _transport_guard) = transport.into_parts();
 
     // Initialize the global output writer before any protocol I/O.
-    crate::renderer::emitters::init_output(writer);
+    // Headless/mock modes get the raw writer (events are host-paced,
+    // no GUI stall risk). Windowed mode gets a ChannelWriter backed
+    // by a background thread so the iced event loop never blocks on
+    // pipe writes. The decision happens below after mode detection.
+    let is_headless = has_flag("--headless") || has_flag("--mock");
+    if is_headless {
+        crate::renderer::emitters::init_output(writer);
+    } else {
+        let channel_writer = crate::renderer::emitters::spawn_writer_thread(writer);
+        crate::renderer::emitters::init_output(Box::new(channel_writer));
+    }
 
     // Collect extension keys before building the dispatcher so the hello
     // message can include them in all modes.
