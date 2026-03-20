@@ -500,12 +500,7 @@ mod tests {
     use serde_json::json;
 
     fn make_node(type_name: &str, props: serde_json::Value) -> TreeNode {
-        TreeNode {
-            id: format!("test-{type_name}"),
-            type_name: type_name.to_string(),
-            props,
-            children: vec![],
-        }
+        crate::testing::node_with_props(&format!("test-{type_name}"), type_name, props)
     }
 
     /// Verify validate_props doesn't panic for every supported widget type,

@@ -837,6 +837,35 @@ mod tests {
     }
 
     #[test]
+    fn test_prop_f32_string_nan() {
+        // "NaN".parse::<f32>() succeeds with NaN, so prop_f32 returns Some(NaN).
+        let p = make_props(json!({"size": "NaN"}));
+        let v = prop_f32(p.as_object(), "size").unwrap();
+        assert!(v.is_nan());
+    }
+
+    #[test]
+    fn test_prop_f32_string_infinity() {
+        // "Infinity".parse::<f32>() succeeds with inf, so prop_f32 returns Some(inf).
+        let p = make_props(json!({"size": "Infinity"}));
+        let v = prop_f32(p.as_object(), "size").unwrap();
+        assert!(v.is_infinite());
+        assert!(v.is_sign_positive());
+    }
+
+    #[test]
+    fn test_prop_f32_empty_string() {
+        let p = make_props(json!({"size": ""}));
+        assert!(prop_f32(p.as_object(), "size").is_none());
+    }
+
+    #[test]
+    fn test_prop_u32_non_numeric_string() {
+        let p = make_props(json!({"count": "not_a_number"}));
+        assert_eq!(prop_u32(p.as_object(), "count"), None);
+    }
+
+    #[test]
     fn test_empty_props() {
         let props: Props<'_> = None;
         assert!(prop_str(props, "anything").is_none());
@@ -934,5 +963,30 @@ mod tests {
     fn test_prop_value_missing() {
         let p = make_props(json!({}));
         assert!(prop_value(p.as_object(), "x").is_none());
+    }
+
+    // -- Property-based tests -------------------------------------------------
+
+    mod proptest_prop_helpers {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// prop_f32 should never panic for any f64 value and should
+            /// return Some for all finite inputs.
+            #[test]
+            fn prop_f32_never_panics(val: f64) {
+                let p = json!({"v": val});
+                let result = prop_f32(p.as_object(), "v");
+                if val.is_finite() {
+                    prop_assert!(result.is_some(), "expected Some for finite {val}");
+                    let f = result.unwrap();
+                    prop_assert!(f.is_finite(), "expected finite f32 for finite input {val}");
+                } else {
+                    // NaN and Infinity become JSON null via serde_json,
+                    // so prop_f32 returns None -- that's correct.
+                }
+            }
+        }
     }
 }

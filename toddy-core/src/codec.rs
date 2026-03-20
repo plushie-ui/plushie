@@ -1389,4 +1389,50 @@ mod tests {
         assert_eq!(decoded["count"], 42);
         assert_eq!(decoded["nested"]["a"][0], 1);
     }
+
+    // -- Property-based tests -------------------------------------------------
+
+    mod proptest_codec {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Generate arbitrary JSON values suitable for round-trip testing.
+        ///
+        /// Uses integers only (no floats) to avoid f64 text round-trip
+        /// precision mismatches in serde_json::Number. Keeps nesting
+        /// shallow to stay fast.
+        fn arb_json_value() -> impl Strategy<Value = serde_json::Value> {
+            let leaf = prop_oneof![
+                Just(serde_json::Value::Null),
+                any::<bool>().prop_map(serde_json::Value::Bool),
+                any::<i64>().prop_map(|n| serde_json::Value::Number(n.into())),
+                "[a-zA-Z0-9_ ]{0,20}".prop_map(serde_json::Value::String),
+            ];
+
+            leaf.prop_recursive(
+                3,  // depth
+                32, // max nodes
+                8,  // items per collection
+                |inner| {
+                    prop_oneof![
+                        prop::collection::vec(inner.clone(), 0..5)
+                            .prop_map(serde_json::Value::Array),
+                        prop::collection::vec(("[a-z_]{1,8}", inner), 0..5).prop_map(|pairs| {
+                            serde_json::Value::Object(pairs.into_iter().collect())
+                        }),
+                    ]
+                },
+            )
+        }
+
+        proptest! {
+            #[test]
+            fn json_encode_decode_roundtrip(val in arb_json_value()) {
+                let bytes = Codec::Json.encode(&val).unwrap();
+                let decoded: serde_json::Value =
+                    Codec::Json.decode(&bytes[..bytes.len() - 1]).unwrap();
+                prop_assert_eq!(decoded, val);
+            }
+        }
+    }
 }

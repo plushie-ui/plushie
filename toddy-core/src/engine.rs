@@ -389,28 +389,9 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-
     use super::*;
     use crate::protocol::{IncomingMessage, TreeNode};
-
-    fn make_node(id: &str, type_name: &str) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props: serde_json::json!({}),
-            children: vec![],
-        }
-    }
-
-    fn make_node_with_props(id: &str, type_name: &str, props: Value) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props,
-            children: vec![],
-        }
-    }
+    use crate::testing::{node as make_node, node_with_props as make_node_with_props};
 
     // -- Core::new() --
 

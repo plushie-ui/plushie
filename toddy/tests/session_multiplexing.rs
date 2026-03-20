@@ -9,16 +9,82 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+/// Default timeout for reading a single response from the subprocess.
+/// Long enough for CI, short enough to catch real hangs.
+const RECV_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn send(stdin: &mut impl Write, msg: &serde_json::Value) {
     let line = serde_json::to_string(msg).unwrap();
     writeln!(stdin, "{line}").unwrap();
     stdin.flush().unwrap();
 }
 
-fn recv(reader: &mut impl BufRead) -> serde_json::Value {
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    serde_json::from_str(line.trim()).unwrap()
+/// A line receiver backed by a dedicated reader thread.
+///
+/// The blocking `read_line` loop runs on a background thread and
+/// sends parsed JSON values through a channel. Tests call `recv()`
+/// with a timeout so they fail with a clear message instead of
+/// hanging forever if the subprocess stops responding.
+struct LineReceiver {
+    rx: mpsc::Receiver<serde_json::Value>,
+    _handle: std::thread::JoinHandle<()>,
+}
+
+impl LineReceiver {
+    fn new(stdout: std::process::ChildStdout) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        match serde_json::from_str(trimmed) {
+                            Ok(val) => {
+                                if tx.send(val).is_err() {
+                                    break; // receiver dropped
+                                }
+                            }
+                            Err(e) => {
+                                panic!("failed to parse JSON from subprocess: {e}\nraw: {line:?}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        panic!("read_line failed: {e}");
+                    }
+                }
+            }
+        });
+        Self {
+            rx,
+            _handle: handle,
+        }
+    }
+
+    fn recv(&self) -> serde_json::Value {
+        self.recv_timeout(RECV_TIMEOUT)
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> serde_json::Value {
+        match self.rx.recv_timeout(timeout) {
+            Ok(val) => val,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                panic!(
+                    "recv timed out after {:.1}s waiting for subprocess response",
+                    timeout.as_secs_f64()
+                );
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("subprocess stdout closed unexpectedly (reader thread exited)");
+            }
+        }
+    }
 }
 
 fn toddy_binary() -> String {
@@ -42,7 +108,7 @@ fn hello_message_has_empty_session() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
 
     // Send initial settings to trigger hello.
     send(
@@ -50,9 +116,59 @@ fn hello_message_has_empty_session() {
         &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
     );
 
-    let hello = recv(&mut stdout);
+    let hello = stdout.recv();
     assert_eq!(hello["type"], "hello");
     assert_eq!(hello["session"], "");
+
+    drop(stdin);
+    child.wait().unwrap();
+}
+
+#[test]
+fn hello_message_fields() {
+    let mut child = Command::new(toddy_binary())
+        .args(["--mock", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn toddy");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
+
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+
+    let hello = stdout.recv();
+    assert_eq!(hello["type"], "hello");
+
+    // Protocol version must match the constant in toddy-core.
+    // toddy_core::protocol::PROTOCOL_VERSION == 1 at time of writing.
+    assert_eq!(
+        hello["protocol"], 1,
+        "hello.protocol should match PROTOCOL_VERSION"
+    );
+
+    // Mode: the test uses --mock.
+    assert_eq!(
+        hello["mode"], "mock",
+        "hello.mode should be \"mock\" for --mock flag"
+    );
+
+    // Version: non-empty string (crate version).
+    let version = hello["version"]
+        .as_str()
+        .expect("hello.version should be a string");
+    assert!(
+        !version.is_empty(),
+        "hello.version should be a non-empty string"
+    );
+
+    // Name: should be "toddy".
+    assert_eq!(hello["name"], "toddy", "hello.name should be \"toddy\"");
 
     drop(stdin);
     child.wait().unwrap();
@@ -69,20 +185,20 @@ fn single_session_echoes_session_id() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
 
     send(
         &mut stdin,
         &serde_json::json!({"session": "test_1", "type": "settings", "settings": {}}),
     );
-    let _hello = recv(&mut stdout);
+    let _hello = stdout.recv();
 
     // Send a reset and verify session is echoed.
     send(
         &mut stdin,
         &serde_json::json!({"session": "test_1", "type": "reset", "id": "r1"}),
     );
-    let resp = recv(&mut stdout);
+    let resp = stdout.recv();
     assert_eq!(resp["type"], "reset_response");
     assert_eq!(resp["session"], "test_1");
     assert_eq!(resp["id"], "r1");
@@ -102,14 +218,14 @@ fn multiplexed_sessions_are_isolated() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
 
     // Consume hello.
     send(
         &mut stdin,
         &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
     );
-    let _hello = recv(&mut stdout);
+    let _hello = stdout.recv();
 
     // Send snapshots to two different sessions with different trees.
     send(
@@ -152,8 +268,8 @@ fn multiplexed_sessions_are_isolated() {
     );
 
     // Collect both responses (order may vary due to threading).
-    let r1 = recv(&mut stdout);
-    let r2 = recv(&mut stdout);
+    let r1 = stdout.recv();
+    let r2 = stdout.recv();
 
     let mut responses: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
@@ -185,13 +301,13 @@ fn reset_tears_down_session() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
 
     send(
         &mut stdin,
         &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
     );
-    let _hello = recv(&mut stdout);
+    let _hello = stdout.recv();
 
     // Create a session, send a tree, reset it.
     send(
@@ -207,7 +323,7 @@ fn reset_tears_down_session() {
         &serde_json::json!({"session": "s1", "type": "reset", "id": "r1"}),
     );
 
-    let reset_resp = recv(&mut stdout);
+    let reset_resp = stdout.recv();
     assert_eq!(reset_resp["type"], "reset_response");
     assert_eq!(reset_resp["session"], "s1");
 
@@ -223,7 +339,7 @@ fn reset_tears_down_session() {
         }),
     );
 
-    let tree_resp = recv(&mut stdout);
+    let tree_resp = stdout.recv();
     assert_eq!(tree_resp["session"], "s1");
     // Tree should be null (fresh session, no snapshot sent).
     assert!(tree_resp["data"].is_null());
@@ -243,14 +359,14 @@ fn headless_interact_step_round_trip() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stdout = LineReceiver::new(child.stdout.take().unwrap());
 
     // Bootstrap: settings + hello.
     send(
         &mut stdin,
         &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
     );
-    let _hello = recv(&mut stdout);
+    let _hello = stdout.recv();
 
     // Send a tree with a button.
     send(
@@ -282,7 +398,7 @@ fn headless_interact_step_round_trip() {
     );
 
     // We should receive an interact_step with the click event.
-    let step = recv(&mut stdout);
+    let step = stdout.recv();
     assert_eq!(step["type"], "interact_step");
     assert_eq!(step["session"], "s1");
     assert_eq!(step["id"], "i1");
@@ -308,7 +424,7 @@ fn headless_interact_step_round_trip() {
 
     // The final interact_response should arrive with empty events
     // (the click was already delivered via the step).
-    let resp = recv(&mut stdout);
+    let resp = stdout.recv();
     assert_eq!(resp["type"], "interact_response");
     assert_eq!(resp["session"], "s1");
     assert_eq!(resp["id"], "i1");
@@ -319,42 +435,8 @@ fn headless_interact_step_round_trip() {
 }
 
 // ---------------------------------------------------------------------------
-// LineReceiver: background thread reads stdout lines into an mpsc channel,
-// enabling recv_timeout so tests don't hang forever on protocol bugs.
-// ---------------------------------------------------------------------------
-
-struct LineReceiver {
-    rx: mpsc::Receiver<serde_json::Value>,
-}
-
-impl LineReceiver {
-    fn new(reader: BufReader<std::process::ChildStdout>) -> Self {
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut reader = reader;
-            loop {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break, // EOF or error
-                    Ok(_) => {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim())
-                            && tx.send(val).is_err()
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        Self { rx }
-    }
-
-    fn recv_timeout(&self, timeout: Duration) -> serde_json::Value {
-        self.rx
-            .recv_timeout(timeout)
-            .expect("timed out waiting for response from toddy")
-    }
-}
+// Widget render, concurrent session, and validate_props tests below
+// use the LineReceiver defined at the top of this file.
 
 // ---------------------------------------------------------------------------
 // Item 4+17: Widget render structural verification via mock interact tests
@@ -371,7 +453,7 @@ fn mock_text_input_emits_input_event() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let receiver = LineReceiver::new(child.stdout.take().unwrap());
     let timeout = Duration::from_secs(10);
 
     // Bootstrap.
@@ -437,7 +519,7 @@ fn mock_checkbox_emits_toggle_event() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let receiver = LineReceiver::new(child.stdout.take().unwrap());
     let timeout = Duration::from_secs(10);
 
     send(
@@ -502,7 +584,7 @@ fn mock_slider_emits_slide_event() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let receiver = LineReceiver::new(child.stdout.take().unwrap());
     let timeout = Duration::from_secs(10);
 
     send(
@@ -571,7 +653,7 @@ fn concurrent_sessions_interleaved() {
         .expect("failed to spawn toddy");
 
     let mut stdin = child.stdin.take().unwrap();
-    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let receiver = LineReceiver::new(child.stdout.take().unwrap());
     let timeout = Duration::from_secs(10);
 
     // Bootstrap.

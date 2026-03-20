@@ -1180,14 +1180,7 @@ mod tests {
         }
     }
 
-    fn make_node(id: &str, type_name: &str) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props: serde_json::json!({}),
-            children: vec![],
-        }
-    }
+    use crate::testing::node as make_node;
 
     // -- Registration and type_name_index ------------------------------------
 

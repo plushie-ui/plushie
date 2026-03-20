@@ -226,28 +226,9 @@ mod tests {
     // Render smoke tests -- verify render() doesn't panic for common types
     // -----------------------------------------------------------------------
 
-    fn smoke_node(id: &str, type_name: &str, props: serde_json::Value) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props,
-            children: vec![],
-        }
-    }
-
-    fn smoke_node_with_children(
-        id: &str,
-        type_name: &str,
-        props: serde_json::Value,
-        children: Vec<TreeNode>,
-    ) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props,
-            children,
-        }
-    }
+    use crate::testing::{
+        node_with_props as smoke_node, node_with_props_and_children as smoke_node_with_children,
+    };
 
     fn smoke_text_child() -> TreeNode {
         smoke_node("child", "text", serde_json::json!({"content": "hi"}))
@@ -562,6 +543,44 @@ mod tests {
         assert!(
             infer_a11y_overrides(&node).is_none(),
             "image without alt should not get a11y wrapping"
+        );
+    }
+
+    #[test]
+    fn a11y_auto_infer_combo_box_placeholder_as_description() {
+        let node = smoke_node(
+            "cb1",
+            "combo_box",
+            serde_json::json!({"placeholder": "Select an option...", "value": ""}),
+        );
+        let overrides =
+            infer_a11y_overrides(&node).expect("should infer overrides from placeholder");
+        assert_eq!(
+            overrides.description.as_deref(),
+            Some("Select an option...")
+        );
+        assert!(overrides.label.is_none());
+    }
+
+    #[test]
+    fn a11y_auto_infer_text_editor_placeholder_as_description() {
+        let node = smoke_node(
+            "te1",
+            "text_editor",
+            serde_json::json!({"placeholder": "Write something..."}),
+        );
+        let overrides =
+            infer_a11y_overrides(&node).expect("should infer overrides from placeholder");
+        assert_eq!(overrides.description.as_deref(), Some("Write something..."));
+        assert!(overrides.label.is_none());
+    }
+
+    #[test]
+    fn a11y_no_wrapping_combo_box_without_placeholder() {
+        let node = smoke_node("cb2", "combo_box", serde_json::json!({"value": "selected"}));
+        assert!(
+            infer_a11y_overrides(&node).is_none(),
+            "combo_box without placeholder should not get a11y wrapping"
         );
     }
 

@@ -29,3 +29,6 @@ base64 = "0.22"
 tokio = { version = "1", features = ["sync"] }
 qrcode = { version = "0.14", default-features = false }
 sha2 = "0.10"
+
+[dev-dependencies]
+proptest = "1"

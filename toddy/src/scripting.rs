@@ -723,24 +723,10 @@ pub(crate) fn handle_tree_hash(core: &Core, id: String, name: String) -> io::Res
 mod tests {
     use super::*;
     use serde_json::json;
-    use toddy_core::protocol::TreeNode;
+    use toddy_core::testing::{node as make_node, node_with_props};
 
-    fn make_node(id: &str, type_name: &str) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: type_name.to_string(),
-            props: json!({}),
-            children: vec![],
-        }
-    }
-
-    fn make_text_node(id: &str, content: &str) -> TreeNode {
-        TreeNode {
-            id: id.to_string(),
-            type_name: "text".to_string(),
-            props: json!({"content": content}),
-            children: vec![],
-        }
+    fn make_text_node(id: &str, content: &str) -> toddy_core::protocol::TreeNode {
+        node_with_props(id, "text", json!({"content": content}))
     }
 
     // -- parse_selector --
