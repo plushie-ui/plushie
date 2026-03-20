@@ -918,6 +918,9 @@ fn load_fonts_from_settings(settings: &serde_json::Value) {
     }
 }
 
+/// Maximum decoded font data size (16 MiB). Matches the limit in widget_ops.rs.
+const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;
+
 /// Load a font from a `load_font` WidgetOp payload (base64-encoded data).
 fn load_font_from_payload(payload: &serde_json::Value) {
     let Some(data_str) = payload.get("data").and_then(|v| v.as_str()) else {
@@ -926,6 +929,14 @@ fn load_font_from_payload(payload: &serde_json::Value) {
     };
     match base64::Engine::decode(&base64::prelude::BASE64_STANDARD, data_str) {
         Ok(bytes) => {
+            if bytes.len() > MAX_FONT_BYTES {
+                log::warn!(
+                    "load_font: font data ({} bytes) exceeds {} byte limit, rejecting",
+                    bytes.len(),
+                    MAX_FONT_BYTES
+                );
+                return;
+            }
             let len = bytes.len();
             load_font_bytes(bytes);
             log::info!("loaded font from base64 ({len} bytes)");

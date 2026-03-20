@@ -11,6 +11,10 @@ use toddy_core::protocol::OutgoingEvent;
 use super::App;
 use super::emitters::emit_event;
 
+/// Maximum decoded font data size (16 MiB). Font files are typically under
+/// 1 MB; anything larger than this is almost certainly not a font.
+const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;
+
 // ---------------------------------------------------------------------------
 // Widget operations (impl App)
 // ---------------------------------------------------------------------------
@@ -264,6 +268,13 @@ impl App {
                     .unwrap_or_default();
                 if data.is_empty() {
                     log::warn!("load_font: no font data provided");
+                    Task::none()
+                } else if data.len() > MAX_FONT_BYTES {
+                    log::warn!(
+                        "load_font: font data ({} bytes) exceeds {} byte limit, rejecting",
+                        data.len(),
+                        MAX_FONT_BYTES
+                    );
                     Task::none()
                 } else {
                     iced::font::load(data).map(|result| {
