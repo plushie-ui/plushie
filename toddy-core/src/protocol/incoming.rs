@@ -26,7 +26,15 @@ pub enum IncomingMessage {
         payload: Value,
     },
     /// Subscribe to a runtime event source (keyboard, mouse, window, etc.).
-    Subscribe { kind: String, tag: String },
+    Subscribe {
+        kind: String,
+        tag: String,
+        /// Maximum events per second for this subscription. Omit for
+        /// unlimited (immediate delivery). Zero means "subscribe but
+        /// never emit."
+        #[serde(default)]
+        max_rate: Option<u32>,
+    },
     /// Unsubscribe from a runtime event source.
     Unsubscribe { kind: String },
     /// Perform a window operation (resize, move, close, etc.).
@@ -321,9 +329,32 @@ mod tests {
         let json = r#"{"type":"subscribe","kind":"on_key_press","tag":"keys"}"#;
         let msg: IncomingMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IncomingMessage::Subscribe { kind, tag } => {
+            IncomingMessage::Subscribe {
+                kind,
+                tag,
+                max_rate,
+            } => {
                 assert_eq!(kind, "on_key_press");
                 assert_eq!(tag, "keys");
+                assert_eq!(max_rate, None);
+            }
+            _ => panic!("expected Subscribe"),
+        }
+    }
+
+    #[test]
+    fn deserialize_subscribe_with_max_rate() {
+        let json = r#"{"type":"subscribe","kind":"on_mouse_move","tag":"mouse","max_rate":30}"#;
+        let msg: IncomingMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IncomingMessage::Subscribe {
+                kind,
+                tag,
+                max_rate,
+            } => {
+                assert_eq!(kind, "on_mouse_move");
+                assert_eq!(tag, "mouse");
+                assert_eq!(max_rate, Some(30));
             }
             _ => panic!("expected Subscribe"),
         }

@@ -147,6 +147,16 @@ impl EventEmitter {
         self.widget_rates.clear();
     }
 
+    /// Check whether a widget rate is already cached.
+    pub fn has_widget_rate(&self, widget_id: &str) -> bool {
+        self.widget_rates.contains_key(widget_id)
+    }
+
+    /// Iterate over the subscription rate keys.
+    pub fn subscription_rate_keys(&self) -> impl Iterator<Item = &str> {
+        self.subscription_rates.keys().map(|s| s.as_str())
+    }
+
     /// Resolve the effective rate for a given key, following the
     /// priority hierarchy: widget > subscription > global default.
     fn effective_rate(&self, key: &CoalesceKey) -> Option<u32> {

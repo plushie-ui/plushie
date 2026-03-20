@@ -133,6 +133,11 @@ pub struct Core {
     pub caches: WidgetCaches,
     /// Active event subscriptions: kind -> tag.
     pub active_subscriptions: HashMap<String, String>,
+    /// Per-subscription max_rate values from Subscribe messages.
+    pub subscription_rates: HashMap<String, Option<u32>>,
+    /// Global default event rate from Settings (events per second).
+    /// None = no limit (full speed).
+    pub default_event_rate: Option<u32>,
     /// Global default text size from Settings.
     pub default_text_size: Option<f32>,
     /// Global default font from Settings.
@@ -161,6 +166,8 @@ impl Core {
             tree: Tree::new(),
             caches: WidgetCaches::new(),
             active_subscriptions: HashMap::new(),
+            subscription_rates: HashMap::new(),
+            default_event_rate: None,
             default_text_size: None,
             default_font: None,
             cached_theme: None,
@@ -278,7 +285,11 @@ impl Core {
                 log::debug!("widget_op: {op}");
                 effects.push(CoreEffect::WidgetOp { op, payload });
             }
-            IncomingMessage::Subscribe { kind, tag } => {
+            IncomingMessage::Subscribe {
+                kind,
+                tag,
+                max_rate,
+            } => {
                 log::debug!("subscription register: {kind} -> {tag}");
                 if let Some(old_tag) = self.active_subscriptions.insert(kind.clone(), tag.clone())
                     && old_tag != tag
@@ -288,10 +299,15 @@ impl Core {
                          (was `{old_tag}`); previous handler replaced"
                     );
                 }
+                if let Some(rate) = max_rate {
+                    log::debug!("subscription `{kind}` max_rate: {rate}");
+                    self.subscription_rates.insert(kind, Some(rate));
+                }
             }
             IncomingMessage::Unsubscribe { kind } => {
                 log::debug!("subscription unregister: {kind}");
                 self.active_subscriptions.remove(&kind);
+                self.subscription_rates.remove(&kind);
             }
             IncomingMessage::WindowOp {
                 op,
@@ -336,6 +352,10 @@ impl Core {
                 }
                 self.settings_applied = true;
 
+                self.default_event_rate = settings
+                    .get("default_event_rate")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
                 self.default_text_size = settings
                     .get("default_text_size")
                     .and_then(|v| v.as_f64())
@@ -537,6 +557,67 @@ mod tests {
     }
 
     #[test]
+    fn settings_sets_default_event_rate() {
+        let mut core = Core::new();
+        let msg = IncomingMessage::Settings {
+            settings: serde_json::json!({"default_event_rate": 60}),
+        };
+        core.apply(msg);
+        assert_eq!(core.default_event_rate, Some(60));
+    }
+
+    #[test]
+    fn settings_without_default_event_rate_leaves_none() {
+        let mut core = Core::new();
+        let msg = IncomingMessage::Settings {
+            settings: serde_json::json!({"default_text_size": 14.0}),
+        };
+        core.apply(msg);
+        assert_eq!(core.default_event_rate, None);
+    }
+
+    #[test]
+    fn subscribe_with_max_rate_stores_rate() {
+        let mut core = Core::new();
+        let msg = IncomingMessage::Subscribe {
+            kind: "on_mouse_move".to_string(),
+            tag: "mouse".to_string(),
+            max_rate: Some(30),
+        };
+        core.apply(msg);
+        assert_eq!(
+            core.subscription_rates.get("on_mouse_move"),
+            Some(&Some(30))
+        );
+    }
+
+    #[test]
+    fn subscribe_without_max_rate_does_not_store_rate() {
+        let mut core = Core::new();
+        let msg = IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "keys".to_string(),
+            max_rate: None,
+        };
+        core.apply(msg);
+        assert!(!core.subscription_rates.contains_key("on_key_press"));
+    }
+
+    #[test]
+    fn unsubscribe_removes_subscription_rate() {
+        let mut core = Core::new();
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_mouse_move".to_string(),
+            tag: "mouse".to_string(),
+            max_rate: Some(30),
+        });
+        core.apply(IncomingMessage::Unsubscribe {
+            kind: "on_mouse_move".to_string(),
+        });
+        assert!(!core.subscription_rates.contains_key("on_mouse_move"));
+    }
+
+    #[test]
     fn settings_without_extension_config_returns_no_effects() {
         let mut core = Core::new();
         let msg = IncomingMessage::Settings {
@@ -592,6 +673,7 @@ mod tests {
         let msg = IncomingMessage::Subscribe {
             kind: "time".to_string(),
             tag: "tick".to_string(),
+            max_rate: None,
         };
         core.apply(msg);
         assert_eq!(
@@ -606,6 +688,7 @@ mod tests {
         let msg = IncomingMessage::Subscribe {
             kind: "keyboard".to_string(),
             tag: "key".to_string(),
+            max_rate: None,
         };
         let effects = core.apply(msg);
         assert!(effects.is_empty());

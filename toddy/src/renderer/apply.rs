@@ -54,6 +54,9 @@ impl App {
             message,
             IncomingMessage::Snapshot { .. } | IncomingMessage::Patch { .. }
         );
+        let is_subscribe = matches!(message, IncomingMessage::Subscribe { .. });
+        let is_unsubscribe = matches!(message, IncomingMessage::Unsubscribe { .. });
+        let is_settings = matches!(message, IncomingMessage::Settings { .. });
 
         // Flush pending widget events before a snapshot replaces the
         // tree (widget IDs may change). Clear cached widget rates
@@ -64,6 +67,35 @@ impl App {
         }
 
         let effects = self.core.apply(message);
+
+        // Sync rate configuration from Core to the EventEmitter after
+        // Subscribe, Unsubscribe, or Settings messages.
+        if is_subscribe || is_settings {
+            self.emitter.set_default_rate(self.core.default_event_rate);
+            for (kind, rate_opt) in &self.core.subscription_rates {
+                if let Some(rate) = rate_opt {
+                    self.emitter.set_subscription_rate(kind, *rate);
+                }
+            }
+        }
+        if is_unsubscribe {
+            // Clean up emitter rates for removed subscriptions by
+            // diffing against Core's subscription_rates.
+            let emitter_keys: Vec<String> = self
+                .emitter
+                .subscription_rate_keys()
+                .map(|s| s.to_string())
+                .collect();
+            for key in emitter_keys {
+                if !self.core.subscription_rates.contains_key(&key) {
+                    self.emitter.remove_subscription_rate(&key);
+                    // Flush pending events for this subscription.
+                    self.emitter.flush_key(
+                        &super::emitter::CoalesceKey::Subscription(key),
+                    );
+                }
+            }
+        }
         for effect in effects {
             match effect {
                 CoreEffect::SyncWindows => {

@@ -61,6 +61,12 @@ impl Tree {
         ids
     }
 
+    /// Find a node by ID, searching the entire tree depth-first.
+    pub fn find_by_id(&self, node_id: &str) -> Option<&TreeNode> {
+        let root = self.root.as_ref()?;
+        find_by_id_recursive(root, node_id, 0)
+    }
+
     /// Apply a sequence of patch operations to the tree.
     ///
     /// Operations are applied sequentially. If one operation fails, it is
@@ -183,6 +189,25 @@ impl Tree {
             }
         }
     }
+}
+
+fn find_by_id_recursive<'a>(
+    node: &'a TreeNode,
+    node_id: &str,
+    depth: usize,
+) -> Option<&'a TreeNode> {
+    if depth > MAX_TREE_DEPTH {
+        return None;
+    }
+    if node.id == node_id {
+        return Some(node);
+    }
+    for child in &node.children {
+        if let Some(found) = find_by_id_recursive(child, node_id, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn find_window_recursive<'a>(

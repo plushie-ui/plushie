@@ -155,6 +155,15 @@ impl App {
         }
     }
 
+    /// Look up a widget's `event_rate` prop from the tree.
+    pub(super) fn lookup_widget_event_rate(&self, widget_id: &str) -> Option<u32> {
+        let node = self.core.tree.find_by_id(widget_id)?;
+        node.props
+            .get("event_rate")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+    }
+
     /// Emit a coalescable subscription event through the EventEmitter.
     /// The emitter applies rate limiting and coalescing. Falls back to
     /// the catch-all "on_event" subscription if the specific key isn't

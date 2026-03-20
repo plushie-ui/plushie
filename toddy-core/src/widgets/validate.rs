@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// Props accepted by all widget types. Checked before widget-specific
 /// schemas so they don't appear as "unexpected" in validation warnings.
-const UNIVERSAL_PROPS: &[&str] = &["a11y", "id"];
+const UNIVERSAL_PROPS: &[&str] = &["a11y", "event_rate", "id"];
 
 /// Global flag to enable prop validation in release builds.
 /// Set via `set_validate_props(true)` during settings init.
@@ -681,8 +681,11 @@ mod tests {
 
     #[test]
     fn no_warnings_for_universal_props() {
-        // "a11y" and "id" are universal props, should never trigger warnings.
-        let node = make_node("button", json!({"a11y": {"role": "button"}, "id": "btn1"}));
+        // "a11y", "id", and "event_rate" are universal props, should never trigger warnings.
+        let node = make_node(
+            "button",
+            json!({"a11y": {"role": "button"}, "id": "btn1", "event_rate": 30}),
+        );
         let warnings = collect_prop_warnings(&node);
         assert!(
             warnings.is_empty(),
