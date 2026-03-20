@@ -7,9 +7,9 @@
 //!
 //! Several operations are no-ops on Wayland because the compositor owns
 //! window positioning, focus, and icon management. When the renderer
-//! detects Wayland (via `WAYLAND_DISPLAY`), it logs a one-time debug
-//! warning for these operations so SDK users can understand why their
-//! requests have no visible effect.
+//! detects Wayland (via `WAYLAND_DISPLAY`), it logs a debug warning for
+//! these operations so SDK users can understand why their requests have
+//! no visible effect.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -811,6 +811,7 @@ pub(super) fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
         Some(obj) if obj.is_object() => {
             let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            warn_wayland_noop("position");
             window::Position::Specific(Point::new(x, y))
         }
         _ => window::Position::default(),

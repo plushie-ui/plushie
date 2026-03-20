@@ -907,8 +907,9 @@ fn load_font_from_payload(payload: &serde_json::Value) {
     };
     match base64::Engine::decode(&base64::prelude::BASE64_STANDARD, data_str) {
         Ok(bytes) => {
+            let len = bytes.len();
             load_font_bytes(bytes);
-            log::info!("loaded font from base64 ({} bytes)", data_str.len() * 3 / 4);
+            log::info!("loaded font from base64 ({len} bytes)");
         }
         Err(e) => {
             log::error!("load_font: base64 decode error: {e}");
