@@ -1518,9 +1518,26 @@ pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // Cache ensure functions
 // ---------------------------------------------------------------------------
 
+/// Maximum text_editor content size in bytes. Content exceeding this limit
+/// is truncated with a warning.
+const MAX_TEXT_EDITOR_CONTENT: usize = 10_485_760; // 10 MB
+
 pub(crate) fn ensure_text_editor_cache(node: &TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
-    let content_str = prop_str(props, "content").unwrap_or_default();
+    let mut content_str = prop_str(props, "content").unwrap_or_default();
+    if content_str.len() > MAX_TEXT_EDITOR_CONTENT {
+        log::warn!(
+            "[id={}] text_editor content ({} bytes) exceeds limit ({} bytes), truncating",
+            node.id,
+            content_str.len(),
+            MAX_TEXT_EDITOR_CONTENT,
+        );
+        let mut end = MAX_TEXT_EDITOR_CONTENT;
+        while !content_str.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        content_str.truncate(end);
+    }
     let prop_hash = hash_str(&content_str);
     let prev_hash = caches.editor_content_hashes.get(&node.id).copied();
     if prev_hash != Some(prop_hash) {

@@ -635,9 +635,26 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 // Cache ensure functions
 // ---------------------------------------------------------------------------
 
+/// Maximum markdown content size in bytes. Content exceeding this limit
+/// is truncated with a warning.
+const MAX_MARKDOWN_CONTENT: usize = 1_048_576; // 1 MB
+
 pub(crate) fn ensure_markdown_cache(node: &TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
-    let content_str = prop_str(props, "content").unwrap_or_default();
+    let mut content_str = prop_str(props, "content").unwrap_or_default();
+    if content_str.len() > MAX_MARKDOWN_CONTENT {
+        log::warn!(
+            "[id={}] markdown content ({} bytes) exceeds limit ({} bytes), truncating",
+            node.id,
+            content_str.len(),
+            MAX_MARKDOWN_CONTENT,
+        );
+        let mut end = MAX_MARKDOWN_CONTENT;
+        while !content_str.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        content_str.truncate(end);
+    }
     let code_theme_str = prop_str(props, "code_theme").unwrap_or_default();
     let hash = hash_str(&format!("{content_str}\0{code_theme_str}"));
     match caches.markdown_items.get(&node.id) {
