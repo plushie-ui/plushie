@@ -16,37 +16,95 @@ use crate::tree::Tree;
 use crate::widgets::{self, WidgetCaches};
 
 /// Side effects produced by [`Core::apply`] that the host must handle.
+///
+/// Core is zero-I/O: it never writes to stdout, opens windows, or runs
+/// platform operations. Instead it returns these effects as commands for
+/// the host (the iced daemon or headless runner) to execute. This keeps
+/// Core testable and mode-agnostic.
+///
+/// Effects are returned in a `Vec` and should be processed in order.
+/// Some variants (e.g. `SyncWindows`) may depend on prior tree mutations
+/// from the same `apply` call.
 #[derive(Debug)]
 pub enum CoreEffect {
     /// The window set may have changed -- re-sync with renderer.
+    ///
+    /// Produced after every Snapshot and Patch that succeeds. The host
+    /// should compare `tree.window_ids()` against its open window set
+    /// and open/close as needed.
     SyncWindows,
-    /// Emit an event to stdout.
+
+    /// Emit a protocol event to the host process.
     EmitEvent(OutgoingEvent),
+
     /// Handle a platform effect (file dialog, clipboard, notification).
     ///
     /// Core does not execute effects -- it passes the raw request through
-    /// for the host (daemon or headless runner) to dispatch. The host
-    /// decides whether to run the effect synchronously, asynchronously,
-    /// or return a cancellation (e.g. in headless mode where file dialogs
+    /// for the host to dispatch. The host decides whether to run the
+    /// effect synchronously, asynchronously (via Task::perform), or
+    /// return a cancellation (e.g. in headless mode where file dialogs
     /// are unavailable).
+    ///
+    /// # Known effect kinds
+    ///
+    /// **Async (file dialogs):** `file_open`, `file_open_multiple`,
+    /// `file_save`, `directory_select`, `directory_select_multiple`
+    ///
+    /// **Sync (clipboard):** `clipboard_read`, `clipboard_write`,
+    /// `clipboard_read_html`, `clipboard_write_html`, `clipboard_clear`,
+    /// `clipboard_read_primary`, `clipboard_write_primary`
+    ///
+    /// **Sync (notification):** `notification`
     HandleEffect {
         request_id: String,
         kind: String,
         payload: Value,
     },
-    /// Execute a widget operation (focus, scroll, etc.)
+
+    /// Execute a widget operation.
+    ///
+    /// # Known ops
+    ///
+    /// `focus`, `focus_next`, `focus_previous`, `scroll_to`, `scroll_by`,
+    /// `snap_to`, `snap_to_end`, `select_all`, `select_range`,
+    /// `move_cursor_to_front`, `move_cursor_to_end`,
+    /// `move_cursor_to_line_start`, `move_cursor_to_line_end`,
+    /// `close_window`, `announce`, `exit`, `pane_split`, `pane_close`,
+    /// `pane_swap`, `tree_hash`, `list_images`, `clear_images`,
+    /// `load_font`, `find_focused`, `system_theme`, `system_info`
     WidgetOp { op: String, payload: Value },
-    /// Execute a window operation (open, close, resize, etc.)
+
+    /// Execute a window operation.
+    ///
+    /// # Known ops
+    ///
+    /// `open`, `close`, `update`, `resize`, `move_to`, `maximize`,
+    /// `minimize`, `set_mode`, `toggle_maximize`, `toggle_decorations`,
+    /// `gain_focus`, `set_level`, `drag`, `drag_resize`,
+    /// `request_attention`, `show_system_menu`, `set_resizable`,
+    /// `set_min_size`, `set_max_size`, `mouse_passthrough`,
+    /// `get_size`, `get_position`, `set_icon`
     WindowOp {
         op: String,
         window_id: String,
         settings: Value,
     },
-    /// Theme changed (for the global/root theme only).
+
+    /// The global/root theme changed to an explicit value.
+    ///
+    /// The host should update its cached theme and set
+    /// `theme_follows_system = false`.
     ThemeChanged(iced::Theme),
-    /// App-level theme should follow the system preference.
+
+    /// The root theme was set to `"system"` -- the app-level theme
+    /// should follow the OS preference.
     ThemeFollowsSystem,
+
     /// Image operation (create/update/delete in-memory handles).
+    ///
+    /// # Known ops
+    ///
+    /// `create_from_bytes`, `create_from_rgba`, `delete`
     ImageOp {
         op: String,
         handle: String,
@@ -55,7 +113,11 @@ pub enum CoreEffect {
         width: Option<u32>,
         height: Option<u32>,
     },
-    /// Extension configuration received from the host.
+
+    /// Extension configuration received from the host's Settings message.
+    ///
+    /// The host should call `dispatcher.init_all(&config)` to pass the
+    /// configuration to registered extensions.
     ExtensionConfig(Value),
 }
 
