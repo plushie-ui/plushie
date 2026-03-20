@@ -662,14 +662,29 @@ impl ExtensionDispatcher {
     /// extension to produce independent instances with isolated mutable
     /// state. The type-name index is rebuilt from the new instances.
     ///
-    /// Panics if any extension has not implemented `new_instance()`.
-    pub fn clone_for_session(&self) -> Self {
-        let extensions: Vec<Box<dyn WidgetExtension>> = self
-            .extensions
-            .iter()
-            .map(|ext| ext.new_instance())
-            .collect();
-        Self::new(extensions)
+    /// Returns `Err` with a description if any extension panics in
+    /// `new_instance()` (the default implementation panics when not
+    /// overridden). The caller should log the error and reject the
+    /// session rather than crashing the reader thread.
+    pub fn clone_for_session(&self) -> Result<Self, String> {
+        let mut extensions: Vec<Box<dyn WidgetExtension>> = Vec::with_capacity(self.extensions.len());
+        for ext in &self.extensions {
+            let key = ext.config_key().to_string();
+            if catch_unwind_enabled() {
+                match catch_unwind(AssertUnwindSafe(|| ext.new_instance())) {
+                    Ok(instance) => extensions.push(instance),
+                    Err(payload) => {
+                        let msg = panic_message(&payload);
+                        return Err(format!(
+                            "extension `{key}` panicked in new_instance(): {msg}"
+                        ));
+                    }
+                }
+            } else {
+                extensions.push(ext.new_instance());
+            }
+        }
+        Ok(Self::new(extensions))
     }
 
     /// Check if a node type is handled by an extension.
@@ -1878,8 +1893,18 @@ mod tests {
     fn clone_for_session_uses_new_instance() {
         let ext = CloneableExtension::new("session");
         let dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
-        let cloned = dispatcher.clone_for_session();
+        let cloned = dispatcher.clone_for_session().expect("clone should succeed");
         assert!(cloned.handles_type("cloneable_widget"));
         assert_eq!(cloned.len(), 1);
+    }
+
+    #[test]
+    fn clone_for_session_returns_err_on_panic() {
+        let ext = TestExtension::new(vec!["sparkline"], "charts");
+        let dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
+        let result = dispatcher.clone_for_session();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("charts"), "error should name the extension: {err}");
     }
 }

@@ -1061,7 +1061,15 @@ fn run_multiplexed(
                     // Bounded channel (32) provides natural back-pressure
                     // from the reader to slow sessions.
                     let (tx, rx) = mpsc::sync_channel::<IncomingMessage>(32);
-                    let dispatcher = template.clone_for_session();
+                    let dispatcher = match template.clone_for_session() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            log::error!(
+                                "failed to clone extensions for session '{session_id}': {e}"
+                            );
+                            continue;
+                        }
+                    };
                     let writer = WireWriter::channel(writer_tx.clone());
                     let sid = session_id.clone();
 
