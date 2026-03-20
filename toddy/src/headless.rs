@@ -1061,17 +1061,44 @@ fn run_multiplexed(
                     let writer = WireWriter::channel(writer_tx.clone());
                     let sid = session_id.clone();
 
+                    let panic_writer_tx = writer_tx.clone();
                     let handle = thread::spawn(move || {
-                        let mut session = Session::new(dispatcher, mode, writer);
-                        for msg in &rx {
-                            let mut read_next = || rx.recv().ok();
-                            if let Err(e) = handle_message(&mut session, &sid, msg, &mut read_next)
-                            {
-                                log::error!("session '{sid}': write error: {e}");
-                                break;
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let mut session = Session::new(dispatcher, mode, writer);
+                            for msg in &rx {
+                                let mut read_next = || rx.recv().ok();
+                                if let Err(e) =
+                                    handle_message(&mut session, &sid, msg, &mut read_next)
+                                {
+                                    log::error!("session '{sid}': write error: {e}");
+                                    break;
+                                }
+                            }
+                            log::debug!("session '{sid}' thread exiting");
+                        }));
+                        if let Err(payload) = result {
+                            let msg = payload
+                                .downcast_ref::<&str>()
+                                .copied()
+                                .or_else(|| {
+                                    payload.downcast_ref::<String>().map(|s| s.as_str())
+                                })
+                                .unwrap_or("(non-string panic)");
+                            log::error!("session '{sid}' thread panicked: {msg}");
+                            // Emit a synthetic error event so the host knows
+                            // the session died.
+                            let error = serde_json::json!({
+                                "type": "event",
+                                "session": sid,
+                                "family": "session_error",
+                                "id": "",
+                                "data": { "error": msg }
+                            });
+                            let codec = Codec::get_global();
+                            if let Ok(bytes) = codec.encode(&error) {
+                                let _ = panic_writer_tx.send(bytes);
                             }
                         }
-                        log::debug!("session '{sid}' thread exiting");
                     });
 
                     sessions.insert(session_id.clone(), tx.clone());
