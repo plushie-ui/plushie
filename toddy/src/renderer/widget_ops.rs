@@ -295,7 +295,7 @@ impl App {
                     .to_string();
                 let handles: Vec<String> = self.image_registry.handle_names();
                 if let Err(e) = super::emitters::emit_query_response(
-                    "image_list",
+                    "list_images",
                     &tag,
                     serde_json::json!({"handles": handles}),
                 ) {
