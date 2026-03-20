@@ -244,6 +244,59 @@ pub(crate) fn parse_background(value: &Value) -> Option<iced::Background> {
 // Font parsing
 // ---------------------------------------------------------------------------
 
+/// Maximum length for a custom font family name. Names longer than this
+/// are truncated with a warning.
+const MAX_FONT_FAMILY_LEN: usize = 256;
+
+/// Maximum number of unique custom font family names cached. Beyond this
+/// limit, new names are still leaked (iced requires `'static` family
+/// names) but not inserted into the cache, bounding the HashMap's memory.
+const MAX_FONT_FAMILY_CACHE: usize = 1024;
+
+/// Intern a custom font family name so identical strings share one leaked
+/// allocation. Names exceeding [`MAX_FONT_FAMILY_LEN`] are truncated.
+/// The cache is bounded to [`MAX_FONT_FAMILY_CACHE`] entries.
+fn intern_font_family(name: &str) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{LazyLock, Mutex};
+
+    static CACHE: LazyLock<Mutex<HashMap<String, &'static str>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    static WARNED: AtomicBool = AtomicBool::new(false);
+
+    let name = if name.len() > MAX_FONT_FAMILY_LEN {
+        log::warn!(
+            "font family name truncated from {} to {MAX_FONT_FAMILY_LEN} chars",
+            name.len()
+        );
+        &name[..MAX_FONT_FAMILY_LEN]
+    } else {
+        name
+    };
+
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+
+    if let Some(existing) = cache.get(name) {
+        return existing;
+    }
+
+    let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
+
+    if cache.len() >= MAX_FONT_FAMILY_CACHE {
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "font family cache full ({MAX_FONT_FAMILY_CACHE} entries); \
+                 new names will leak without caching"
+            );
+        }
+        return leaked;
+    }
+
+    cache.insert(name.to_owned(), leaked);
+    leaked
+}
+
 /// Parse a font from a JSON value. Accepts:
 /// - "default" -> Font::DEFAULT
 /// - "monospace" -> Font::MONOSPACE
@@ -275,11 +328,7 @@ pub(crate) fn parse_font(value: &Value) -> Font {
                     // through as custom font families (user-loaded fonts).
                     "default" | "sans_serif" | "sans-serif" | "sansserif" | "" => {}
                     other => {
-                        // Leak the string to get a 'static lifetime. Font
-                        // family names are a small, finite set that lives for
-                        // the process lifetime, so this is acceptable.
-                        let leaked: &'static str = Box::leak(other.to_owned().into_boxed_str());
-                        f.family = font::Family::Name(leaked);
+                        f.family = font::Family::Name(intern_font_family(other));
                     }
                 }
             }
