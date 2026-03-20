@@ -567,6 +567,15 @@ fn rmpv_to_json_inner(val: rmpv::Value, depth: usize) -> serde_json::Value {
         rmpv::Value::Binary(bytes) => {
             // Preserve raw bytes as a JSON array of u8 values.
             // The deserialize_binary_field custom deserializer reconstructs Vec<u8>.
+            //
+            // Memory amplification note: each byte becomes a serde_json::Value::Number,
+            // which is ~40x larger than the original byte on 64-bit platforms
+            // (Value enum tag + Number heap alloc + i64). A 64 MiB binary field
+            // would expand to ~2.5 GiB of Value::Number objects. This is bounded
+            // by the 64 MiB MAX_MESSAGE_SIZE cap on incoming wire messages --
+            // the worst-case expansion stays under ~2.5 GiB, which is large but
+            // finite. In practice, binary fields in real messages are much smaller
+            // (e.g. pixel data in image_ops, font data in load_font).
             serde_json::Value::Array(
                 bytes
                     .into_iter()
