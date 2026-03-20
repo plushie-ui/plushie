@@ -40,6 +40,15 @@ pub struct ImageRegistry {
     handles: HashMap<String, image::Handle>,
 }
 
+impl std::fmt::Debug for ImageRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageRegistry")
+            .field("count", &self.handles.len())
+            .field("names", &self.handles.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 impl Default for ImageRegistry {
     fn default() -> Self {
         Self::new()

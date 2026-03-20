@@ -111,6 +111,18 @@ pub struct TestEnv {
     pub default_font: Option<iced::Font>,
 }
 
+impl std::fmt::Debug for TestEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestEnv")
+            .field("ext_caches", &self.ext_caches)
+            .field("images", &self.images)
+            .field("dispatcher", &self.dispatcher)
+            .field("default_text_size", &self.default_text_size)
+            .field("default_font", &self.default_font)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for TestEnv {
     fn default() -> Self {
         Self {

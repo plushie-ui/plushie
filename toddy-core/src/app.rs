@@ -29,6 +29,14 @@ pub struct ToddyAppBuilder {
     extensions: Vec<Box<dyn WidgetExtension>>,
 }
 
+impl std::fmt::Debug for ToddyAppBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToddyAppBuilder")
+            .field("extensions", &self.extensions.len())
+            .finish()
+    }
+}
+
 impl ToddyAppBuilder {
     /// Create an empty builder with no extensions registered.
     pub fn new() -> Self {

@@ -277,6 +277,15 @@ pub struct ExtensionCaches {
     inner: HashMap<String, Box<dyn Any + Send + Sync>>,
 }
 
+impl std::fmt::Debug for ExtensionCaches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtensionCaches")
+            .field("entries", &self.inner.len())
+            .field("keys", &self.inner.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 impl ExtensionCaches {
     pub fn new() -> Self {
         Self {
@@ -411,6 +420,15 @@ pub struct WidgetEnv<'a> {
     pub ctx: RenderCtx<'a>,
 }
 
+impl std::fmt::Debug for WidgetEnv<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WidgetEnv")
+            .field("caches", self.caches)
+            .field("ctx", &self.ctx)
+            .finish()
+    }
+}
+
 impl<'a> WidgetEnv<'a> {
     pub fn images(&self) -> &'a ImageRegistry {
         self.ctx.images
@@ -476,6 +494,17 @@ pub struct RenderCtx<'a> {
     pub scale_factor: f32,
 }
 
+impl std::fmt::Debug for RenderCtx<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderCtx")
+            .field("window_id", &self.window_id)
+            .field("scale_factor", &self.scale_factor)
+            .field("default_text_size", &self.default_text_size)
+            .field("default_font", &self.default_font)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a> RenderCtx<'a> {
     /// Render a child node through the main dispatch.
     pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message> {
@@ -515,6 +544,17 @@ pub struct ExtensionDispatcher {
     /// so `record_render_panic` can be called with `&self` (the dispatcher
     /// is borrowed immutably during view/render).
     render_panic_counts: Vec<AtomicU32>,
+}
+
+impl std::fmt::Debug for ExtensionDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let type_names: Vec<_> = self.type_name_index.keys().collect();
+        f.debug_struct("ExtensionDispatcher")
+            .field("extensions", &self.extensions.len())
+            .field("type_names", &type_names)
+            .field("poisoned", &self.poisoned)
+            .finish()
+    }
 }
 
 impl ExtensionDispatcher {
