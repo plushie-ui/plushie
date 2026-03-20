@@ -148,6 +148,12 @@ impl WidgetCaches {
 ///
 /// After populating caches, prunes stale entries for nodes no longer in the
 /// tree across all cache types.
+///
+/// The full-tree walk is intentional: it collects all live node IDs for
+/// the pruning step. The expensive work (parsing styles, hashing canvas
+/// layers, etc.) is guarded by per-node content hashes, so unchanged
+/// nodes are O(1). A dirty-flag optimization would only skip those hash
+/// lookups, which are already cheap relative to the tree walk itself.
 pub fn ensure_caches(node: &TreeNode, caches: &mut WidgetCaches) {
     let mut live_ids = HashSet::new();
     ensure_caches_walk(node, caches, &mut live_ids, 0);

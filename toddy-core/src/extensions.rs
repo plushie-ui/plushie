@@ -701,7 +701,14 @@ impl ExtensionDispatcher {
         let mut new_map = HashMap::new();
         self.walk_prepare(root, caches, theme, &mut new_map, 0);
 
-        // Prune stale nodes
+        // Prune stale nodes: call cleanup() for nodes that existed in the
+        // previous tree but not in the current one. Cache entries for
+        // poisoned extensions are removed directly (without calling
+        // cleanup) because the extension's mutable state may be
+        // inconsistent after a panic. Note that between the tree change
+        // and this prune pass, cache entries for poisoned extensions
+        // survive intentionally -- cleanup callbacks for *healthy*
+        // extensions may need to observe neighbouring cache data.
         for (old_id, ext_idx) in &self.node_extension_map {
             if !new_map.contains_key(old_id) {
                 let ns = self.extensions[*ext_idx].config_key().to_string();

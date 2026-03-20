@@ -123,6 +123,11 @@ pub(crate) fn read_initial_settings(
     Vec<Vec<u8>>,
     io::BufReader<io::Stdin>,
 ) {
+    // 64 KiB buffer is generous for the initial Settings message (typically
+    // < 4 KiB). The background reader thread uses the same reader after
+    // handoff, so this capacity also serves ongoing message reads.
+    // BufReader's default (8 KiB) would work but the larger buffer reduces
+    // syscall frequency for msgpack streams with many small messages.
     let mut reader = io::BufReader::with_capacity(64 * 1024, io::stdin());
 
     // Determine codec: forced by CLI flag, or auto-detected from first byte.

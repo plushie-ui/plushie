@@ -58,8 +58,10 @@ impl Codec {
     /// - JSON: `serde_json` serialization + trailing `\n`.
     /// - MsgPack: 4-byte BE u32 length prefix + `rmp_serde` named serialization.
     ///
-    /// Allocates a new Vec per call. For hot paths (e.g. rapid event
-    /// emission), consider pre-allocating and reusing a buffer.
+    /// Allocates a new Vec per call. In practice, encode is called once
+    /// per outgoing message (not per render frame), and the messages are
+    /// small enough that the allocation is negligible relative to the
+    /// I/O cost. Buffer reuse would add complexity for no measurable gain.
     pub fn encode<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, String> {
         match self {
             Codec::Json => {

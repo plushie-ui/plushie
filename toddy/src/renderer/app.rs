@@ -82,7 +82,10 @@ impl App {
             && let Some(title) = node.props.get("title").and_then(|v| v.as_str())
         {
             // Strip control characters to prevent injection into
-            // window titles / terminal escape sequences.
+            // window titles / terminal escape sequences. The per-char
+            // filter + collect allocates a new String, but titles are
+            // short (typically < 100 chars) and this runs once per
+            // window title query, not per frame.
             return title.chars().filter(|c| !c.is_control()).collect();
         }
         DEFAULT_WINDOW_TITLE.to_string()
