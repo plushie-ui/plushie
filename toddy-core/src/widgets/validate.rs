@@ -303,6 +303,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
         "combo_box" => &[
             ("selected", Str),
             ("placeholder", Str),
+            ("options", Array),
             ("width", Length),
             ("padding", Any),
             ("size", Number),
@@ -316,6 +317,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("on_close", Bool),
             ("ellipsis", Str),
             ("menu_style", Any),
+            ("style", Any),
         ],
         "text_editor" => &[
             ("content", Str),

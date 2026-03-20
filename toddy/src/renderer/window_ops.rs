@@ -820,8 +820,21 @@ pub(super) fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
     let position = match v.get("position") {
         Some(serde_json::Value::String(s)) if s == "centered" => window::Position::Centered,
         Some(obj) if obj.is_object() => {
-            let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-            let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            const MAX_POS: f32 = 32768.0;
+            let mut x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let mut y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            if !(-MAX_POS..=MAX_POS).contains(&x) {
+                log::warn!(
+                    "window position x={x} out of range, clamping to -{MAX_POS}..={MAX_POS}"
+                );
+                x = x.clamp(-MAX_POS, MAX_POS);
+            }
+            if !(-MAX_POS..=MAX_POS).contains(&y) {
+                log::warn!(
+                    "window position y={y} out of range, clamping to -{MAX_POS}..={MAX_POS}"
+                );
+                y = y.clamp(-MAX_POS, MAX_POS);
+            }
             warn_wayland_noop("position");
             window::Position::Specific(Point::new(x, y))
         }

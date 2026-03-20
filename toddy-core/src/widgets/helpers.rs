@@ -78,10 +78,10 @@ pub(crate) fn parse_padding_value(props: Props<'_>) -> Option<Padding> {
         Some(Value::Number(n)) => {
             let base = n.as_f64().map(|v| v as f32).unwrap_or(0.0).max(0.0);
             // Check for per-side overrides (legacy format)
-            let top = prop_f32(props, "padding_top").unwrap_or(base);
-            let right = prop_f32(props, "padding_right").unwrap_or(base);
-            let bottom = prop_f32(props, "padding_bottom").unwrap_or(base);
-            let left = prop_f32(props, "padding_left").unwrap_or(base);
+            let top = prop_f32(props, "padding_top").unwrap_or(base).max(0.0);
+            let right = prop_f32(props, "padding_right").unwrap_or(base).max(0.0);
+            let bottom = prop_f32(props, "padding_bottom").unwrap_or(base).max(0.0);
+            let left = prop_f32(props, "padding_left").unwrap_or(base).max(0.0);
             Some(Padding {
                 top,
                 right,
@@ -99,10 +99,10 @@ pub(crate) fn parse_padding_value(props: Props<'_>) -> Option<Padding> {
 
             if top.is_some() || right.is_some() || bottom.is_some() || left.is_some() {
                 Some(Padding {
-                    top: top.unwrap_or(0.0),
-                    right: right.unwrap_or(0.0),
-                    bottom: bottom.unwrap_or(0.0),
-                    left: left.unwrap_or(0.0),
+                    top: top.unwrap_or(0.0).max(0.0),
+                    right: right.unwrap_or(0.0).max(0.0),
+                    bottom: bottom.unwrap_or(0.0).max(0.0),
+                    left: left.unwrap_or(0.0).max(0.0),
                 })
             } else {
                 None
@@ -158,10 +158,10 @@ pub(crate) fn parse_color(value: &Value) -> Option<Color> {
     match value {
         Value::String(s) => parse_hex_color(s),
         Value::Object(obj) => {
-            let r = obj.get("r").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-            let g = obj.get("g").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-            let b = obj.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-            let a = obj.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+            let r = (obj.get("r").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
+            let g = (obj.get("g").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
+            let b = (obj.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
+            let a = (obj.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32).clamp(0.0, 1.0);
             Some(Color::from_rgba(r, g, b, a))
         }
         _ => None,
@@ -270,7 +270,11 @@ fn intern_font_family(name: &str) -> &'static str {
             "font family name truncated from {} to {MAX_FONT_FAMILY_LEN} chars",
             name.len()
         );
-        &name[..MAX_FONT_FAMILY_LEN]
+        let mut end = MAX_FONT_FAMILY_LEN.min(name.len());
+        while end > 0 && !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        &name[..end]
     } else {
         name
     };

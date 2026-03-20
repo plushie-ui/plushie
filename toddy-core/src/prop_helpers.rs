@@ -242,8 +242,12 @@ pub fn prop_range_f32(props: Props<'_>) -> std::ops::RangeInclusive<f32> {
         .and_then(|p| p.get("range"))
         .and_then(|v| v.as_array())
         .and_then(|arr| {
-            let min = f64_to_f32(arr.first()?.as_f64()?);
-            let max = f64_to_f32(arr.get(1)?.as_f64()?);
+            let mut min = f64_to_f32(arr.first()?.as_f64()?);
+            let mut max = f64_to_f32(arr.get(1)?.as_f64()?);
+            if min > max {
+                log::warn!("prop 'range': min ({min}) > max ({max}), swapping");
+                std::mem::swap(&mut min, &mut max);
+            }
             Some(min..=max)
         })
         .unwrap_or(0.0..=100.0)
@@ -255,8 +259,12 @@ pub fn prop_range_f64(props: Props<'_>) -> std::ops::RangeInclusive<f64> {
         .and_then(|p| p.get("range"))
         .and_then(|v| v.as_array())
         .and_then(|arr| {
-            let min = arr.first()?.as_f64()?;
-            let max = arr.get(1)?.as_f64()?;
+            let mut min = arr.first()?.as_f64()?;
+            let mut max = arr.get(1)?.as_f64()?;
+            if min > max {
+                log::warn!("prop 'range': min ({min}) > max ({max}), swapping");
+                std::mem::swap(&mut min, &mut max);
+            }
             Some(min..=max)
         })
         .unwrap_or(0.0..=100.0)
@@ -360,7 +368,7 @@ pub fn value_to_length(val: &Value) -> Option<Length> {
         },
         Value::Object(obj) => {
             if let Some(n) = obj.get("fill_portion").and_then(|v| v.as_u64()) {
-                Some(Length::FillPortion(n as u16))
+                Some(Length::FillPortion(u16::try_from(n).unwrap_or(1).max(1)))
             } else {
                 Some(Length::Shrink)
             }

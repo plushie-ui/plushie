@@ -614,7 +614,7 @@ pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
     .height(height)
     .spacing(spacing);
 
-    let min_size = prop_f32(props, "min_size").unwrap_or(10.0);
+    let min_size = prop_f32(props, "min_size").unwrap_or(10.0).max(1.0);
     let leeway = prop_f32(props, "leeway").unwrap_or(min_size);
 
     pg = pg.on_click(move |pane| Message::PaneClicked(node_id3.clone(), pane));

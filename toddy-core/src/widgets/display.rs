@@ -582,7 +582,7 @@ impl canvas::Program<Message> for QrCodeProgram<'_> {
 pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let data = prop_str(props, "data").unwrap_or_default();
-    let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0);
+    let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0).clamp(1.0, 50.0);
     let ec_str = prop_str(props, "error_correction").unwrap_or_default();
     let cell_color = prop_str(props, "cell_color")
         .and_then(|s| parse_hex_color(&s))
