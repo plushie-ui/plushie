@@ -95,10 +95,20 @@ impl Transport {
 }
 
 /// Holds transport resources (child process, stderr thread) for
-/// cleanup on drop.
+/// cleanup on drop. Kills the child process when dropped to prevent
+/// orphaned processes (e.g., a lingering SSH session).
 pub(crate) struct TransportGuard {
     _child: Option<Child>,
     _stderr_thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for TransportGuard {
+    fn drop(&mut self) {
+        if let Some(ref mut child) = self._child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 /// Read lines from the child's stderr and forward them to toddy's
