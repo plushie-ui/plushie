@@ -663,11 +663,8 @@ fn handle_message(
                              (no display)"
                         );
                         s.writer.emit(
-                            &toddy_core::protocol::EffectResponse::error(
-                                request_id,
-                                "cancelled".to_string(),
-                            )
-                            .with_session(session_id),
+                            &toddy_core::protocol::EffectResponse::cancelled(request_id)
+                                .with_session(session_id),
                         )?;
                     }
                     CoreEffect::ThemeChanged(t) => {
