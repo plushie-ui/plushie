@@ -56,9 +56,11 @@ fn prop_type_matches(val: &Value, expected: PropType) -> bool {
     }
 }
 
-/// Validate props for known widget types. Only active in debug builds.
-/// Logs warnings for unexpected prop names or mismatched types.
-pub(crate) fn validate_props(node: &TreeNode) {
+/// Collect prop validation warnings for a node without logging them.
+///
+/// Returns a list of human-readable warning strings. Useful for testing
+/// and for callers that want to inspect warnings programmatically.
+pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
     use PropType::*;
 
     let expected: &[(&str, PropType)] = match node.type_name.as_str() {
@@ -447,15 +449,16 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("height", Length),
             ("scale_factor", Number),
         ],
-        _ => return, // Unknown widget type -- skip validation
+        _ => return Vec::new(), // Unknown widget type -- skip validation
     };
 
     let props = match node.props.as_object() {
         Some(p) => p,
-        None => return,
+        None => return Vec::new(),
     };
 
     let expected_names: Vec<&str> = expected.iter().map(|(name, _)| *name).collect();
+    let mut warnings = Vec::new();
 
     for (key, val) in props {
         // Skip props accepted by all widget types.
@@ -465,26 +468,29 @@ pub(crate) fn validate_props(node: &TreeNode) {
         match expected.iter().find(|(name, _)| name == key) {
             Some((_, expected_type)) => {
                 if !prop_type_matches(val, *expected_type) {
-                    log::warn!(
+                    warnings.push(format!(
                         "widget '{}' ({}): prop '{}' has unexpected type {:?} (expected {:?})",
-                        node.id,
-                        node.type_name,
-                        key,
-                        val,
-                        expected_type
-                    );
+                        node.id, node.type_name, key, val, expected_type
+                    ));
                 }
             }
             None => {
-                log::warn!(
+                warnings.push(format!(
                     "widget '{}' ({}): unexpected prop '{}' (known: {:?})",
-                    node.id,
-                    node.type_name,
-                    key,
-                    expected_names
-                );
+                    node.id, node.type_name, key, expected_names
+                ));
             }
         }
+    }
+
+    warnings
+}
+
+/// Validate props for known widget types. Only active in debug builds.
+/// Logs warnings for unexpected prop names or mismatched types.
+pub(crate) fn validate_props(node: &TreeNode) {
+    for warning in collect_prop_warnings(node) {
+        log::warn!("{warning}");
     }
 }
 
@@ -628,5 +634,72 @@ mod tests {
         assert!(prop_type_matches(&json!(null), Any));
         assert!(prop_type_matches(&json!(42), Any));
         assert!(prop_type_matches(&json!("x"), Any));
+    }
+
+    // -- collect_prop_warnings --
+
+    #[test]
+    fn warnings_for_unexpected_prop_name() {
+        let node = make_node("button", json!({"label": "ok", "bogus_prop": 42}));
+        let warnings = collect_prop_warnings(&node);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("unexpected prop 'bogus_prop'"),
+            "warning should name the bad prop, got: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn warnings_for_type_mismatch() {
+        // "label" expects Str, passing a number should trigger a type warning.
+        let node = make_node("button", json!({"label": 42}));
+        let warnings = collect_prop_warnings(&node);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("unexpected type"),
+            "warning should mention type mismatch, got: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn no_warnings_for_valid_props() {
+        let node = make_node("button", json!({"label": "ok", "disabled": false}));
+        let warnings = collect_prop_warnings(&node);
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn no_warnings_for_universal_props() {
+        // "a11y" and "id" are universal props, should never trigger warnings.
+        let node = make_node("button", json!({"a11y": {"role": "button"}, "id": "btn1"}));
+        let warnings = collect_prop_warnings(&node);
+        assert!(
+            warnings.is_empty(),
+            "universal props should not warn, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn no_warnings_for_unknown_widget_type() {
+        let node = make_node("antimatter_widget", json!({"flux": 42}));
+        let warnings = collect_prop_warnings(&node);
+        assert!(
+            warnings.is_empty(),
+            "unknown types should produce no warnings"
+        );
+    }
+
+    #[test]
+    fn multiple_warnings_for_multiple_bad_props() {
+        // "content" expects Str but gets bool -> type mismatch
+        // "bogus" is not a known prop -> unexpected prop
+        let node = make_node("text", json!({"content": true, "bogus": 1}));
+        let warnings = collect_prop_warnings(&node);
+        assert_eq!(warnings.len(), 2, "expected 2 warnings, got: {warnings:?}");
     }
 }

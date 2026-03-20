@@ -6,6 +6,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 fn send(stdin: &mut impl Write, msg: &serde_json::Value) {
     let line = serde_json::to_string(msg).unwrap();
@@ -311,6 +313,329 @@ fn headless_interact_step_round_trip() {
     assert_eq!(resp["session"], "s1");
     assert_eq!(resp["id"], "i1");
     assert!(resp["events"].as_array().unwrap().is_empty());
+
+    drop(stdin);
+    child.wait().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// LineReceiver: background thread reads stdout lines into an mpsc channel,
+// enabling recv_timeout so tests don't hang forever on protocol bugs.
+// ---------------------------------------------------------------------------
+
+struct LineReceiver {
+    rx: mpsc::Receiver<serde_json::Value>,
+}
+
+impl LineReceiver {
+    fn new(reader: BufReader<std::process::ChildStdout>) -> Self {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break, // EOF or error
+                    Ok(_) => {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim())
+                            && tx.send(val).is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        Self { rx }
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> serde_json::Value {
+        self.rx
+            .recv_timeout(timeout)
+            .expect("timed out waiting for response from toddy")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 4+17: Widget render structural verification via mock interact tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mock_text_input_emits_input_event() {
+    let mut child = Command::new(toddy_binary())
+        .args(["--mock", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn toddy");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let timeout = Duration::from_secs(10);
+
+    // Bootstrap.
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+    let hello = receiver.recv_timeout(timeout);
+    assert_eq!(hello["type"], "hello");
+
+    // Send a tree with a text_input widget.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "snapshot",
+            "tree": {
+                "id": "root", "type": "column", "props": {}, "children": [
+                    {"id": "inp1", "type": "text_input", "props": {"value": "", "placeholder": "Type here"}, "children": []}
+                ]
+            }
+        }),
+    );
+
+    // Interact: type_text on the text_input.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "interact",
+            "id": "i1",
+            "action": "type_text",
+            "selector": {"by": "id", "value": "inp1"},
+            "payload": {"text": "hello"}
+        }),
+    );
+
+    let resp = receiver.recv_timeout(timeout);
+    assert_eq!(resp["type"], "interact_response");
+    assert_eq!(resp["session"], "s1");
+    assert_eq!(resp["id"], "i1");
+
+    let events = resp["events"]
+        .as_array()
+        .expect("events should be an array");
+    assert_eq!(events.len(), 1, "expected exactly one event");
+    assert_eq!(events[0]["family"], "input");
+    assert_eq!(events[0]["id"], "inp1");
+    assert_eq!(events[0]["value"], "hello");
+
+    drop(stdin);
+    child.wait().unwrap();
+}
+
+#[test]
+fn mock_checkbox_emits_toggle_event() {
+    let mut child = Command::new(toddy_binary())
+        .args(["--mock", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn toddy");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let timeout = Duration::from_secs(10);
+
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+    let hello = receiver.recv_timeout(timeout);
+    assert_eq!(hello["type"], "hello");
+
+    // Send a tree with a checkbox widget.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "snapshot",
+            "tree": {
+                "id": "root", "type": "column", "props": {}, "children": [
+                    {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": false}, "children": []}
+                ]
+            }
+        }),
+    );
+
+    // Interact: toggle the checkbox.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "interact",
+            "id": "i1",
+            "action": "toggle",
+            "selector": {"by": "id", "value": "chk1"},
+            "payload": {"value": true}
+        }),
+    );
+
+    let resp = receiver.recv_timeout(timeout);
+    assert_eq!(resp["type"], "interact_response");
+    assert_eq!(resp["session"], "s1");
+    assert_eq!(resp["id"], "i1");
+
+    let events = resp["events"]
+        .as_array()
+        .expect("events should be an array");
+    assert_eq!(events.len(), 1, "expected exactly one event");
+    assert_eq!(events[0]["family"], "toggle");
+    assert_eq!(events[0]["id"], "chk1");
+    assert_eq!(events[0]["value"], true);
+
+    drop(stdin);
+    child.wait().unwrap();
+}
+
+#[test]
+fn mock_slider_emits_slide_event() {
+    let mut child = Command::new(toddy_binary())
+        .args(["--mock", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn toddy");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let timeout = Duration::from_secs(10);
+
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+    let hello = receiver.recv_timeout(timeout);
+    assert_eq!(hello["type"], "hello");
+
+    // Send a tree with a slider widget.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "snapshot",
+            "tree": {
+                "id": "root", "type": "column", "props": {}, "children": [
+                    {"id": "sld1", "type": "slider", "props": {"value": 50, "range": [0, 100]}, "children": []}
+                ]
+            }
+        }),
+    );
+
+    // Interact: slide to a new value.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "interact",
+            "id": "i1",
+            "action": "slide",
+            "selector": {"by": "id", "value": "sld1"},
+            "payload": {"value": 75.0}
+        }),
+    );
+
+    let resp = receiver.recv_timeout(timeout);
+    assert_eq!(resp["type"], "interact_response");
+    assert_eq!(resp["session"], "s1");
+    assert_eq!(resp["id"], "i1");
+
+    let events = resp["events"]
+        .as_array()
+        .expect("events should be an array");
+    assert_eq!(events.len(), 1, "expected exactly one event");
+    assert_eq!(events[0]["family"], "slide");
+    assert_eq!(events[0]["id"], "sld1");
+    assert_eq!(events[0]["value"], 75.0);
+
+    drop(stdin);
+    child.wait().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Item 6: Concurrent session stress test
+// ---------------------------------------------------------------------------
+
+#[test]
+fn concurrent_sessions_interleaved() {
+    let mut child = Command::new(toddy_binary())
+        .args(["--mock", "--max-sessions", "4", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn toddy");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let receiver = LineReceiver::new(BufReader::new(child.stdout.take().unwrap()));
+    let timeout = Duration::from_secs(10);
+
+    // Bootstrap.
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+    let hello = receiver.recv_timeout(timeout);
+    assert_eq!(hello["type"], "hello");
+
+    let session_ids = ["s1", "s2", "s3", "s4"];
+
+    // Send snapshots to all 4 sessions interleaved.
+    for &sid in &session_ids {
+        send(
+            &mut stdin,
+            &serde_json::json!({
+                "session": sid,
+                "type": "snapshot",
+                "tree": {
+                    "id": "root",
+                    "type": "text",
+                    "props": {"content": format!("content-{sid}")},
+                    "children": []
+                }
+            }),
+        );
+    }
+
+    // Query each session's tree.
+    for (i, &sid) in session_ids.iter().enumerate() {
+        send(
+            &mut stdin,
+            &serde_json::json!({
+                "session": sid,
+                "type": "query",
+                "id": format!("q{}", i + 1),
+                "target": "tree",
+                "selector": {}
+            }),
+        );
+    }
+
+    // Collect all 4 responses (order may vary due to threading).
+    let mut responses: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    for _ in 0..4 {
+        let resp = receiver.recv_timeout(timeout);
+        let session = resp["session"].as_str().unwrap().to_string();
+        responses.insert(session, resp);
+    }
+
+    // Verify each response has the correct session ID and content.
+    for &sid in &session_ids {
+        let resp = responses
+            .get(sid)
+            .unwrap_or_else(|| panic!("missing response for session {sid}"));
+        assert_eq!(resp["type"], "query_response");
+        assert_eq!(
+            resp["data"]["props"]["content"],
+            format!("content-{sid}"),
+            "session {sid} should have its own tree content"
+        );
+    }
 
     drop(stdin);
     child.wait().unwrap();
