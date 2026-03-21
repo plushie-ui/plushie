@@ -61,9 +61,9 @@ pub fn prop_f32(props: Props<'_>, key: &str) -> Option<f32> {
                 None
             }
         },
-        Value::String(s) => match s.trim().parse::<f32>() {
-            Ok(f) => Some(f),
-            Err(_) => {
+        Value::String(s) => match s.trim().parse::<f32>().ok().filter(|f| f.is_finite()) {
+            Some(f) => Some(f),
+            None => {
                 log::trace!("prop '{}': string not parseable as f32: {:?}", key, s);
                 None
             }
@@ -86,9 +86,9 @@ pub fn prop_f64(props: Props<'_>, key: &str) -> Option<f64> {
                 None
             }
         },
-        Value::String(s) => match s.trim().parse::<f64>() {
-            Ok(f) => Some(f),
-            Err(_) => {
+        Value::String(s) => match s.trim().parse::<f64>().ok().filter(|f| f.is_finite()) {
+            Some(f) => Some(f),
+            None => {
                 log::trace!("prop '{}': string not parseable as f64: {:?}", key, s);
                 None
             }
@@ -270,13 +270,15 @@ pub fn prop_range_f64(props: Props<'_>) -> std::ops::RangeInclusive<f64> {
         .unwrap_or(0.0..=100.0)
 }
 
-/// Parse a hex color string prop (`#RRGGBB` or `#RRGGBBAA`) to `iced::Color`.
+/// Parse a color prop to `iced::Color`.
+///
+/// Accepts hex strings: `"#RRGGBB"` or `"#RRGGBBAA"`.
 pub fn prop_color(props: Props<'_>, key: &str) -> Option<Color> {
-    let hex = prop_str(props, key)?;
-    match parse_hex_color(&hex) {
+    let s = prop_str(props, key)?;
+    match parse_hex_color(&s) {
         Some(c) => Some(c),
         None => {
-            log::trace!("prop '{}': invalid hex color: {:?}", key, hex);
+            log::trace!("prop '{key}': invalid hex color: {s:?}");
             None
         }
     }
@@ -846,19 +848,16 @@ mod tests {
 
     #[test]
     fn test_prop_f32_string_nan() {
-        // "NaN".parse::<f32>() succeeds with NaN, so prop_f32 returns Some(NaN).
+        // "NaN" strings are rejected -- non-finite values return None.
         let p = make_props(json!({"size": "NaN"}));
-        let v = prop_f32(p.as_object(), "size").unwrap();
-        assert!(v.is_nan());
+        assert!(prop_f32(p.as_object(), "size").is_none());
     }
 
     #[test]
     fn test_prop_f32_string_infinity() {
-        // "Infinity".parse::<f32>() succeeds with inf, so prop_f32 returns Some(inf).
+        // "Infinity" strings are rejected -- non-finite values return None.
         let p = make_props(json!({"size": "Infinity"}));
-        let v = prop_f32(p.as_object(), "size").unwrap();
-        assert!(v.is_infinite());
-        assert!(v.is_sign_positive());
+        assert!(prop_f32(p.as_object(), "size").is_none());
     }
 
     #[test]
