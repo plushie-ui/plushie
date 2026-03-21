@@ -18,12 +18,7 @@ impl EffectHandler for WebEffectHandler {
         Some(EffectResponse::unsupported(id.to_string()))
     }
 
-    fn spawn_async(
-        &self,
-        _id: String,
-        _kind: String,
-        _payload: Value,
-    ) -> Task<Message> {
+    fn spawn_async(&self, _id: String, _kind: String, _payload: Value) -> Task<Message> {
         Task::none()
     }
 

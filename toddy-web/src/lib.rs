@@ -12,8 +12,8 @@ use wasm_bindgen::prelude::*;
 use toddy_core::codec::Codec;
 use toddy_core::protocol::IncomingMessage;
 
-use toddy_renderer::emitters::{emit_hello, init_output};
 use toddy_renderer::App;
+use toddy_renderer::emitters::{emit_hello, init_output};
 
 use effects::WebEffectHandler;
 use output::WebOutputWriter;
@@ -58,10 +58,7 @@ pub fn send_message(json: &str) -> Result<(), JsValue> {
 /// This starts the full iced rendering loop. The function returns a
 /// Future that is driven by the browser's requestAnimationFrame loop.
 #[wasm_bindgen]
-pub async fn run_app(
-    settings_json: &str,
-    on_event: js_sys::Function,
-) -> Result<(), JsValue> {
+pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<(), JsValue> {
     console_log::init_with_level(log::Level::Warn).ok();
 
     // Set up output
