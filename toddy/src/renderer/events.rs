@@ -13,7 +13,6 @@ use toddy_core::protocol::OutgoingEvent;
 
 use super::App;
 use super::constants::*;
-use super::emitter::CoalesceStrategy;
 use super::emitters::emit_event;
 
 /// Convert a file path to a UTF-8 string, using lossy conversion if
@@ -50,16 +49,13 @@ impl App {
         mods: iced::keyboard::Modifiers,
         captured: bool,
     ) -> Task<Message> {
-        self.coalesce_subscription(
-            SUB_MODIFIERS_CHANGED,
-            captured,
-            CoalesceStrategy::Replace,
-            |tag| OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods)),
-        )
+        self.coalesce_subscription(SUB_MODIFIERS_CHANGED, captured, |tag| {
+            OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods))
+        })
     }
 
     pub(super) fn handle_cursor_moved(&mut self, pos: Point, captured: bool) -> Task<Message> {
-        self.coalesce_subscription(SUB_MOUSE_MOVE, captured, CoalesceStrategy::Replace, |tag| {
+        self.coalesce_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_moved(tag, pos.x, pos.y)
         })
     }
@@ -101,15 +97,10 @@ impl App {
         delta: iced::mouse::ScrollDelta,
         captured: bool,
     ) -> Task<Message> {
-        self.coalesce_subscription(
-            SUB_MOUSE_SCROLL,
-            captured,
-            CoalesceStrategy::AccumulateDeltas,
-            |tag| {
-                let (dx, dy, unit) = serialize_scroll_delta(&delta);
-                OutgoingEvent::wheel_scrolled(tag, dx, dy, unit)
-            },
-        )
+        self.coalesce_subscription(SUB_MOUSE_SCROLL, captured, |tag| {
+            let (dx, dy, unit) = serialize_scroll_delta(&delta);
+            OutgoingEvent::wheel_scrolled(tag, dx, dy, unit)
+        })
     }
 
     pub(super) fn handle_finger_pressed(
@@ -129,7 +120,7 @@ impl App {
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.coalesce_subscription(SUB_TOUCH, captured, CoalesceStrategy::Replace, |tag| {
+        self.coalesce_subscription(SUB_TOUCH, captured, |tag| {
             OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y)
         })
     }

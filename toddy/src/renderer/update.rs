@@ -8,7 +8,7 @@ use toddy_core::protocol::{IncomingMessage, OutgoingEvent};
 
 use super::App;
 use super::constants::*;
-use super::emitter;
+use super::emitter::CoalesceKey;
 use super::emitters::{self, emit_event, emit_screenshot_response};
 
 impl App {
@@ -56,7 +56,7 @@ impl App {
                 );
                 let mut task = Task::none();
                 for event in events {
-                    let t = if emitter::is_coalescable_widget_event(&event) {
+                    let t = if event.coalesce.is_some() {
                         // Lazily cache event_rate from the widget's tree node.
                         if !event.id.is_empty()
                             && !self.emitter.has_widget_rate(&event.id)
@@ -64,9 +64,8 @@ impl App {
                         {
                             self.emitter.set_widget_rate(&event.id, rate);
                         }
-                        let key = emitter::widget_coalesce_key(&event);
-                        let strategy = emitter::widget_coalesce_strategy(&event);
-                        self.emitter.coalesce(key, event, strategy)
+                        let key = super::emitter::widget_coalesce_key(&event);
+                        self.emitter.coalesce(key, event)
                     } else {
                         self.emitter.emit_immediate(event)
                     };
@@ -177,9 +176,8 @@ impl App {
                     let millis = instant.duration_since(epoch).as_millis();
                     let event = OutgoingEvent::animation_frame(tag.clone(), millis);
                     self.emitter.coalesce(
-                        emitter::CoalesceKey::Subscription(SUB_ANIMATION_FRAME.to_string()),
+                        CoalesceKey::Subscription(SUB_ANIMATION_FRAME.to_string()),
                         event,
-                        emitter::CoalesceStrategy::Replace,
                     )
                 } else {
                     Task::none()
@@ -200,9 +198,8 @@ impl App {
                     };
                     let event = OutgoingEvent::theme_changed(tag.clone(), mode_str.to_string());
                     self.emitter.coalesce(
-                        emitter::CoalesceKey::Subscription(SUB_THEME_CHANGE.to_string()),
+                        CoalesceKey::Subscription(SUB_THEME_CHANGE.to_string()),
                         event,
-                        emitter::CoalesceStrategy::Replace,
                     )
                 } else {
                     Task::none()

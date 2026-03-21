@@ -15,12 +15,12 @@ use std::time::{Duration, Instant};
 use iced::Task;
 
 use toddy_core::message::Message;
-use toddy_core::protocol::OutgoingEvent;
+use toddy_core::protocol::{CoalesceHint, OutgoingEvent};
 
 use super::emitters;
 
 // ---------------------------------------------------------------------------
-// Coalesce key and strategy
+// Coalesce key
 // ---------------------------------------------------------------------------
 
 /// Identifies a stream of events that can be coalesced together.
@@ -32,16 +32,6 @@ pub(super) enum CoalesceKey {
     Widget(String, String),
 }
 
-/// How buffered events are merged when a newer one arrives before the
-/// rate limit allows emission.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CoalesceStrategy {
-    /// Keep only the latest event, discarding intermediates.
-    Replace,
-    /// Sum delta fields across buffered events so no magnitude is lost.
-    AccumulateDeltas,
-}
-
 // ---------------------------------------------------------------------------
 // Pending event buffer
 // ---------------------------------------------------------------------------
@@ -49,30 +39,70 @@ pub(super) enum CoalesceStrategy {
 enum PendingEvent {
     /// Latest-value-wins: only the most recent event is kept.
     Replace(OutgoingEvent),
-    /// Delta accumulation: `delta_x` and `delta_y` fields in `data`
-    /// are summed across arrivals.
+    /// Named-field accumulation: the listed fields in `data` are summed
+    /// across arrivals. All other fields keep the latest event's values.
     Accumulate {
         base: OutgoingEvent,
-        total_dx: f64,
-        total_dy: f64,
+        fields: Vec<String>,
+        totals: HashMap<String, f64>,
     },
 }
 
 impl PendingEvent {
+    fn from_hint(event: OutgoingEvent, hint: &CoalesceHint) -> Self {
+        match hint {
+            CoalesceHint::Replace => PendingEvent::Replace(event),
+            CoalesceHint::Accumulate(fields) => {
+                let mut totals = HashMap::new();
+                if let Some(data) = &event.data {
+                    for field in fields {
+                        if let Some(val) = data.get(field).and_then(|v| v.as_f64()) {
+                            totals.insert(field.clone(), val);
+                        }
+                    }
+                }
+                PendingEvent::Accumulate {
+                    base: event,
+                    fields: fields.clone(),
+                    totals,
+                }
+            }
+        }
+    }
+
+    fn merge(&mut self, event: OutgoingEvent) {
+        match self {
+            PendingEvent::Replace(existing) => *existing = event,
+            PendingEvent::Accumulate {
+                base,
+                fields,
+                totals,
+            } => {
+                if let Some(data) = &event.data {
+                    for field in fields.iter() {
+                        if let Some(val) = data.get(field).and_then(|v| v.as_f64()) {
+                            *totals.entry(field.clone()).or_insert(0.0) += val;
+                        }
+                    }
+                }
+                *base = event;
+            }
+        }
+    }
+
     fn into_event(self) -> OutgoingEvent {
         match self {
             PendingEvent::Replace(ev) => ev,
             PendingEvent::Accumulate {
-                mut base,
-                total_dx,
-                total_dy,
+                mut base, totals, ..
             } => {
-                // Patch the accumulated deltas back into the event's data.
+                // Patch accumulated totals back into the event's data.
                 if let Some(ref mut data) = base.data
                     && let Some(obj) = data.as_object_mut()
                 {
-                    obj.insert("delta_x".to_string(), serde_json::json!(total_dx));
-                    obj.insert("delta_y".to_string(), serde_json::json!(total_dy));
+                    for (field, total) in totals {
+                        obj.insert(field, serde_json::json!(total));
+                    }
                 }
                 base
             }
@@ -171,13 +201,19 @@ impl EventEmitter {
     }
 
     /// Emit a coalescable event, buffering it if the rate limit has
-    /// not elapsed. Returns a Task if a flush timer needs scheduling.
-    pub fn coalesce(
-        &mut self,
-        key: CoalesceKey,
-        event: OutgoingEvent,
-        strategy: CoalesceStrategy,
-    ) -> Task<Message> {
+    /// not elapsed. The coalescing strategy is read from the event's
+    /// [`CoalesceHint`]. Returns a Task if a flush timer needs scheduling.
+    pub fn coalesce(&mut self, key: CoalesceKey, mut event: OutgoingEvent) -> Task<Message> {
+        // Take the hint out of the event -- it's consumed by the emitter
+        // and not needed downstream (not serialized to the wire).
+        let hint = match event.coalesce.take() {
+            Some(h) => h,
+            None => {
+                // No hint -- treat as non-coalescable (immediate delivery).
+                return self.emit_immediate(event);
+            }
+        };
+
         let rate = self.effective_rate(&key);
 
         // Zero rate = muted, silently drop.
@@ -207,7 +243,7 @@ impl EventEmitter {
         }
 
         // Buffer the event.
-        self.buffer_event(&key, event, strategy);
+        self.buffer_event(&key, event, &hint);
 
         // Schedule a flush timer if one isn't already running.
         if !self.flush_scheduled {
@@ -265,90 +301,34 @@ impl EventEmitter {
     }
 
     /// Buffer an event under the given key.
-    fn buffer_event(
-        &mut self,
-        key: &CoalesceKey,
-        event: OutgoingEvent,
-        strategy: CoalesceStrategy,
-    ) {
-        match strategy {
-            CoalesceStrategy::Replace => {
-                self.pending
-                    .insert(key.clone(), PendingEvent::Replace(event));
+    ///
+    /// If the existing entry uses a different strategy (e.g. Replace vs
+    /// Accumulate), the old entry is flushed first and a fresh buffer is
+    /// started. This handles the edge case where an extension changes
+    /// its coalesce hint between events for the same key.
+    fn buffer_event(&mut self, key: &CoalesceKey, event: OutgoingEvent, hint: &CoalesceHint) {
+        if let Some(existing) = self.pending.get_mut(key) {
+            // Check for strategy mismatch: Replace vs Accumulate.
+            let compatible = matches!(
+                (&*existing, hint),
+                (PendingEvent::Replace(_), CoalesceHint::Replace)
+                    | (PendingEvent::Accumulate { .. }, CoalesceHint::Accumulate(_))
+            );
+            if compatible {
+                existing.merge(event);
+                return;
             }
-            CoalesceStrategy::AccumulateDeltas => {
-                let (dx, dy) = extract_deltas(&event);
-                match self.pending.get_mut(key) {
-                    Some(PendingEvent::Accumulate {
-                        total_dx, total_dy, ..
-                    }) => {
-                        *total_dx += dx;
-                        *total_dy += dy;
-                    }
-                    _ => {
-                        self.pending.insert(
-                            key.clone(),
-                            PendingEvent::Accumulate {
-                                base: event,
-                                total_dx: dx,
-                                total_dy: dy,
-                            },
-                        );
-                    }
-                }
-            }
+            // Strategy changed -- flush the old entry and start fresh.
+            self.flush_key(key);
         }
+        self.pending
+            .insert(key.clone(), PendingEvent::from_hint(event, hint));
     }
 
     /// Encode and write an event to the wire. Returns Task::none() on
     /// success, iced::exit() on broken pipe.
     fn do_emit(&self, event: OutgoingEvent) -> Task<Message> {
         emitters::emit_or_exit(event)
-    }
-}
-
-/// Extract delta_x and delta_y from an event's data object.
-fn extract_deltas(event: &OutgoingEvent) -> (f64, f64) {
-    let data = match &event.data {
-        Some(d) => d,
-        None => return (0.0, 0.0),
-    };
-    let obj = match data.as_object() {
-        Some(o) => o,
-        None => return (0.0, 0.0),
-    };
-    let dx = obj.get("delta_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let dy = obj.get("delta_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    (dx, dy)
-}
-
-// ---------------------------------------------------------------------------
-// Helpers for classifying events
-// ---------------------------------------------------------------------------
-
-/// Event families that are coalescable (high-frequency, latest-value-wins
-/// or delta-accumulation).
-const COALESCABLE_WIDGET_FAMILIES: &[&str] = &[
-    "slide",
-    "mouse_area_move",
-    "canvas_move",
-    "sensor_resize",
-    "pane_resized",
-    "mouse_area_scroll",
-    "canvas_scroll",
-    "scroll",
-];
-
-/// Returns true if the event family is coalescable at the widget level.
-pub(super) fn is_coalescable_widget_event(event: &OutgoingEvent) -> bool {
-    COALESCABLE_WIDGET_FAMILIES.contains(&event.family.as_str())
-}
-
-/// Returns the coalesce strategy for a widget event.
-pub(super) fn widget_coalesce_strategy(event: &OutgoingEvent) -> CoalesceStrategy {
-    match event.family.as_str() {
-        "mouse_area_scroll" | "canvas_scroll" => CoalesceStrategy::AccumulateDeltas,
-        _ => CoalesceStrategy::Replace,
     }
 }
 
@@ -377,6 +357,7 @@ mod tests {
             modifiers: None,
             data: None,
             captured: None,
+            coalesce: None,
         }
     }
 
@@ -391,6 +372,7 @@ mod tests {
             modifiers: None,
             data: Some(data),
             captured: None,
+            coalesce: None,
         }
     }
 
@@ -464,12 +446,13 @@ mod tests {
     fn buffer_replace_keeps_latest() {
         let mut emitter = EventEmitter::new();
         let key = CoalesceKey::Widget("w1".into(), "slide".into());
+        let hint = CoalesceHint::Replace;
 
         let ev1 = make_event("slide", "w1");
-        emitter.buffer_event(&key, ev1, CoalesceStrategy::Replace);
+        emitter.buffer_event(&key, ev1, &hint);
 
         let ev2 = make_event("slide", "w1");
-        emitter.buffer_event(&key, ev2, CoalesceStrategy::Replace);
+        emitter.buffer_event(&key, ev2, &hint);
 
         assert_eq!(emitter.pending.len(), 1);
     }
@@ -478,27 +461,26 @@ mod tests {
     fn buffer_accumulate_sums_deltas() {
         let mut emitter = EventEmitter::new();
         let key = CoalesceKey::Widget("ma1".into(), "mouse_area_scroll".into());
+        let hint = CoalesceHint::Accumulate(vec!["delta_x".into(), "delta_y".into()]);
 
         let ev1 = make_event_with_data(
             "mouse_area_scroll",
             "ma1",
             json!({"delta_x": 1.0, "delta_y": 2.0}),
         );
-        emitter.buffer_event(&key, ev1, CoalesceStrategy::AccumulateDeltas);
+        emitter.buffer_event(&key, ev1, &hint);
 
         let ev2 = make_event_with_data(
             "mouse_area_scroll",
             "ma1",
             json!({"delta_x": 3.0, "delta_y": 4.0}),
         );
-        emitter.buffer_event(&key, ev2, CoalesceStrategy::AccumulateDeltas);
+        emitter.buffer_event(&key, ev2, &hint);
 
         match emitter.pending.get(&key).unwrap() {
-            PendingEvent::Accumulate {
-                total_dx, total_dy, ..
-            } => {
-                assert!((total_dx - 4.0).abs() < f64::EPSILON);
-                assert!((total_dy - 6.0).abs() < f64::EPSILON);
+            PendingEvent::Accumulate { totals, .. } => {
+                assert!((totals["delta_x"] - 4.0).abs() < f64::EPSILON);
+                assert!((totals["delta_y"] - 6.0).abs() < f64::EPSILON);
             }
             _ => panic!("expected Accumulate variant"),
         }
@@ -507,16 +489,19 @@ mod tests {
     // -- PendingEvent::into_event --
 
     #[test]
-    fn accumulate_into_event_patches_deltas() {
+    fn accumulate_into_event_patches_totals() {
         let base = make_event_with_data(
             "canvas_scroll",
             "c1",
             json!({"delta_x": 1.0, "delta_y": 2.0, "cursor_x": 50.0}),
         );
+        let mut totals = HashMap::new();
+        totals.insert("delta_x".to_string(), 10.0);
+        totals.insert("delta_y".to_string(), 20.0);
         let pending = PendingEvent::Accumulate {
             base,
-            total_dx: 10.0,
-            total_dy: 20.0,
+            fields: vec!["delta_x".into(), "delta_y".into()],
+            totals,
         };
         let event = pending.into_event();
         let data = event.data.unwrap();
@@ -526,62 +511,178 @@ mod tests {
         assert_eq!(data["cursor_x"], 50.0);
     }
 
-    // -- classification helpers --
+    // -- CoalesceHint on constructors --
 
     #[test]
-    fn coalescable_widget_families() {
-        assert!(is_coalescable_widget_event(&make_event("slide", "s1")));
-        assert!(is_coalescable_widget_event(&make_event(
-            "mouse_area_move",
-            "m1"
-        )));
-        assert!(is_coalescable_widget_event(&make_event(
-            "canvas_scroll",
-            "c1"
-        )));
-        assert!(!is_coalescable_widget_event(&make_event("click", "b1")));
-        assert!(!is_coalescable_widget_event(&make_event("input", "i1")));
+    fn constructors_set_replace_hint() {
+        let events = vec![
+            OutgoingEvent::slide("s1".into(), 0.5),
+            OutgoingEvent::cursor_moved("t".into(), 1.0, 2.0),
+            OutgoingEvent::canvas_move("c1".into(), 1.0, 2.0),
+            OutgoingEvent::mouse_area_move("m1".into(), 1.0, 2.0),
+            OutgoingEvent::sensor_resize("s1".into(), 100.0, 200.0),
+            OutgoingEvent::pane_resized("p1".into(), "s0".into(), 0.5),
+            OutgoingEvent::animation_frame("t".into(), 16000),
+            OutgoingEvent::theme_changed("t".into(), "dark".into()),
+            OutgoingEvent::finger_moved("t".into(), 1, 10.0, 20.0),
+            OutgoingEvent::modifiers_changed(
+                "t".into(),
+                toddy_core::protocol::KeyModifiers::default(),
+            ),
+            OutgoingEvent::scroll("s1".into(), 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 300.0, 400.0),
+        ];
+        for event in events {
+            assert!(
+                matches!(event.coalesce, Some(CoalesceHint::Replace)),
+                "expected Replace hint on {}",
+                event.family
+            );
+        }
     }
 
     #[test]
-    fn widget_strategy_scroll_accumulates() {
-        assert_eq!(
-            widget_coalesce_strategy(&make_event("mouse_area_scroll", "m1")),
-            CoalesceStrategy::AccumulateDeltas
-        );
-        assert_eq!(
-            widget_coalesce_strategy(&make_event("canvas_scroll", "c1")),
-            CoalesceStrategy::AccumulateDeltas
-        );
+    fn constructors_set_accumulate_hint() {
+        let events = vec![
+            OutgoingEvent::wheel_scrolled("t".into(), 0.0, -3.0, "line"),
+            OutgoingEvent::canvas_scroll("c1".into(), 5.0, 5.0, 0.0, -1.0),
+            OutgoingEvent::mouse_area_scroll("m1".into(), 0.0, -3.0),
+        ];
+        for event in events {
+            assert!(
+                matches!(event.coalesce, Some(CoalesceHint::Accumulate(_))),
+                "expected Accumulate hint on {}",
+                event.family
+            );
+        }
     }
 
     #[test]
-    fn widget_strategy_non_scroll_replaces() {
-        assert_eq!(
-            widget_coalesce_strategy(&make_event("slide", "s1")),
-            CoalesceStrategy::Replace
-        );
-        assert_eq!(
-            widget_coalesce_strategy(&make_event("sensor_resize", "s1")),
-            CoalesceStrategy::Replace
-        );
+    fn constructors_set_no_hint_for_discrete() {
+        let events = vec![
+            OutgoingEvent::click("b1".into()),
+            OutgoingEvent::input("i1".into(), "text".into()),
+            OutgoingEvent::submit("f1".into(), "data".into()),
+            OutgoingEvent::toggle("c1".into(), true),
+            OutgoingEvent::select("p1".into(), "opt".into()),
+            OutgoingEvent::paste("i1".into(), "text".into()),
+            OutgoingEvent::slide_release("s1".into(), 0.5),
+            OutgoingEvent::canvas_press("c1".into(), 1.0, 2.0, "Left".into()),
+            OutgoingEvent::canvas_release("c1".into(), 1.0, 2.0, "Left".into()),
+            OutgoingEvent::option_hovered("cb1".into(), "opt".into()),
+            OutgoingEvent::cursor_entered("t".into()),
+            OutgoingEvent::cursor_left("t".into()),
+            OutgoingEvent::button_pressed("t".into(), "Left".into()),
+            OutgoingEvent::button_released("t".into(), "Left".into()),
+            OutgoingEvent::mouse_enter("m1".into()),
+            OutgoingEvent::mouse_exit("m1".into()),
+            OutgoingEvent::pane_clicked("pg1".into(), "pane_a".into()),
+            OutgoingEvent::pane_focus_cycle("pg1".into(), "pane_a".into()),
+            OutgoingEvent::pane_dragged("pg1".into(), "picked", "pane_a".into(), None, None, None),
+        ];
+        for event in events {
+            assert!(
+                event.coalesce.is_none(),
+                "expected no hint on {}",
+                event.family
+            );
+        }
     }
 
-    // -- extract_deltas --
+    // -- Accumulate with missing fields --
 
     #[test]
-    fn extract_deltas_from_data() {
-        let ev = make_event_with_data("scroll", "s1", json!({"delta_x": 5.5, "delta_y": -3.2}));
-        let (dx, dy) = extract_deltas(&ev);
-        assert!((dx - 5.5).abs() < f64::EPSILON);
-        assert!((dy - (-3.2)).abs() < f64::EPSILON);
+    fn accumulate_missing_fields_graceful() {
+        let hint = CoalesceHint::Accumulate(vec!["dx".into(), "dy".into()]);
+        // Event only has dx, not dy.
+        let ev = make_event_with_data("custom", "w1", json!({"dx": 5.0}));
+        let pending = PendingEvent::from_hint(ev, &hint);
+        match &pending {
+            PendingEvent::Accumulate { totals, .. } => {
+                assert_eq!(totals.get("dx"), Some(&5.0));
+                assert_eq!(totals.get("dy"), None);
+            }
+            _ => panic!("expected Accumulate"),
+        }
     }
 
+    // -- Mixed hinted/unhinted events (ordering guarantee) --
+
     #[test]
-    fn extract_deltas_missing_data_returns_zero() {
-        let ev = make_event("scroll", "s1");
-        let (dx, dy) = extract_deltas(&ev);
-        assert!((dx).abs() < f64::EPSILON);
-        assert!((dy).abs() < f64::EPSILON);
+    fn emit_immediate_flushes_pending_first() {
+        let mut emitter = EventEmitter::new();
+        let key = CoalesceKey::Widget("w1".into(), "cursor_pos".into());
+        let hint = CoalesceHint::Replace;
+
+        // Buffer a coalescable event.
+        let ev = make_event("cursor_pos", "w1");
+        emitter.buffer_event(&key, ev, &hint);
+        assert_eq!(emitter.pending.len(), 1);
+
+        // emit_immediate should flush pending events first (even though
+        // it can't actually write to stdout in tests, the flush clears
+        // the pending buffer).
+        let discrete = make_event("click", "w1");
+        let _ = emitter.emit_immediate(discrete);
+
+        // The pending buffer should be empty after flush.
+        assert!(emitter.pending.is_empty());
+    }
+
+    // -- Strategy mismatch (extension changes hint between events) --
+
+    #[test]
+    fn buffer_event_flushes_on_strategy_mismatch() {
+        let mut emitter = EventEmitter::new();
+        let key = CoalesceKey::Widget("w1".into(), "update".into());
+
+        // Buffer a Replace event.
+        let ev1 = make_event_with_data("update", "w1", json!({"x": 1.0}));
+        emitter.buffer_event(&key, ev1, &CoalesceHint::Replace);
+        assert_eq!(emitter.pending.len(), 1);
+
+        // Buffer an Accumulate event with the same key -- strategy mismatch.
+        // The old Replace entry should be flushed and a new Accumulate started.
+        let ev2 = make_event_with_data("update", "w1", json!({"dx": 5.0}));
+        let acc_hint = CoalesceHint::Accumulate(vec!["dx".into()]);
+        emitter.buffer_event(&key, ev2, &acc_hint);
+
+        // Should still have one pending entry, but now it's Accumulate.
+        assert_eq!(emitter.pending.len(), 1);
+        assert!(matches!(
+            emitter.pending.get(&key),
+            Some(PendingEvent::Accumulate { .. })
+        ));
+    }
+
+    // -- Accumulate with custom fields (extension parity) --
+
+    #[test]
+    fn accumulate_custom_fields() {
+        let mut emitter = EventEmitter::new();
+        let key = CoalesceKey::Widget("w1".into(), "physics".into());
+        let hint = CoalesceHint::Accumulate(vec!["impulse_x".into(), "impulse_y".into()]);
+
+        let ev1 = make_event_with_data(
+            "physics",
+            "w1",
+            json!({"x": 10.0, "y": 20.0, "impulse_x": 1.0, "impulse_y": 2.0}),
+        );
+        emitter.buffer_event(&key, ev1, &hint);
+
+        let ev2 = make_event_with_data(
+            "physics",
+            "w1",
+            json!({"x": 15.0, "y": 25.0, "impulse_x": 3.0, "impulse_y": 4.0}),
+        );
+        emitter.buffer_event(&key, ev2, &hint);
+
+        let result = emitter.pending.remove(&key).unwrap().into_event();
+        let data = result.data.unwrap();
+        // Position fields: latest value wins.
+        assert_eq!(data["x"], 15.0);
+        assert_eq!(data["y"], 25.0);
+        // Impulse fields: accumulated.
+        assert_eq!(data["impulse_x"], 4.0);
+        assert_eq!(data["impulse_y"], 6.0);
     }
 }

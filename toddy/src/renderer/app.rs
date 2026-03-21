@@ -13,7 +13,7 @@ use toddy_core::message::Message;
 use toddy_core::protocol::OutgoingEvent;
 
 use super::constants::*;
-use super::emitter::{CoalesceKey, CoalesceStrategy, EventEmitter};
+use super::emitter::{CoalesceKey, EventEmitter};
 use super::emitters;
 use super::window_map;
 
@@ -165,14 +165,13 @@ impl App {
     }
 
     /// Emit a coalescable subscription event through the EventEmitter.
-    /// The emitter applies rate limiting and coalescing. Falls back to
-    /// the catch-all "on_event" subscription if the specific key isn't
-    /// registered.
+    /// The emitter applies rate limiting and coalescing based on the
+    /// event's [`CoalesceHint`]. Falls back to the catch-all "on_event"
+    /// subscription if the specific key isn't registered.
     pub(super) fn coalesce_subscription(
         &mut self,
         key: &str,
         captured: bool,
-        strategy: CoalesceStrategy,
         event_fn: impl FnOnce(String) -> OutgoingEvent,
     ) -> Task<Message> {
         let tag = if let Some(tag) = self.core.active_subscriptions.get(key) {
@@ -188,6 +187,6 @@ impl App {
         // against each other when both fall through to the on_event
         // catch-all.
         self.emitter
-            .coalesce(CoalesceKey::Subscription(key.to_string()), event, strategy)
+            .coalesce(CoalesceKey::Subscription(key.to_string()), event)
     }
 }
