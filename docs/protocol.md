@@ -1775,3 +1775,106 @@ thousands of nodes). Practical considerations for large trees:
 - **Screenshot size.** Large screenshots allocate proportional RGBA
   buffers (width * height * 4 bytes). The maximum dimension is
   16384 px per axis.
+
+---
+
+## Interactive canvas shapes
+
+Shapes within canvas layers can include an `interactive` object to
+make them respond to pointer events, display tooltips, support drag
+gestures, and participate in the accessibility tree.
+
+### The `interactive` field
+
+Any shape JSON object in a canvas layer can carry an `interactive`
+object with the following fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier for this shape within the canvas |
+| `on_click` | bool | No | Emit `canvas_shape_click` events |
+| `on_hover` | bool | No | Emit `canvas_shape_enter` / `canvas_shape_leave` events |
+| `cursor` | string | No | Cursor to show on hover (`pointer`, `grab`, `crosshair`, `move`, `text`, etc.) |
+| `hover_style` | object | No | Style overrides applied while the cursor is over the shape |
+| `pressed_style` | object | No | Style overrides applied while a mouse button is held on the shape |
+| `tooltip` | string | No | Text shown as a tooltip on hover |
+| `draggable` | bool | No | Enable drag interaction |
+| `drag_axis` | string | No | Constrain drag direction: `"both"` (default), `"x"`, `"y"` |
+| `drag_bounds` | object | No | Clamp drag position: `{min_x, max_x, min_y, max_y}` |
+| `hit_rect` | object | No | Explicit rectangular hit region: `{x, y, w, h}` |
+| `a11y` | object | No | Accessible node: `{role, label, description}` |
+
+**Example -- bar chart with clickable bars:**
+
+```json
+{
+  "type": "rect", "x": 10, "y": 50, "w": 30, "h": 200, "fill": "#3498db",
+  "interactive": {
+    "id": "bar-jan",
+    "on_click": true,
+    "on_hover": true,
+    "cursor": "pointer",
+    "hover_style": {"fill": "#2980b9"},
+    "tooltip": "January: 200 units",
+    "a11y": {"role": "button", "label": "January: 200 units"}
+  }
+}
+```
+
+### Hit testing
+
+The renderer infers hit regions automatically for common shape types:
+
+| Shape | Hit test method |
+|-------|----------------|
+| `rect` | Point-in-rect |
+| `circle` | Distance from center <= radius |
+| `line` | Distance to line segment (minimum 2px half-width for usability) |
+| Other shapes | No automatic inference -- use `hit_rect` for an explicit rectangular hit region |
+
+Shapes are tested in reverse draw order (topmost shape first), so
+shapes drawn later take priority.
+
+**Transforms are not applied to hit regions.** Layer-level transforms
+(translate, rotate, scale) do not affect hit testing. Interactive
+shapes should use absolute coordinates that match their on-screen
+position.
+
+### Events emitted
+
+Interactive shapes emit the following event families. The `id` field
+on the outgoing event is the canvas node ID.
+
+| Family | Data fields | Description |
+|--------|-------------|-------------|
+| `canvas_shape_enter` | `shape_id`, `x`, `y` | Cursor entered the shape's hit region |
+| `canvas_shape_leave` | `shape_id` | Cursor left the shape's hit region |
+| `canvas_shape_click` | `shape_id`, `x`, `y`, `button` | Click on an interactive shape |
+| `canvas_shape_drag` | `shape_id`, `x`, `y`, `dx`, `dy` | Drag movement (rate-limited, CoalesceHint::Replace) |
+| `canvas_shape_drag_end` | `shape_id`, `x`, `y` | Mouse released after a drag |
+
+Raw canvas events (`canvas_move`, `canvas_press`, `canvas_release`,
+`canvas_scroll`) continue to fire alongside shape events.
+
+### Style overrides
+
+`hover_style` and `pressed_style` objects are merged into the shape's
+JSON during draw. Any shape property can be overridden (`fill`,
+`stroke`, `stroke_width`, `opacity`, etc.). When both apply,
+`pressed_style` takes priority over `hover_style`.
+
+Layers with an active style override (hover or press) bypass the
+geometry cache so that visual feedback is immediate.
+
+### Accessibility
+
+Interactive shapes that include an `a11y` object appear as focusable
+child nodes in the accessibility tree, nested under the canvas
+widget's `Image` role. Supported roles: `button`, `link`, `slider`,
+`image`, `list_item`, `tab`, `tree_item`.
+
+### Tooltips
+
+When the cursor hovers over a shape with a `tooltip` field, the text
+is drawn as an overlay within the canvas. The tooltip is not clipped
+to the canvas bounds.
