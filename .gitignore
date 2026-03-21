@@ -1,3 +1,4 @@
 target/
 .cargo/
 /plushie-wasm/pkg/
+CLAUDE.md

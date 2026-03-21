@@ -4,7 +4,47 @@ All notable changes to plushie will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.4.0] - 2026-03-21
+
+### Breaking changes
+
+- **Project renamed from toddy to plushie.** All crate names, binary name,
+  module paths, and import paths have changed: `toddy` -> `plushie`,
+  `toddy-core` -> `plushie-core`, `toddy_core` -> `plushie_core`. The
+  binary is now `plushie` (was `toddy`). The iced fork is now
+  `plushie-iced` (was `toddy-iced`).
+- **Crate split.** The single `toddy` crate is now three:
+  `plushie-core` (SDK library), `plushie-renderer` (shared renderer
+  logic, compilable to native and wasm32), and `plushie` (native binary).
+  A fourth crate `plushie-wasm` provides the WASM entry point.
+  Extension authors now depend on `plushie-core` instead of `toddy-core`.
+- **Wire protocol field renames.** `canvas_scroll` position fields
+  changed from `cursor_x`/`cursor_y` to `x`/`y`. `canvas_shape_drag`
+  delta fields changed from `dx`/`dy` to `delta_x`/`delta_y`.
+- **`scroll_to` field change.** The legacy `offset` key is removed;
+  use `offset_y` only.
+- **Scripting scroll event family renamed** from `scroll` to
+  `wheel_scrolled` (the old name collided with the scrollable widget
+  family).
+- **Accessibility role name aliases removed.** Concatenated forms like
+  `columnheader` are gone; use underscore form only (`column_header`).
+- **Color format restricted.** Only hex notation (`#RRGGBB` /
+  `#RRGGBBAA`) is accepted; other color notations are rejected.
+- **Shaping prop renamed.** `text_shaping` is now `shaping`.
+- **`OutgoingEvent` constructor signatures changed.** Parameter types
+  standardized across the SDK; callers constructing events manually
+  will need updating.
+- **`CoalesceHint` added to `OutgoingEvent`.** The hardcoded coalescing
+  table is removed. Extensions and host code that relied on implicit
+  coalescing behavior must set `CoalesceHint` explicitly.
+- **Core is zero-I/O.** Platform effects (file dialogs, clipboard,
+  notifications) moved out of `plushie-core` into the binary crate.
+  `Core` now returns `CoreEffect` variants instead of performing I/O.
+  Extension authors using core directly will see a different effect API.
+- **IME event family names changed** to avoid collisions with other
+  event families.
+- **Key event shapes unified.** Scripting and real key events now use
+  the same field layout.
 
 ### Added
 

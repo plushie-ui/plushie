@@ -1,6 +1,6 @@
 [package]
 name = "plushie-wasm"
-description = "WASM entry point for the plushie renderer"
+description = "WebAssembly bindings for Plushie"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,9 +15,9 @@ crate-type = ["cdylib", "rlib"]
 workspace = true
 
 [dependencies]
-plushie-core = { version = "0.3.1", path = "../plushie-core" }
-plushie-renderer = { version = "0.3.1", path = "../plushie-renderer" }
-iced = { version = "0.6", package = "plushie-iced", features = ["advanced", "canvas", "a11y"] }
+plushie-core = { version = "0.4.0", path = "../plushie-core" }
+plushie-renderer = { version = "0.4.0", path = "../plushie-renderer" }
+iced = { version = "0.7", package = "plushie-iced", features = ["advanced", "canvas", "a11y"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
