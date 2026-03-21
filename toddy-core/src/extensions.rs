@@ -31,7 +31,16 @@ use crate::widgets::WidgetCaches;
 /// prevents one extension from crashing the entire renderer.
 pub(crate) fn catch_unwind_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("TODDY_NO_CATCH_UNWIND").is_err())
+    *ENABLED.get_or_init(|| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::env::var("TODDY_NO_CATCH_UNWIND").is_err()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            true
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

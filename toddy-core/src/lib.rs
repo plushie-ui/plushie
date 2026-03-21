@@ -24,7 +24,8 @@
 
 // Ensure catch_unwind works: extension panic isolation requires unwinding.
 // If this fails, remove `panic = "abort"` from your Cargo profile.
-#[cfg(all(not(test), panic = "abort"))]
+// On WASM, catch_unwind is a no-op (panics always abort), so skip this check.
+#[cfg(all(not(test), not(target_arch = "wasm32"), panic = "abort"))]
 compile_error!(
     "toddy-core requires panic=\"unwind\" (the default). \
      Extension panic isolation via catch_unwind is a no-op with panic=\"abort\"."
