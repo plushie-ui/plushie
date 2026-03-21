@@ -1737,6 +1737,18 @@ Incoming stdin messages also flush the buffer, providing adaptive
 throughput matching -- when the host sends a message, it gets all
 pending coalesced events immediately.
 
+### Extension events
+
+Extension widget events participate in rate limiting and coalescing
+when they carry a `CoalesceHint`. Extension authors set hints on
+outgoing events via `.with_coalesce(CoalesceHint::Replace)` or
+`.with_coalesce(CoalesceHint::Accumulate(vec!["field_x".into(), "field_y".into()]))`.
+`Replace` uses the standard latest-value-wins strategy.
+`Accumulate(fields)` sums the named data fields across coalesced
+events; other fields keep the latest values. Events returned without
+a hint are never coalesced -- they are delivered immediately
+regardless of any `event_rate` setting.
+
 ### Headless and mock modes
 
 Rate limiting configuration is accepted and stored but not applied
