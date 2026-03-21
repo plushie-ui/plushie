@@ -1060,7 +1060,7 @@ Canvas events:
 | `canvas_press` | id, data: {x, y, button} | Mouse pressed on canvas |
 | `canvas_release` | id, data: {x, y, button} | Mouse released on canvas |
 | `canvas_move` | id, data: {x, y} | Mouse moved on canvas |
-| `canvas_scroll` | id, data: {cursor_x, cursor_y, delta_x, delta_y} | Scroll on canvas |
+| `canvas_scroll` | id, data: {x, y, delta_x, delta_y} | Scroll on canvas |
 
 Pane grid events:
 
@@ -1082,7 +1082,7 @@ tag from the subscription registration.
 |--------|--------|
 | `key_press` | tag, data: {key, modified_key, physical_key, location, text, repeat}, modifiers |
 | `key_release` | tag, data: {key, modified_key, physical_key, location}, modifiers |
-| `modifiers_changed` | tag, modifiers: {shift, ctrl, alt, logo} |
+| `modifiers_changed` | tag, modifiers: {shift, ctrl, alt, logo, command} |
 
 **Mouse:**
 
@@ -1935,7 +1935,7 @@ on the outgoing event is the canvas node ID.
 | `canvas_shape_enter` | `shape_id`, `x`, `y` | Cursor entered the shape's hit region |
 | `canvas_shape_leave` | `shape_id` | Cursor left the shape's hit region |
 | `canvas_shape_click` | `shape_id`, `x`, `y`, `button` | Click on an interactive shape. `button` is `"keyboard"` when activated via Enter/Space. |
-| `canvas_shape_drag` | `shape_id`, `x`, `y`, `dx`, `dy` | Drag movement (rate-limited, CoalesceHint::Replace) |
+| `canvas_shape_drag` | `shape_id`, `x`, `y`, `delta_x`, `delta_y` | Drag movement (rate-limited, CoalesceHint::Replace) |
 | `canvas_shape_drag_end` | `shape_id`, `x`, `y` | Mouse released after a drag |
 | `canvas_shape_focused` | `shape_id` | Keyboard focus moved to this element (not coalescable) |
 
