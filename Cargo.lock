@@ -4404,7 +4404,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "toddy-iced",
- "tokio",
 ]
 
 [[package]]
@@ -4654,6 +4653,22 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winit",
+]
+
+[[package]]
+name = "toddy-renderer"
+version = "0.3.1"
+dependencies = [
+ "base64",
+ "log",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smol_str 0.2.2",
+ "toddy-core",
+ "toddy-iced",
+ "tokio",
+ "wasmtimer",
 ]
 
 [[package]]
