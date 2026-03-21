@@ -228,10 +228,17 @@ fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<Interactiv
 
     let drag_bounds = interactive.get("drag_bounds").and_then(|v| {
         let obj = v.as_object()?;
-        let min_x = obj.get("min_x")?.as_f64()? as f32;
-        let max_x = obj.get("max_x")?.as_f64()? as f32;
-        let min_y = obj.get("min_y")?.as_f64()? as f32;
-        let max_y = obj.get("max_y")?.as_f64()? as f32;
+        let get = |key: &str| -> Option<f32> {
+            let val = obj.get(key).and_then(|v| v.as_f64()).map(|v| v as f32);
+            if val.is_none() {
+                log::warn!("canvas shape '{id}': drag_bounds missing '{key}'");
+            }
+            val
+        };
+        let min_x = get("min_x")?;
+        let max_x = get("max_x")?;
+        let min_y = get("min_y")?;
+        let max_y = get("max_y")?;
         // Ensure min <= max to avoid panic from f32::clamp in debug.
         Some(DragBounds {
             min_x: min_x.min(max_x),
