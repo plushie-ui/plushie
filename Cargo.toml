@@ -1,5 +1,5 @@
 [workspace]
-members = ["toddy-core", "toddy-renderer", "toddy", "toddy-web"]
+members = ["toddy-core", "toddy-renderer", "toddy", "toddy-wasm"]
 resolver = "2"
 
 [workspace.package]

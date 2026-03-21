@@ -1,5 +1,5 @@
 [package]
-name = "toddy-web"
+name = "toddy-wasm"
 description = "WASM entry point for the toddy renderer"
 version.workspace = true
 edition.workspace = true

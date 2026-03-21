@@ -4683,7 +4683,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "toddy-web"
+name = "toddy-wasm"
 version = "0.3.1"
 dependencies = [
  "console_log",
