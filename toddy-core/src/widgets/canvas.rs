@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
-use iced::widget::canvas::{self, AccessibleShape};
+use iced::advanced::widget::operation::accessible::{self as a11y_accessible, Accessible};
+use iced::widget::canvas;
 use iced::{
     Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Vector, alignment, mouse,
 };
@@ -1508,37 +1509,70 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
     }
 
-    fn accessible_shapes(
+    fn is_focusable(&self, _state: &CanvasState) -> bool {
+        !self.interactive_shapes.is_empty()
+    }
+
+    fn operate_accessible(
         &self,
         _state: &CanvasState,
-        _canvas_bounds: iced::Rectangle,
-    ) -> Vec<AccessibleShape> {
-        self.interactive_shapes
-            .iter()
-            .filter_map(|shape| {
-                let a11y = shape.a11y.as_ref()?.as_object()?;
-                let role = a11y
-                    .get("role")
-                    .and_then(|v| v.as_str())
-                    .map(parse_a11y_role)
-                    .unwrap_or(iced::advanced::widget::operation::accessible::Role::Group);
-                let label = a11y
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let description = a11y
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let bounds = hit_region_to_rect(&shape.hit_region);
-                Some(AccessibleShape {
-                    bounds,
+        canvas_bounds: iced::Rectangle,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        let mut seen_ids = std::collections::HashSet::new();
+        for shape in self.interactive_shapes {
+            let a11y = match shape.a11y.as_ref().and_then(|v| v.as_object()) {
+                Some(obj) => obj,
+                None => continue,
+            };
+            // Deduplicate by ID (composites may share IDs).
+            if !seen_ids.insert(&shape.id) {
+                continue;
+            }
+            let role = a11y
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(parse_a11y_role)
+                .unwrap_or(a11y_accessible::Role::Group);
+            let label = a11y.get("label").and_then(|v| v.as_str());
+            let description = a11y.get("description").and_then(|v| v.as_str());
+            let shape_rect = hit_region_to_rect(&shape.hit_region);
+            let shape_bounds = Rectangle {
+                x: canvas_bounds.x + shape_rect.x,
+                y: canvas_bounds.y + shape_rect.y,
+                width: shape_rect.width,
+                height: shape_rect.height,
+            };
+            let selected = a11y.get("selected").and_then(|v| v.as_bool());
+            let expanded = a11y.get("expanded").and_then(|v| v.as_bool());
+            let disabled = a11y
+                .get("disabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let position_in_set = a11y
+                .get("position_in_set")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            let size_of_set = a11y
+                .get("size_of_set")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            operation.accessible(
+                None,
+                shape_bounds,
+                &Accessible {
                     role,
                     label,
                     description,
-                })
-            })
-            .collect()
+                    selected,
+                    expanded,
+                    disabled,
+                    position_in_set,
+                    size_of_set,
+                    ..Accessible::default()
+                },
+            );
+        }
     }
 }
 
@@ -1579,8 +1613,8 @@ fn hit_region_to_rect(region: &HitRegion) -> Rectangle {
 }
 
 /// Parse an a11y role string into an accessible Role.
-fn parse_a11y_role(role: &str) -> iced::advanced::widget::operation::accessible::Role {
-    use iced::advanced::widget::operation::accessible::Role;
+fn parse_a11y_role(role: &str) -> a11y_accessible::Role {
+    use a11y_accessible::Role;
     match role {
         "button" => Role::Button,
         "link" => Role::Link,
@@ -1589,6 +1623,14 @@ fn parse_a11y_role(role: &str) -> iced::advanced::widget::operation::accessible:
         "listitem" | "list_item" => Role::ListItem,
         "tab" => Role::Tab,
         "treeitem" | "tree_item" => Role::TreeItem,
+        "radio" => Role::RadioButton,
+        "checkbox" => Role::CheckBox,
+        "toolbar" => Role::Toolbar,
+        "list" => Role::List,
+        "tablist" | "tab_list" => Role::TabList,
+        "tree" => Role::Tree,
+        "menu" => Role::Menu,
+        "menubar" => Role::MenuBar,
         _ => Role::Group,
     }
 }
