@@ -30,7 +30,7 @@ use serde_json::Value;
 /// accessibility tree.
 ///
 /// [`operate`]: iced::advanced::widget::Widget::operate
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct A11yOverrides {
     /// Semantic role override.
     pub role: Option<accessible::Role>,
@@ -111,8 +111,16 @@ impl A11yOverrides {
     /// Returns `None` if no `a11y` key exists or if the `a11y` object
     /// contains no meaningful overrides.
     pub fn from_props(props: &Value) -> Option<Self> {
-        let a11y = props.get("a11y")?;
+        Self::from_a11y_value(props.get("a11y")?)
+    }
 
+    /// Parse accessibility overrides from an `a11y` JSON value directly.
+    ///
+    /// Like [`from_props`](Self::from_props) but takes the `a11y` value
+    /// itself, avoiding the need to wrap it in a parent object. Used by
+    /// canvas interactive shapes where the `a11y` field is nested inside
+    /// the `interactive` object.
+    pub fn from_a11y_value(a11y: &Value) -> Option<Self> {
         let role = a11y
             .get("role")
             .and_then(|v| v.as_str())
@@ -318,7 +326,7 @@ impl A11yOverrides {
     ///
     /// Used when upgrading a container (which normally has no accessible
     /// node) to an accessible node because the host set a11y overrides.
-    fn to_accessible(&self) -> Accessible<'_> {
+    pub(crate) fn to_accessible(&self) -> Accessible<'_> {
         self.apply_to(&Accessible::default())
     }
 

@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
-use iced::advanced::widget::operation::accessible::{self as a11y_accessible, Accessible};
 use iced::widget::canvas;
 use iced::{
-    Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Vector, alignment, mouse,
+    Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Vector, alignment, keyboard,
+    mouse,
 };
 use serde_json::Value;
 
@@ -104,9 +104,11 @@ pub(crate) struct InteractiveShape {
     pub has_pressed_style: bool,
     /// Tooltip text to show on hover.
     pub tooltip: Option<String>,
-    /// Raw a11y JSON for accessible node creation in
-    /// [`accessible_shapes()`](CanvasProgram::accessible_shapes).
-    pub a11y: Option<Value>,
+    /// Accessibility overrides for this element. Parsed from the
+    /// `a11y` sub-field of `interactive` using the same
+    /// [`A11yOverrides`](super::a11y::A11yOverrides) struct that all
+    /// other widgets use -- same fields, same parsing, same validation.
+    pub a11y: Option<super::a11y::A11yOverrides>,
 }
 
 /// Active drag state tracked in `CanvasState`.
@@ -188,11 +190,16 @@ fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<Interactiv
 
     let drag_bounds = interactive.get("drag_bounds").and_then(|v| {
         let obj = v.as_object()?;
+        let min_x = obj.get("min_x")?.as_f64()? as f32;
+        let max_x = obj.get("max_x")?.as_f64()? as f32;
+        let min_y = obj.get("min_y")?.as_f64()? as f32;
+        let max_y = obj.get("max_y")?.as_f64()? as f32;
+        // Ensure min <= max to avoid panic from f32::clamp in debug.
         Some(DragBounds {
-            min_x: obj.get("min_x")?.as_f64()? as f32,
-            max_x: obj.get("max_x")?.as_f64()? as f32,
-            min_y: obj.get("min_y")?.as_f64()? as f32,
-            max_y: obj.get("max_y")?.as_f64()? as f32,
+            min_x: min_x.min(max_x),
+            max_x: min_x.max(max_x),
+            min_y: min_y.min(max_y),
+            max_y: min_y.max(max_y),
         })
     });
 
@@ -226,8 +233,85 @@ fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<Interactiv
             .get("tooltip")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        a11y: interactive.get("a11y").cloned(),
+        a11y: interactive
+            .get("a11y")
+            .and_then(super::a11y::A11yOverrides::from_a11y_value),
     })
+}
+
+/// Compute the bounding box of a single shape in its parent's coordinate
+/// system. Returns `(min_x, min_y, max_x, max_y)` or `None` if bounds
+/// can't be determined for this shape type.
+fn child_bounds(child: &Value) -> Option<(f32, f32, f32, f32)> {
+    let ct = child.get("type").and_then(|v| v.as_str())?;
+    match ct {
+        "rect" => {
+            let x = json_f32(child, "x");
+            let y = json_f32(child, "y");
+            let w = json_f32(child, "w");
+            let h = json_f32(child, "h");
+            Some((x, y, x + w, y + h))
+        }
+        "circle" => {
+            let cx = json_f32(child, "x");
+            let cy = json_f32(child, "y");
+            let r = json_f32(child, "r");
+            Some((cx - r, cy - r, cx + r, cy + r))
+        }
+        "line" => {
+            let x1 = json_f32(child, "x1");
+            let y1 = json_f32(child, "y1");
+            let x2 = json_f32(child, "x2");
+            let y2 = json_f32(child, "y2");
+            Some((x1.min(x2), y1.min(y2), x1.max(x2), y1.max(y2)))
+        }
+        "text" => {
+            let x = json_f32(child, "x");
+            let y = json_f32(child, "y");
+            let content = child.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let size = child.get("size").and_then(|v| v.as_f64()).unwrap_or(16.0) as f32;
+            let est_w = content.chars().count() as f32 * size * 0.6;
+            Some((x, y - size, x + est_w, y))
+        }
+        "image" | "svg" => {
+            let x = json_f32(child, "x");
+            let y = json_f32(child, "y");
+            let w = json_f32(child, "w");
+            let h = json_f32(child, "h");
+            Some((x, y, x + w, y + h))
+        }
+        "group" => {
+            let gx = json_f32(child, "x");
+            let gy = json_f32(child, "y");
+            let nested = child.get("children").and_then(|v| v.as_array())?;
+            let (min_x, min_y, max_x, max_y) = children_bounds(nested)?;
+            Some((gx + min_x, gy + min_y, gx + max_x, gy + max_y))
+        }
+        // Paths, transforms, clips, and other types can't have their
+        // bounds automatically determined. Use hit_rect on the parent.
+        _ => None,
+    }
+}
+
+/// Compute the union bounding box of a list of child shapes.
+/// Returns `(min_x, min_y, max_x, max_y)` or `None` if no children
+/// have computable bounds.
+fn children_bounds(children: &[Value]) -> Option<(f32, f32, f32, f32)> {
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    let mut has_bounds = false;
+    for child in children {
+        if let Some((cx0, cy0, cx1, cy1)) = child_bounds(child) {
+            min_x = min_x.min(cx0);
+            min_y = min_y.min(cy0);
+            max_x = max_x.max(cx1);
+            max_y = max_y.max(cy1);
+            has_bounds = true;
+        }
+    }
+    has_bounds.then_some((min_x, min_y, max_x, max_y))
 }
 
 /// Compute the hit region from a shape's geometry.
@@ -287,6 +371,25 @@ fn compute_hit_region(
                 y2,
                 half_width,
             })
+        }
+        "group" => {
+            let group_x = json_f32(shape, "x");
+            let group_y = json_f32(shape, "y");
+            let children = shape.get("children").and_then(|v| v.as_array());
+            if let Some(children) = children {
+                if let Some((min_x, min_y, max_x, max_y)) = children_bounds(children) {
+                    Some(HitRegion::Rect {
+                        x: min_x + group_x,
+                        y: min_y + group_y,
+                        w: max_x - min_x,
+                        h: max_y - min_y,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         }
         // For unsupported shape types, the host can provide an explicit
         // hit_rect in the interactive field as a fallback.
@@ -380,6 +483,8 @@ struct CanvasState {
     pressed_shape: Option<String>,
     /// Active drag state (shape being dragged).
     dragging: Option<DragState>,
+    /// Index of the interactive shape that has keyboard focus.
+    focused_index: Option<usize>,
 }
 
 struct CanvasProgram<'a> {
@@ -412,10 +517,13 @@ impl CanvasProgram<'_> {
     /// shape with style overrides. Returns `None` if no interaction is
     /// active or the active shape has no style overrides.
     fn layer_with_active_interaction(&self, state: &CanvasState) -> Option<String> {
+        // Pressed takes priority -- if the user is pressing a shape on
+        // layer A while hovering a shape on layer B, layer A needs the
+        // force-redraw for pressed_style.
         let active_id = state
-            .hovered_shape
+            .pressed_shape
             .as_deref()
-            .or(state.pressed_shape.as_deref());
+            .or(state.hovered_shape.as_deref());
         let active_id = active_id?;
         let shape = self.interactive_shapes.iter().find(|s| s.id == active_id)?;
         if shape.has_hover_style || shape.has_pressed_style {
@@ -474,6 +582,46 @@ impl CanvasProgram<'_> {
                 "pop_clip" => {
                     i += 1;
                 }
+                "group" => {
+                    let gx = json_f32(shape, "x");
+                    let gy = json_f32(shape, "y");
+                    let group_id = shape
+                        .get("interactive")
+                        .and_then(|v| v.get("id"))
+                        .and_then(|v| v.as_str());
+                    let group_active =
+                        group_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
+
+                    if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+                        frame.push_transform();
+                        frame.translate(Vector::new(gx, gy));
+                        if group_active {
+                            let is_pressed = group_id.is_some_and(|sid| pressed == Some(sid));
+                            for child in children {
+                                // Each child can have its own hover_style/pressed_style
+                                // at the top level of the child shape JSON.
+                                let override_style = if is_pressed {
+                                    child.get("pressed_style")
+                                } else {
+                                    None
+                                }
+                                .or_else(|| child.get("hover_style"));
+
+                                if let Some(overrides) = override_style {
+                                    let merged = merge_shape_style(child, overrides);
+                                    draw_canvas_shape(frame, &merged, images);
+                                } else {
+                                    draw_canvas_shape(frame, child, images);
+                                }
+                            }
+                        } else {
+                            let child_refs: Vec<&Value> = children.iter().collect();
+                            draw_canvas_shapes(frame, &child_refs, images);
+                        }
+                        frame.pop_transform();
+                    }
+                    i += 1;
+                }
                 _ => {
                     let shape_id = shape
                         .get("interactive")
@@ -525,8 +673,28 @@ fn merge_shape_style(shape: &Value, overrides: &Value) -> Value {
 }
 
 /// Draw a tooltip overlay at the cursor position.
-fn draw_tooltip(frame: &mut canvas::Frame, text: &str, cursor: Point, bounds: Size) {
+fn draw_tooltip(
+    frame: &mut canvas::Frame,
+    text: &str,
+    cursor: Point,
+    bounds: Size,
+    theme: &iced::Theme,
+) {
     use iced::widget::canvas::Text;
+
+    let palette = theme.palette();
+    // Use inverse colors: dark bg on light theme, light bg on dark theme.
+    let (bg_color, text_color) = if palette.is_dark {
+        (
+            Color::from_rgba(0.85, 0.85, 0.85, 0.95),
+            Color::from_rgb(0.1, 0.1, 0.1),
+        )
+    } else {
+        (
+            Color::from_rgba(0.15, 0.15, 0.15, 0.95),
+            Color::from_rgb(0.95, 0.95, 0.95),
+        )
+    };
 
     let padding = 6.0;
     let font_size = 13.0;
@@ -554,14 +722,14 @@ fn draw_tooltip(frame: &mut canvas::Frame, text: &str, cursor: Point, bounds: Si
     frame.fill_rectangle(
         Point::new(bg_rect.x, bg_rect.y),
         Size::new(bg_rect.width, bg_rect.height),
-        Color::from_rgba(0.15, 0.15, 0.15, 0.92),
+        bg_color,
     );
 
     // Text
     frame.fill_text(Text {
         content: text.to_string(),
         position: Point::new(x + padding, y + padding),
-        color: Color::from_rgb(0.95, 0.95, 0.95),
+        color: text_color,
         size: Pixels(font_size),
         ..Text::default()
     });
@@ -1184,6 +1352,17 @@ fn draw_canvas_shape(
             let handle = iced::widget::svg::Handle::from_path(source);
             frame.draw_svg(bounds, &handle);
         }
+        "group" => {
+            let x = json_f32(shape, "x");
+            let y = json_f32(shape, "y");
+            if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+                frame.push_transform();
+                frame.translate(Vector::new(x, y));
+                let child_refs: Vec<&Value> = children.iter().collect();
+                draw_canvas_shapes(frame, &child_refs, images);
+                frame.pop_transform();
+            }
+        }
         _ => {}
     }
 }
@@ -1206,22 +1385,26 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             None => {
                 // Cursor is outside canvas bounds. Clean up interaction
                 // state so we don't have stale hover/drag.
+                //
+                // DragEnd is processed first (higher priority) because
+                // losing a drag-end event leaves the host thinking the
+                // drag is still active. ShapeLeave is less critical --
+                // the host can infer leave from the drag-end.
                 let mut action: Option<iced::widget::Action<Message>> = None;
-                if let Some(hovered_id) = state.hovered_shape.take() {
-                    let msg = Message::CanvasShapeLeave {
-                        canvas_id: self.id.clone(),
-                        shape_id: hovered_id,
-                    };
-                    action = Some(iced::widget::Action::publish(msg));
-                }
                 if let Some(drag) = state.dragging.take() {
-                    // End drag with last known position.
                     let pos = state.cursor_position.unwrap_or(Point::ORIGIN);
                     let msg = Message::CanvasShapeDragEnd {
                         canvas_id: self.id.clone(),
                         shape_id: drag.shape_id,
                         x: pos.x,
                         y: pos.y,
+                    };
+                    action = Some(iced::widget::Action::publish(msg));
+                }
+                if let Some(hovered_id) = state.hovered_shape.take() {
+                    let msg = Message::CanvasShapeLeave {
+                        canvas_id: self.id.clone(),
+                        shape_id: hovered_id,
                     };
                     action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                 }
@@ -1241,29 +1424,35 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         .interactive_shapes
                         .iter()
                         .find(|s| s.id == drag.shape_id);
-                    let (mut dx, mut dy) = (position.x - drag.last.x, position.y - drag.last.y);
-                    // Axis constraints
+
+                    // Start from raw cursor position, apply bounds
+                    // clamping first, then axis constraints. This
+                    // ensures axis-constrained drags still respect
+                    // bounds on the constrained axis.
+                    let mut effective = position;
+                    if let Some(shape) = shape
+                        && let Some(ref db) = shape.drag_bounds
+                    {
+                        effective.x = effective.x.clamp(db.min_x, db.max_x);
+                        effective.y = effective.y.clamp(db.min_y, db.max_y);
+                    }
+                    let mut dx = effective.x - drag.last.x;
+                    let mut dy = effective.y - drag.last.y;
                     if let Some(shape) = shape {
                         match shape.drag_axis {
                             DragAxis::X => dy = 0.0,
                             DragAxis::Y => dx = 0.0,
                             DragAxis::Both => {}
                         }
-                        // Bounds clamping: clamp the reported position
-                        // to the declared bounds, then recompute deltas.
-                        if let Some(ref db) = shape.drag_bounds {
-                            let clamped_x = position.x.clamp(db.min_x, db.max_x);
-                            let clamped_y = position.y.clamp(db.min_y, db.max_y);
-                            dx = clamped_x - drag.last.x;
-                            dy = clamped_y - drag.last.y;
-                        }
                     }
-                    drag.last = position;
+                    // Track the effective (clamped) position so deltas
+                    // are consistent across frames.
+                    drag.last = effective;
                     let msg = Message::CanvasShapeDrag {
                         canvas_id: self.id.clone(),
                         shape_id: drag.shape_id.clone(),
-                        x: position.x,
-                        y: position.y,
+                        x: effective.x,
+                        y: effective.y,
                         dx,
                         dy,
                     };
@@ -1277,7 +1466,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     let old_hovered = state.hovered_shape.take();
 
                     if new_hovered != old_hovered {
-                        // Shape leave
+                        // Enter is emitted AFTER leave so that pick_action
+                        // keeps Enter when both fire (direct A -> B transition).
+                        // The host can infer leave from receiving enter for a
+                        // different shape. Losing Enter is worse than losing
+                        // Leave -- Enter tells the host WHAT is hovered.
                         if let Some(ref old_id) = old_hovered {
                             let msg = Message::CanvasShapeLeave {
                                 canvas_id: self.id.clone(),
@@ -1285,7 +1478,6 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             };
                             action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                         }
-                        // Shape enter
                         if let Some(ref new_id) = new_hovered {
                             let msg = Message::CanvasShapeEnter {
                                 canvas_id: self.id.clone(),
@@ -1293,7 +1485,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                                 x: position.x,
                                 y: position.y,
                             };
-                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                            // Override any previous action -- Enter takes
+                            // priority over Leave and raw canvas move.
+                            action = Some(iced::widget::Action::publish(msg));
                         }
                     }
                     state.hovered_shape = new_hovered;
@@ -1416,6 +1610,207 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 }))
             }
 
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if !self.interactive_shapes.is_empty() =>
+            {
+                use keyboard::key::Named;
+                let count = self.interactive_shapes.len();
+                // Validate focused_index against current shape count
+                // (shapes may have changed between renders).
+                if state.focused_index.is_some_and(|idx| idx >= count) {
+                    state.focused_index = None;
+                }
+                match key {
+                    keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
+                        match state.focused_index {
+                            None => {
+                                state.focused_index = Some(0);
+                                let shape_id = self.interactive_shapes[0].id.clone();
+                                Some(
+                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                        canvas_id: self.id.clone(),
+                                        shape_id,
+                                    })
+                                    .and_capture(),
+                                )
+                            }
+                            Some(idx) if idx + 1 < count => {
+                                let next = idx + 1;
+                                state.focused_index = Some(next);
+                                let shape_id = self.interactive_shapes[next].id.clone();
+                                Some(
+                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                        canvas_id: self.id.clone(),
+                                        shape_id,
+                                    })
+                                    .and_capture(),
+                                )
+                            }
+                            Some(_) => {
+                                // At last element -- clear focus, let Tab propagate.
+                                state.focused_index = None;
+                                None
+                            }
+                        }
+                    }
+                    keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
+                        match state.focused_index {
+                            None => {
+                                // Focus last element.
+                                let last = count - 1;
+                                state.focused_index = Some(last);
+                                let shape_id = self.interactive_shapes[last].id.clone();
+                                Some(
+                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                        canvas_id: self.id.clone(),
+                                        shape_id,
+                                    })
+                                    .and_capture(),
+                                )
+                            }
+                            Some(0) => {
+                                // At first element -- clear focus, let Shift+Tab propagate.
+                                state.focused_index = None;
+                                None
+                            }
+                            Some(idx) => {
+                                let prev = idx - 1;
+                                state.focused_index = Some(prev);
+                                let shape_id = self.interactive_shapes[prev].id.clone();
+                                Some(
+                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                        canvas_id: self.id.clone(),
+                                        shape_id,
+                                    })
+                                    .and_capture(),
+                                )
+                            }
+                        }
+                    }
+                    keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight) => {
+                        let next = match state.focused_index {
+                            None => 0,
+                            Some(idx) => (idx + 1) % count,
+                        };
+                        state.focused_index = Some(next);
+                        let shape_id = self.interactive_shapes[next].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft) => {
+                        let prev = match state.focused_index {
+                            None => count - 1,
+                            Some(0) => count - 1,
+                            Some(idx) => idx - 1,
+                        };
+                        state.focused_index = Some(prev);
+                        let shape_id = self.interactive_shapes[prev].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    keyboard::Key::Named(Named::Enter | Named::Space) => {
+                        if let Some(idx) = state.focused_index {
+                            let shape = &self.interactive_shapes[idx];
+                            if shape.on_click {
+                                let center = hit_region_center(&shape.hit_region);
+                                let msg = Message::CanvasShapeClick {
+                                    canvas_id: self.id.clone(),
+                                    shape_id: shape.id.clone(),
+                                    x: center.x,
+                                    y: center.y,
+                                    button: "keyboard".to_string(),
+                                };
+                                Some(iced::widget::Action::publish(msg).and_capture())
+                            } else {
+                                // Shape is focusable but not clickable
+                                // (e.g., draggable-only). Consume the key
+                                // but don't emit an event.
+                                Some(iced::widget::Action::capture())
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    keyboard::Key::Named(Named::Escape) => {
+                        if state.focused_index.is_some() {
+                            state.focused_index = None;
+                            // Capture so Escape doesn't propagate to parent
+                            // widgets. Return None would let iced unfocus
+                            // the canvas, which is correct when nothing
+                            // internal was focused. But when we HAD internal
+                            // focus, Escape should only clear internal focus.
+                            Some(iced::widget::Action::capture())
+                        } else {
+                            // Nothing internally focused -- let Escape
+                            // propagate (iced will unfocus the canvas).
+                            None
+                        }
+                    }
+                    keyboard::Key::Named(Named::Home) => {
+                        state.focused_index = Some(0);
+                        let shape_id = self.interactive_shapes[0].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    keyboard::Key::Named(Named::End) => {
+                        let last = count - 1;
+                        state.focused_index = Some(last);
+                        let shape_id = self.interactive_shapes[last].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    keyboard::Key::Named(Named::PageDown) => {
+                        let page_size = 10.min(count);
+                        let idx = state.focused_index.unwrap_or(0);
+                        let new_idx = (idx + page_size).min(count - 1);
+                        state.focused_index = Some(new_idx);
+                        let shape_id = self.interactive_shapes[new_idx].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    keyboard::Key::Named(Named::PageUp) => {
+                        let page_size = 10.min(count);
+                        let idx = state.focused_index.unwrap_or(0);
+                        let new_idx = idx.saturating_sub(page_size);
+                        state.focused_index = Some(new_idx);
+                        let shape_id = self.interactive_shapes[new_idx].id.clone();
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                canvas_id: self.id.clone(),
+                                shape_id,
+                            })
+                            .and_capture(),
+                        )
+                    }
+                    _ => None,
+                }
+            }
+
             _ => None,
         }
     }
@@ -1424,7 +1819,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         &self,
         state: &CanvasState,
         renderer: &iced::Renderer,
-        _theme: &iced::Theme,
+        theme: &iced::Theme,
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
@@ -1474,7 +1869,29 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             && let Some(pos) = state.cursor_position
         {
             let mut frame = canvas::Frame::new(renderer, bounds.size());
-            draw_tooltip(&mut frame, tooltip, pos, bounds.size());
+            draw_tooltip(&mut frame, tooltip, pos, bounds.size(), theme);
+            geometries.push(frame.into_geometry());
+        }
+
+        // Focus ring overlay (uncached, drawn on top of everything).
+        if let Some(idx) = state.focused_index
+            && idx < self.interactive_shapes.len()
+        {
+            let shape = &self.interactive_shapes[idx];
+            let rect = hit_region_to_rect(&shape.hit_region);
+            let mut frame = canvas::Frame::new(renderer, bounds.size());
+            let ring_path = canvas::Path::rounded_rectangle(
+                Point::new(rect.x - 2.0, rect.y - 2.0),
+                Size::new(rect.width + 4.0, rect.height + 4.0),
+                iced::border::Radius::from(3.0),
+            );
+            let focus_color = theme.palette().primary.base.color;
+            frame.stroke(
+                &ring_path,
+                canvas::Stroke::default()
+                    .with_color(focus_color)
+                    .with_width(2.0),
+            );
             geometries.push(frame.into_geometry());
         }
 
@@ -1521,21 +1938,14 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
     ) {
         let mut seen_ids = std::collections::HashSet::new();
         for shape in self.interactive_shapes {
-            let a11y = match shape.a11y.as_ref().and_then(|v| v.as_object()) {
-                Some(obj) => obj,
+            let a11y = match &shape.a11y {
+                Some(a) => a,
                 None => continue,
             };
             // Deduplicate by ID (composites may share IDs).
             if !seen_ids.insert(&shape.id) {
                 continue;
             }
-            let role = a11y
-                .get("role")
-                .and_then(|v| v.as_str())
-                .map(parse_a11y_role)
-                .unwrap_or(a11y_accessible::Role::Group);
-            let label = a11y.get("label").and_then(|v| v.as_str());
-            let description = a11y.get("description").and_then(|v| v.as_str());
             let shape_rect = hit_region_to_rect(&shape.hit_region);
             let shape_bounds = Rectangle {
                 x: canvas_bounds.x + shape_rect.x,
@@ -1543,35 +1953,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 width: shape_rect.width,
                 height: shape_rect.height,
             };
-            let selected = a11y.get("selected").and_then(|v| v.as_bool());
-            let expanded = a11y.get("expanded").and_then(|v| v.as_bool());
-            let disabled = a11y
-                .get("disabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let position_in_set = a11y
-                .get("position_in_set")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize);
-            let size_of_set = a11y
-                .get("size_of_set")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize);
-            operation.accessible(
-                None,
-                shape_bounds,
-                &Accessible {
-                    role,
-                    label,
-                    description,
-                    selected,
-                    expanded,
-                    disabled,
-                    position_in_set,
-                    size_of_set,
-                    ..Accessible::default()
-                },
-            );
+            operation.accessible(None, shape_bounds, &a11y.to_accessible());
         }
     }
 }
@@ -1612,26 +1994,12 @@ fn hit_region_to_rect(region: &HitRegion) -> Rectangle {
     }
 }
 
-/// Parse an a11y role string into an accessible Role.
-fn parse_a11y_role(role: &str) -> a11y_accessible::Role {
-    use a11y_accessible::Role;
-    match role {
-        "button" => Role::Button,
-        "link" => Role::Link,
-        "slider" => Role::Slider,
-        "img" | "image" => Role::Image,
-        "listitem" | "list_item" => Role::ListItem,
-        "tab" => Role::Tab,
-        "treeitem" | "tree_item" => Role::TreeItem,
-        "radio" => Role::RadioButton,
-        "checkbox" => Role::CheckBox,
-        "toolbar" => Role::Toolbar,
-        "list" => Role::List,
-        "tablist" | "tab_list" => Role::TabList,
-        "tree" => Role::Tree,
-        "menu" => Role::Menu,
-        "menubar" => Role::MenuBar,
-        _ => Role::Group,
+/// Compute the center point of a hit region.
+fn hit_region_center(region: &HitRegion) -> Point {
+    match *region {
+        HitRegion::Rect { x, y, w, h } => Point::new(x + w / 2.0, y + h / 2.0),
+        HitRegion::Circle { cx, cy, .. } => Point::new(cx, cy),
+        HitRegion::Line { x1, y1, x2, y2, .. } => Point::new((x1 + x2) / 2.0, (y1 + y2) / 2.0),
     }
 }
 
@@ -1720,21 +2088,80 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // Cache ensure function
 // ---------------------------------------------------------------------------
 
+/// Recursively collect interactive shapes from a shapes array, descending
+/// into groups to find nested interactive shapes.
+/// Recursively collect interactive shapes from a shape array, descending
+/// into groups. `offset_x`/`offset_y` accumulate group x/y translations
+/// so nested shapes' hit regions are in canvas-space coordinates.
+fn collect_interactive_shapes(
+    shapes: &[Value],
+    layer_name: &str,
+    offset_x: f32,
+    offset_y: f32,
+    out: &mut Vec<InteractiveShape>,
+) {
+    for shape in shapes {
+        if let Some(mut ishape) = parse_interactive_shape(shape, layer_name) {
+            // Apply accumulated group offset to the hit region.
+            if offset_x != 0.0 || offset_y != 0.0 {
+                ishape.hit_region = offset_hit_region(&ishape.hit_region, offset_x, offset_y);
+            }
+            out.push(ishape);
+        }
+        // Recurse into group children to find nested interactive shapes.
+        let is_group = shape
+            .get("type")
+            .and_then(|v| v.as_str())
+            .is_some_and(|t| t == "group");
+        if is_group && let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+            let gx = json_f32(shape, "x");
+            let gy = json_f32(shape, "y");
+            collect_interactive_shapes(children, layer_name, offset_x + gx, offset_y + gy, out);
+        }
+    }
+}
+
+/// Translate a hit region by the given offset.
+fn offset_hit_region(region: &HitRegion, dx: f32, dy: f32) -> HitRegion {
+    match *region {
+        HitRegion::Rect { x, y, w, h } => HitRegion::Rect {
+            x: x + dx,
+            y: y + dy,
+            w,
+            h,
+        },
+        HitRegion::Circle { cx, cy, r } => HitRegion::Circle {
+            cx: cx + dx,
+            cy: cy + dy,
+            r,
+        },
+        HitRegion::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            half_width,
+        } => HitRegion::Line {
+            x1: x1 + dx,
+            y1: y1 + dy,
+            x2: x2 + dx,
+            y2: y2 + dy,
+            half_width,
+        },
+    }
+}
+
 pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
     // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
     let layer_map = canvas_layer_map(props);
     let node_caches = caches.canvas_caches.entry(node.id.clone()).or_default();
 
-    // Parse interactive shapes from all layers.
+    // Parse interactive shapes from all layers, recursing into groups.
     let mut interactive_shapes = Vec::new();
     for (layer_name, shapes_val) in &layer_map {
         if let Some(shapes_arr) = shapes_val.as_array() {
-            for shape in shapes_arr {
-                if let Some(ishape) = parse_interactive_shape(shape, layer_name) {
-                    interactive_shapes.push(ishape);
-                }
-            }
+            collect_interactive_shapes(shapes_arr, layer_name, 0.0, 0.0, &mut interactive_shapes);
         }
     }
     caches
@@ -2266,5 +2693,138 @@ mod tests {
         assert_eq!(merged["fill"], "#00ff00");
         // Non-overridden fields preserved.
         assert_eq!(merged["stroke"]["color"], "#000");
+    }
+
+    // -- Group shape tests --
+
+    #[test]
+    fn compute_hit_region_group_with_rect_children() {
+        let shape = json!({
+            "type": "group",
+            "x": 50.0, "y": 100.0,
+            "interactive": {"id": "grp1", "on_click": true},
+            "children": [
+                {"type": "rect", "x": 0, "y": 0, "w": 100, "h": 40},
+                {"type": "rect", "x": 10, "y": 50, "w": 80, "h": 20}
+            ]
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        let region = compute_hit_region(&shape, interactive).unwrap();
+        // Bounding box of children: x=0..100, y=0..70, offset by group's x/y.
+        match region {
+            HitRegion::Rect { x, y, w, h } => {
+                assert!((x - 50.0).abs() < 0.01);
+                assert!((y - 100.0).abs() < 0.01);
+                assert!((w - 100.0).abs() < 0.01);
+                assert!((h - 70.0).abs() < 0.01);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compute_hit_region_group_with_mixed_children() {
+        let shape = json!({
+            "type": "group",
+            "x": 10.0, "y": 20.0,
+            "interactive": {"id": "grp2", "on_click": true},
+            "children": [
+                {"type": "rect", "x": 0, "y": 0, "w": 50, "h": 30},
+                {"type": "circle", "x": 80, "y": 15, "r": 10}
+            ]
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        let region = compute_hit_region(&shape, interactive).unwrap();
+        // Rect: 0..50, 0..30; Circle: 70..90, 5..25
+        // Union: 0..90, 0..30 (rect extends lower), offset by 10, 20
+        match region {
+            HitRegion::Rect { x, y, w, h } => {
+                assert!((x - 10.0).abs() < 0.01);
+                assert!((y - 20.0).abs() < 0.01);
+                assert!((w - 90.0).abs() < 0.01);
+                assert!((h - 30.0).abs() < 0.01);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compute_hit_region_group_no_children() {
+        let shape = json!({
+            "type": "group",
+            "x": 0.0, "y": 0.0,
+            "interactive": {"id": "empty", "on_click": true},
+            "children": []
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        // No computable bounds from empty children.
+        assert!(compute_hit_region(&shape, interactive).is_none());
+    }
+
+    #[test]
+    fn parse_interactive_group() {
+        let shape = json!({
+            "type": "group",
+            "x": 50, "y": 100,
+            "interactive": {
+                "id": "btn",
+                "on_click": true,
+                "on_hover": true,
+                "cursor": "pointer",
+                "a11y": {"role": "button", "label": "Save"}
+            },
+            "children": [
+                {"type": "rect", "x": 0, "y": 0, "w": 100, "h": 40, "fill": "#3498db"},
+                {"type": "text", "x": 30, "y": 25, "content": "Save", "fill": "#ccc"}
+            ]
+        });
+        let result = parse_interactive_shape(&shape, "default").unwrap();
+        assert_eq!(result.id, "btn");
+        assert!(result.on_click);
+        assert!(result.on_hover);
+        assert_eq!(result.cursor.as_deref(), Some("pointer"));
+        assert!(result.a11y.is_some());
+        match result.hit_region {
+            HitRegion::Rect { x, y, w, h } => {
+                // Group offset (50, 100) + bounding box of children.
+                // Rect child: (0,0,100,40). Text child: (30,9,68.4,25).
+                // Union: (0, 0, 100, 40). With offset: (50, 100, 100, 40).
+                assert!((x - 50.0).abs() < 0.01);
+                assert!((y - 100.0).abs() < 0.01);
+                assert!((w - 100.0).abs() < 0.01);
+                assert!((h - 40.0).abs() < 0.01);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_interactive_shapes_recurses_into_groups() {
+        let shapes = vec![
+            json!({
+                "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
+                "interactive": {"id": "top-rect", "on_click": true}
+            }),
+            json!({
+                "type": "group", "x": 0, "y": 0,
+                "interactive": {"id": "grp", "on_click": true},
+                "children": [
+                    {"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50},
+                    {
+                        "type": "group", "x": 10, "y": 10,
+                        "interactive": {"id": "nested-grp", "on_click": true},
+                        "children": [
+                            {"type": "circle", "x": 5, "y": 5, "r": 5}
+                        ]
+                    }
+                ]
+            }),
+        ];
+        let mut result = Vec::new();
+        collect_interactive_shapes(&shapes, "default", 0.0, 0.0, &mut result);
+        let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"top-rect"));
+        assert!(ids.contains(&"grp"));
+        assert!(ids.contains(&"nested-grp"));
     }
 }

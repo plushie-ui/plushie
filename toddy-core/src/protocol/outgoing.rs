@@ -658,6 +658,13 @@ impl OutgoingEvent {
         }
     }
 
+    pub fn canvas_shape_focused(canvas_id: String, shape_id: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"shape_id": shape_id})),
+            ..Self::bare("canvas_shape_focused", canvas_id)
+        }
+    }
+
     // -----------------------------------------------------------------------
     // MouseArea events
     // -----------------------------------------------------------------------

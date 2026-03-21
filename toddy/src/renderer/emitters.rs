@@ -384,6 +384,13 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             *x,
             *y,
         )),
+        Message::CanvasShapeFocused {
+            canvas_id,
+            shape_id,
+        } => Some(OutgoingEvent::canvas_shape_focused(
+            canvas_id.clone(),
+            shape_id.clone(),
+        )),
         _ => None,
     }
 }

@@ -186,6 +186,8 @@ pub enum Message {
         x: f32,
         y: f32,
     },
+    /// Canvas shape received keyboard focus.
+    CanvasShapeFocused { canvas_id: String, shape_id: String },
     /// PaneGrid pane was resized (grid_id, resize_event).
     PaneResized(String, iced::widget::pane_grid::ResizeEvent),
     /// PaneGrid pane was dragged (grid_id, drag_event).

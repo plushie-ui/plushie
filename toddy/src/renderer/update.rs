@@ -45,6 +45,7 @@ impl App {
             | Message::CanvasShapeClick { .. }
             | Message::CanvasShapeDrag { .. }
             | Message::CanvasShapeDragEnd { .. }
+            | Message::CanvasShapeFocused { .. }
             | Message::Slide(..)
             | Message::SlideRelease(..)
             | Message::TextEditorAction(..)
