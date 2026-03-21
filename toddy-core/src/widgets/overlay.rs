@@ -22,6 +22,21 @@ pub(crate) enum Position {
     Right,
 }
 
+/// Cross-axis alignment of the overlay content relative to the anchor.
+///
+/// For `Below`/`Above` positions, this controls horizontal alignment.
+/// For `Left`/`Right` positions, this controls vertical alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Align {
+    /// Align to the start edge (left for Below/Above, top for Left/Right).
+    Start,
+    /// Center on the cross-axis (default).
+    #[default]
+    Center,
+    /// Align to the end edge (right for Below/Above, bottom for Left/Right).
+    End,
+}
+
 /// A widget that renders its anchor child normally and displays its overlay
 /// child as an iced overlay positioned relative to the anchor.
 ///
@@ -44,9 +59,15 @@ pub(crate) struct OverlayWrapper<'a> {
     gap: f32,
     offset_x: f32,
     offset_y: f32,
+    /// When true, auto-flip the position (Below<->Above, Left<->Right)
+    /// when the content would overflow the viewport in the primary axis.
+    flip: bool,
+    /// Cross-axis alignment of the content relative to the anchor.
+    align: Align,
 }
 
 impl<'a> OverlayWrapper<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         anchor: Element<'a, Message>,
         content: Element<'a, Message>,
@@ -54,6 +75,8 @@ impl<'a> OverlayWrapper<'a> {
         gap: f32,
         offset_x: f32,
         offset_y: f32,
+        flip: bool,
+        align: Align,
     ) -> Self {
         Self {
             anchor,
@@ -62,6 +85,8 @@ impl<'a> OverlayWrapper<'a> {
             gap,
             offset_x,
             offset_y,
+            flip,
+            align,
         }
     }
 }
@@ -188,6 +213,8 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
             gap: self.gap,
             offset_x: self.offset_x,
             offset_y: self.offset_y,
+            flip: self.flip,
+            align: self.align,
             anchor_bounds: layout.bounds(),
             translation,
         }));
@@ -247,6 +274,8 @@ struct OverlayContent<'a, 'b> {
     gap: f32,
     offset_x: f32,
     offset_y: f32,
+    flip: bool,
+    align: Align,
     anchor_bounds: Rectangle,
     translation: Vector,
 }
@@ -276,25 +305,86 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
             height: self.anchor_bounds.height,
         };
 
-        let (x, y) = match self.position {
-            Position::Below => (
-                anchor.x + (anchor.width - content_size.width) / 2.0,
-                anchor.y + anchor.height + self.gap,
-            ),
-            Position::Above => (
-                anchor.x + (anchor.width - content_size.width) / 2.0,
-                anchor.y - content_size.height - self.gap,
-            ),
-            Position::Left => (
-                anchor.x - content_size.width - self.gap,
-                anchor.y + (anchor.height - content_size.height) / 2.0,
-            ),
-            Position::Right => (
-                anchor.x + anchor.width + self.gap,
-                anchor.y + (anchor.height - content_size.height) / 2.0,
-            ),
+        // Determine effective position (may flip if content overflows).
+        let position = if self.flip {
+            match self.position {
+                Position::Below => {
+                    let below_y = anchor.y + anchor.height + self.gap;
+                    if below_y + content_size.height > bounds.height {
+                        let above_y = anchor.y - content_size.height - self.gap;
+                        if above_y >= 0.0 {
+                            Position::Above
+                        } else {
+                            Position::Below // neither fits, keep original
+                        }
+                    } else {
+                        Position::Below
+                    }
+                }
+                Position::Above => {
+                    let above_y = anchor.y - content_size.height - self.gap;
+                    if above_y < 0.0 {
+                        let below_y = anchor.y + anchor.height + self.gap;
+                        if below_y + content_size.height <= bounds.height {
+                            Position::Below
+                        } else {
+                            Position::Above
+                        }
+                    } else {
+                        Position::Above
+                    }
+                }
+                Position::Left => {
+                    let left_x = anchor.x - content_size.width - self.gap;
+                    if left_x < 0.0 {
+                        let right_x = anchor.x + anchor.width + self.gap;
+                        if right_x + content_size.width <= bounds.width {
+                            Position::Right
+                        } else {
+                            Position::Left
+                        }
+                    } else {
+                        Position::Left
+                    }
+                }
+                Position::Right => {
+                    let right_x = anchor.x + anchor.width + self.gap;
+                    if right_x + content_size.width > bounds.width {
+                        let left_x = anchor.x - content_size.width - self.gap;
+                        if left_x >= 0.0 {
+                            Position::Left
+                        } else {
+                            Position::Right
+                        }
+                    } else {
+                        Position::Right
+                    }
+                }
+            }
+        } else {
+            self.position
         };
 
+        // Cross-axis alignment.
+        let cross_h = match self.align {
+            Align::Start => anchor.x,
+            Align::Center => anchor.x + (anchor.width - content_size.width) / 2.0,
+            Align::End => anchor.x + anchor.width - content_size.width,
+        };
+        let cross_v = match self.align {
+            Align::Start => anchor.y,
+            Align::Center => anchor.y + (anchor.height - content_size.height) / 2.0,
+            Align::End => anchor.y + anchor.height - content_size.height,
+        };
+
+        let (x, y) = match position {
+            Position::Below => (cross_h, anchor.y + anchor.height + self.gap),
+            Position::Above => (cross_h, anchor.y - content_size.height - self.gap),
+            Position::Left => (anchor.x - content_size.width - self.gap, cross_v),
+            Position::Right => (anchor.x + anchor.width + self.gap, cross_v),
+        };
+
+        // Viewport clamping (last resort after flip + align + offsets).
         let final_x = (x + self.offset_x).clamp(0.0, (bounds.width - content_size.width).max(0.0));
         let final_y =
             (y + self.offset_y).clamp(0.0, (bounds.height - content_size.height).max(0.0));

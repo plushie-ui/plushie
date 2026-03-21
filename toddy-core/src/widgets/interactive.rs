@@ -385,6 +385,12 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
     let gap = prop_f32(props, "gap").unwrap_or(0.0);
     let offset_x = prop_f32(props, "offset_x").unwrap_or(0.0);
     let offset_y = prop_f32(props, "offset_y").unwrap_or(0.0);
+    let flip = prop_bool_default(props, "flip", false);
+    let align = match prop_str(props, "align").as_deref() {
+        Some("start") => overlay::Align::Start,
+        Some("end") => overlay::Align::End,
+        _ => overlay::Align::Center,
+    };
 
     let children = &node.children;
     if children.len() < 2 {
@@ -401,7 +407,7 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
         _ => overlay::Position::Below,
     };
 
-    overlay::OverlayWrapper::new(anchor, content, pos, gap, offset_x, offset_y).into()
+    overlay::OverlayWrapper::new(anchor, content, pos, gap, offset_x, offset_y, flip, align).into()
 }
 
 // ---------------------------------------------------------------------------
