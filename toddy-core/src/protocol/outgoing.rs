@@ -7,6 +7,38 @@
 use serde::Serialize;
 use serde_json::Value;
 
+/// Hint for the renderer's event coalescing system.
+///
+/// Set by event constructors or extension authors via
+/// [`OutgoingEvent::with_coalesce`]. The renderer uses this to decide
+/// whether and how to buffer events during rate-limited delivery. Not
+/// serialized to the wire -- renderer-internal metadata.
+///
+/// # For extension authors
+///
+/// Set on events returned from `handle_event()`:
+///
+/// ```ignore
+/// let event = OutgoingEvent::extension_event("cursor_pos", node_id, data)
+///     .with_coalesce(CoalesceHint::Replace);
+/// ```
+///
+/// Events without a hint are always delivered immediately (never
+/// rate-limited), regardless of `event_rate` or `default_event_rate`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoalesceHint {
+    /// Keep the latest event, discard intermediates.
+    /// Use for: position reports, state snapshots, progress values --
+    /// anything where only the most recent value matters.
+    Replace,
+    /// Sum the named `data` fields across coalesced events.
+    /// Other fields keep the latest event's values.
+    /// Use for: scroll deltas, velocity changes, counters -- anything
+    /// where intermediate values carry magnitude that would be lost
+    /// if only the latest were kept.
+    Accumulate(Vec<String>),
+}
+
 /// An event written to stdout by the renderer.
 ///
 /// All events share a flat struct with optional fields. There are two
@@ -49,6 +81,10 @@ pub struct OutgoingEvent {
     /// touch, and IME events; absent on widget-level events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub captured: Option<bool>,
+    /// Coalescing hint for rate-limited delivery.
+    /// Not serialized to the wire -- renderer-internal metadata.
+    #[serde(skip)]
+    pub coalesce: Option<CoalesceHint>,
 }
 
 impl OutgoingEvent {
@@ -61,6 +97,14 @@ impl OutgoingEvent {
     /// Set the session ID for this event.
     pub fn with_session(mut self, session: impl Into<String>) -> Self {
         self.session = session.into();
+        self
+    }
+
+    /// Declare that this event can be coalesced during rate-limited
+    /// delivery. Without this hint, the event is always delivered
+    /// immediately regardless of rate settings.
+    pub fn with_coalesce(mut self, hint: CoalesceHint) -> Self {
+        self.coalesce = Some(hint);
         self
     }
 
@@ -116,6 +160,7 @@ impl OutgoingEvent {
             modifiers: None,
             data: None,
             captured: None,
+            coalesce: None,
         }
     }
 
@@ -131,6 +176,7 @@ impl OutgoingEvent {
             modifiers: None,
             data: None,
             captured: None,
+            coalesce: None,
         }
     }
 
@@ -183,6 +229,7 @@ impl OutgoingEvent {
     pub fn slide(id: String, value: f64) -> Self {
         Self {
             value: Some(serde_json::json!(sanitize_f64(value))),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("slide", id)
         }
     }
@@ -236,6 +283,7 @@ impl OutgoingEvent {
     pub fn modifiers_changed(tag: String, modifiers: KeyModifiers) -> Self {
         Self {
             modifiers: Some(modifiers),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::tagged("modifiers_changed", tag)
         }
     }
@@ -247,6 +295,7 @@ impl OutgoingEvent {
     pub fn cursor_moved(tag: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::tagged("cursor_moved", tag)
         }
     }
@@ -280,6 +329,10 @@ impl OutgoingEvent {
                 "delta_y": sanitize_f32(delta_y),
                 "unit": unit,
             })),
+            coalesce: Some(CoalesceHint::Accumulate(vec![
+                "delta_x".into(),
+                "delta_y".into(),
+            ])),
             ..Self::tagged("wheel_scrolled", tag)
         }
     }
@@ -304,7 +357,10 @@ impl OutgoingEvent {
     }
 
     pub fn finger_moved(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
-        Self::touch_event("finger_moved", tag, finger_id, x, y)
+        Self {
+            coalesce: Some(CoalesceHint::Replace),
+            ..Self::touch_event("finger_moved", tag, finger_id, x, y)
+        }
     }
 
     pub fn finger_lifted(tag: String, finger_id: u64, x: f32, y: f32) -> Self {
@@ -457,6 +513,7 @@ impl OutgoingEvent {
     pub fn animation_frame(tag: String, timestamp_millis: u128) -> Self {
         Self {
             data: Some(serde_json::json!({"timestamp": timestamp_millis})),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::tagged("animation_frame", tag)
         }
     }
@@ -464,6 +521,7 @@ impl OutgoingEvent {
     pub fn theme_changed(tag: String, mode: String) -> Self {
         Self {
             value: Some(Value::String(mode)),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::tagged("theme_changed", tag)
         }
     }
@@ -477,6 +535,7 @@ impl OutgoingEvent {
             data: Some(
                 serde_json::json!({"width": sanitize_f32(width), "height": sanitize_f32(height)}),
             ),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("sensor_resize", id)
         }
     }
@@ -506,6 +565,7 @@ impl OutgoingEvent {
     pub fn canvas_move(id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("canvas_move", id)
         }
     }
@@ -518,6 +578,10 @@ impl OutgoingEvent {
                 "delta_x": sanitize_f32(delta_x),
                 "delta_y": sanitize_f32(delta_y),
             })),
+            coalesce: Some(CoalesceHint::Accumulate(vec![
+                "delta_x".into(),
+                "delta_y".into(),
+            ])),
             ..Self::bare("canvas_scroll", id)
         }
     }
@@ -557,6 +621,7 @@ impl OutgoingEvent {
     pub fn mouse_area_move(id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)})),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("mouse_move", id)
         }
     }
@@ -566,6 +631,10 @@ impl OutgoingEvent {
             data: Some(
                 serde_json::json!({"delta_x": sanitize_f32(delta_x), "delta_y": sanitize_f32(delta_y)}),
             ),
+            coalesce: Some(CoalesceHint::Accumulate(vec![
+                "delta_x".into(),
+                "delta_y".into(),
+            ])),
             ..Self::bare("mouse_scroll", id)
         }
     }
@@ -577,6 +646,7 @@ impl OutgoingEvent {
     pub fn pane_resized(id: String, split: String, ratio: f32) -> Self {
         Self {
             data: Some(serde_json::json!({"split": split, "ratio": sanitize_f32(ratio)})),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("pane_resized", id)
         }
     }
@@ -714,6 +784,7 @@ impl OutgoingEvent {
                 "bounds_width": sanitize_f32(bounds_w), "bounds_height": sanitize_f32(bounds_h),
                 "content_width": sanitize_f32(content_w), "content_height": sanitize_f32(content_h),
             })),
+            coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("scroll", id)
         }
     }

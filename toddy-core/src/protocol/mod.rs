@@ -19,8 +19,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use incoming::{ExtensionCommandItem, IncomingMessage};
 pub use outgoing::{
-    EffectResponse, InteractResponse, KeyModifiers, OutgoingEvent, QueryResponse, ResetResponse,
-    TreeHashResponse,
+    CoalesceHint, EffectResponse, InteractResponse, KeyModifiers, OutgoingEvent, QueryResponse,
+    ResetResponse, TreeHashResponse,
 };
 pub use types::{PatchOp, TreeNode};
 

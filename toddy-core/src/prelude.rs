@@ -19,7 +19,7 @@ pub use crate::extensions::{
 
 // -- Wire protocol types --
 pub use crate::message::Message;
-pub use crate::protocol::{OutgoingEvent, TreeNode};
+pub use crate::protocol::{CoalesceHint, OutgoingEvent, TreeNode};
 
 // -- Prop extraction helpers --
 pub use crate::prop_helpers::*;
