@@ -4687,6 +4687,7 @@ name = "toddy-web"
 version = "0.3.1"
 dependencies = [
  "console_log",
+ "futures",
  "js-sys",
  "log",
  "serde",

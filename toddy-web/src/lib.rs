@@ -4,27 +4,42 @@
 //! Uses `iced::daemon` with a canvas-based backend and communicates
 //! with the host via JavaScript callbacks.
 //!
-//! # Entry point
+//! # Usage from JavaScript
 //!
-//! [`run_app(settings_json, on_event)`](run_app) is the single entry
-//! point. It parses the settings JSON, validates the protocol version,
-//! emits the hello handshake, and starts the iced daemon.
+//! ```js
+//! import init, { ToddyApp } from './toddy_web.js';
+//!
+//! await init();
+//! const app = new ToddyApp(settingsJson, (event) => {
+//!     console.log('event:', event);
+//! });
+//! app.send_message(snapshotJson);
+//! ```
+//!
+//! # Usage from Rust (custom WASM builds with extensions)
+//!
+//! ```ignore
+//! let mut builder = toddy_core::app::ToddyAppBuilder::new();
+//! builder.register(Box::new(MyWidget));
+//! let app = ToddyApp::with_extensions(settings, on_event, builder)?;
+//! app.send_message(snapshot_json)?;
+//! ```
 //!
 //! # Limitations
 //!
 //! - Platform effects (file dialogs, clipboard, notifications) are
-//!   stubbed as unsupported.
-//! - Message ingestion (sending Snapshots/Patches after startup) is
-//!   not yet implemented. The initial settings are applied at startup;
-//!   runtime tree updates require an async channel that hasn't been
-//!   wired yet.
+//!   stubbed as unsupported. Web API implementations can be added in
+//!   a future iteration.
 
 mod effects;
 mod output;
 
+use std::sync::Mutex;
+
 use wasm_bindgen::prelude::*;
 
 use toddy_core::codec::Codec;
+use toddy_core::message::{Message, StdinEvent};
 use toddy_core::protocol::IncomingMessage;
 
 use toddy_renderer::App;
@@ -33,118 +48,223 @@ use toddy_renderer::emitters::{emit_hello, init_output};
 use effects::WebEffectHandler;
 use output::WebOutputWriter;
 
-/// Run the iced daemon with the given settings JSON and event callback.
+/// Global message receiver slot. Initialized by the [`ToddyApp`]
+/// constructor, consumed once by the message subscription.
+static MSG_RX: Mutex<Option<futures::channel::mpsc::UnboundedReceiver<String>>> = Mutex::new(None);
+
+/// WASM toddy renderer handle.
 ///
-/// This is the single entry point for the WASM renderer. It validates
-/// the protocol version, emits the hello handshake, and starts the
-/// full iced rendering loop. The returned Future is driven by the
-/// browser's requestAnimationFrame loop.
+/// Created via the constructor, which initializes the renderer and
+/// starts the iced daemon in the background. The host sends messages
+/// (Snapshots, Patches, etc.) via [`send_message`](ToddyApp::send_message)
+/// and receives events via the `on_event` callback.
 #[wasm_bindgen]
-pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<(), JsValue> {
-    console_log::init_with_level(log::Level::Warn).ok();
+pub struct ToddyApp {
+    sender: futures::channel::mpsc::UnboundedSender<String>,
+}
 
-    let writer = WebOutputWriter::new(on_event);
-    init_output(Box::new(writer));
-    Codec::set_global(Codec::Json);
-
-    let settings: serde_json::Value = serde_json::from_str(settings_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid settings JSON: {e}")))?;
-
-    // Validate protocol version
-    let expected = u64::from(toddy_core::protocol::PROTOCOL_VERSION);
-    if let Some(version) = settings.get("protocol_version").and_then(|v| v.as_u64())
-        && version != expected
-    {
-        return Err(JsValue::from_str(&format!(
-            "protocol version mismatch: expected {expected}, got {version}"
-        )));
+#[wasm_bindgen]
+impl ToddyApp {
+    /// Create a new toddy renderer with no extensions.
+    ///
+    /// Parses settings, validates the protocol version, initializes the
+    /// output writer, and starts the iced daemon in the background.
+    /// Returns a handle for sending messages.
+    ///
+    /// `on_event` is a JavaScript callback that receives serialized
+    /// event strings whenever the renderer emits an outgoing event.
+    #[wasm_bindgen(constructor)]
+    pub fn new(settings_json: &str, on_event: js_sys::Function) -> Result<ToddyApp, JsValue> {
+        Self::with_extensions(
+            settings_json,
+            on_event,
+            toddy_core::app::ToddyAppBuilder::new(),
+        )
     }
 
-    // Apply validate_props before any rendering
-    toddy_renderer::settings::apply_validate_props(&settings);
+    /// Send a JSON-encoded protocol message to the renderer.
+    ///
+    /// The message is parsed as an [`IncomingMessage`] and processed
+    /// by the iced daemon on the next event loop tick. This is the
+    /// WASM equivalent of writing to stdin on native.
+    ///
+    /// Accepts any valid protocol message: Snapshot, Patch, Settings,
+    /// Subscribe, Unsubscribe, WidgetOp, WindowOp, Effect,
+    /// ExtensionCommand, etc.
+    pub fn send_message(&self, json: &str) -> Result<(), JsValue> {
+        self.sender
+            .unbounded_send(json.to_string())
+            .map_err(|e| JsValue::from_str(&format!("send failed: {e}")))
+    }
+}
 
-    // Parse iced-level settings (antialiasing, default font/size, etc.)
-    let iced_settings = toddy_renderer::settings::parse_iced_settings(&settings);
+impl ToddyApp {
+    /// Create a renderer with pre-registered extensions.
+    ///
+    /// Rust callers building custom WASM modules use this to register
+    /// extensions at compile time. Extensions are Rust code compiled
+    /// into the WASM binary -- they cannot be added at runtime from JS.
+    ///
+    /// ```ignore
+    /// let mut builder = ToddyAppBuilder::new();
+    /// builder.register(Box::new(MyWidget));
+    /// let app = ToddyApp::with_extensions(settings, on_event, builder)?;
+    /// ```
+    pub fn with_extensions(
+        settings_json: &str,
+        on_event: js_sys::Function,
+        builder: toddy_core::app::ToddyAppBuilder,
+    ) -> Result<ToddyApp, JsValue> {
+        console_log::init_with_level(log::Level::Warn).ok();
 
-    // Parse inline font data (base64 or binary). File paths are not
-    // supported on WASM -- use the load_font widget op for runtime loading.
-    let font_bytes = toddy_renderer::settings::parse_inline_fonts(&settings);
+        let writer = WebOutputWriter::new(on_event);
+        init_output(Box::new(writer));
+        Codec::set_global(Codec::Json);
 
-    emit_hello("web", "wgpu", &[], "wasm")
-        .map_err(|e| JsValue::from_str(&format!("failed to emit hello: {e}")))?;
+        let settings: serde_json::Value = serde_json::from_str(settings_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid settings JSON: {e}")))?;
 
-    type InitData = (
-        serde_json::Value,
-        toddy_core::app::ToddyAppBuilder,
-        Vec<Vec<u8>>,
-    );
-    let app_slot: std::sync::Mutex<Option<InitData>> = std::sync::Mutex::new(Some((
-        settings,
-        toddy_core::app::ToddyAppBuilder::new(),
-        font_bytes,
-    )));
+        // Validate protocol version.
+        let expected = u64::from(toddy_core::protocol::PROTOCOL_VERSION);
+        if let Some(version) = settings.get("protocol_version").and_then(|v| v.as_u64())
+            && version != expected
+        {
+            return Err(JsValue::from_str(&format!(
+                "protocol version mismatch: expected {expected}, got {version}"
+            )));
+        }
 
-    iced::daemon(
-        move || {
-            let (settings, builder, fonts) = app_slot
-                .lock()
-                .expect("app_slot lock poisoned")
-                .take()
-                .expect("daemon init closure called more than once");
+        toddy_renderer::settings::apply_validate_props(&settings);
+        let iced_settings = toddy_renderer::settings::parse_iced_settings(&settings);
+        let font_bytes = toddy_renderer::settings::parse_inline_fonts(&settings);
 
-            let dispatcher = builder.build_dispatcher();
-            let effect_handler = Box::new(WebEffectHandler);
-            let mut app = App::new(dispatcher, effect_handler);
+        // Include extension keys in the hello message.
+        let ext_keys: Vec<String> = builder
+            .extension_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
 
-            app.scale_factor = toddy_renderer::validate_scale_factor(
-                settings
-                    .get("scale_factor")
-                    .and_then(|v| v.as_f64())
-                    .map(toddy_core::prop_helpers::f64_to_f32)
-                    .unwrap_or(1.0),
-            );
+        emit_hello("web", "wgpu", &ext_key_refs, "wasm")
+            .map_err(|e| JsValue::from_str(&format!("failed to emit hello: {e}")))?;
 
-            let effects = app.core.apply(IncomingMessage::Settings { settings });
-            for effect in effects {
-                if let toddy_core::engine::CoreEffect::ExtensionConfig(config) = effect {
-                    app.dispatcher.init_all(
-                        &config,
-                        &app.theme,
-                        app.core.default_text_size,
-                        app.core.default_font,
+        // Create the message channel for JS -> renderer communication.
+        let (sender, receiver) = futures::channel::mpsc::unbounded::<String>();
+        *MSG_RX.lock().expect("MSG_RX lock") = Some(receiver);
+
+        // Pack init data into a Mutex so the Fn closure can move it out once.
+        type InitData = (
+            serde_json::Value,
+            toddy_core::app::ToddyAppBuilder,
+            Vec<Vec<u8>>,
+        );
+        let app_slot: Mutex<Option<InitData>> = Mutex::new(Some((settings, builder, font_bytes)));
+
+        // Spawn the iced daemon in the background. On WASM, spawn_local
+        // schedules the future on the browser's microtask queue, driven
+        // by requestAnimationFrame.
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = iced::daemon(
+                move || {
+                    let (settings, builder, fonts) = app_slot
+                        .lock()
+                        .expect("app_slot lock poisoned")
+                        .take()
+                        .expect("daemon init closure called more than once");
+
+                    let dispatcher = builder.build_dispatcher();
+                    let effect_handler = Box::new(WebEffectHandler);
+                    let mut app = App::new(dispatcher, effect_handler);
+
+                    app.scale_factor = toddy_renderer::validate_scale_factor(
+                        settings
+                            .get("scale_factor")
+                            .and_then(|v| v.as_f64())
+                            .map(toddy_core::prop_helpers::f64_to_f32)
+                            .unwrap_or(1.0),
                     );
-                }
-            }
 
-            // Build font load tasks
-            let font_tasks: Vec<iced::Task<toddy_core::message::Message>> = fonts
-                .into_iter()
-                .map(|bytes| {
-                    iced::font::load(bytes).map(|result| {
-                        if let Err(e) = result {
-                            log::error!("font load error: {e:?}");
+                    let effects = app.core.apply(IncomingMessage::Settings { settings });
+                    for effect in effects {
+                        if let toddy_core::engine::CoreEffect::ExtensionConfig(config) = effect {
+                            app.dispatcher.init_all(
+                                &config,
+                                &app.theme,
+                                app.core.default_text_size,
+                                app.core.default_font,
+                            );
                         }
-                        toddy_core::message::Message::NoOp
-                    })
-                })
-                .collect();
+                    }
 
-            let task = if font_tasks.is_empty() {
-                iced::Task::none()
-            } else {
-                iced::Task::batch(font_tasks)
+                    let font_tasks: Vec<iced::Task<Message>> = fonts
+                        .into_iter()
+                        .map(|bytes| {
+                            iced::font::load(bytes).map(|result| {
+                                if let Err(e) = result {
+                                    log::error!("font load error: {e:?}");
+                                }
+                                Message::NoOp
+                            })
+                        })
+                        .collect();
+
+                    let task = if font_tasks.is_empty() {
+                        iced::Task::none()
+                    } else {
+                        iced::Task::batch(font_tasks)
+                    };
+
+                    (app, task)
+                },
+                App::update,
+                App::view_window,
+            )
+            .title(App::title_for_window)
+            .subscription(|app: &App| {
+                iced::Subscription::batch([
+                    app.renderer_subscriptions(),
+                    iced::Subscription::run(message_subscription).map(Message::Stdin),
+                ])
+            })
+            .theme(App::theme_for_window)
+            .scale_factor(App::scale_factor_for_window)
+            .settings(iced_settings)
+            .run();
+
+            if let Err(e) = result {
+                log::error!("iced daemon error: {e}");
+            }
+        });
+
+        Ok(ToddyApp { sender })
+    }
+}
+
+/// Subscription that reads JSON messages from the JS channel and feeds
+/// them to the iced event loop as [`StdinEvent`]s. Mirrors the native
+/// stdin subscription pattern.
+fn message_subscription() -> impl iced::futures::Stream<Item = StdinEvent> {
+    iced::stream::channel(32, async |mut sender| {
+        use iced::futures::{SinkExt, StreamExt};
+
+        let mut rx = MSG_RX
+            .lock()
+            .expect("MSG_RX lock poisoned")
+            .take()
+            .expect("message_subscription: no receiver (called more than once?)");
+
+        while let Some(json) = rx.next().await {
+            let event = match serde_json::from_str::<IncomingMessage>(&json) {
+                Ok(msg) => StdinEvent::Message(msg),
+                Err(e) => StdinEvent::Warning(format!("parse error: {e}")),
             };
+            if sender.send(event).await.is_err() {
+                break;
+            }
+        }
 
-            (app, task)
-        },
-        App::update,
-        App::view_window,
-    )
-    .title(App::title_for_window)
-    .subscription(App::renderer_subscriptions)
-    .theme(App::theme_for_window)
-    .scale_factor(App::scale_factor_for_window)
-    .settings(iced_settings)
-    .run()
-    .map_err(|e| JsValue::from_str(&format!("iced error: {e}")))
+        // Channel closed (ToddyApp dropped) -- signal the daemon.
+        let _ = sender.send(StdinEvent::Closed).await;
+    })
 }
