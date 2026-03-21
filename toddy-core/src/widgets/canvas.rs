@@ -2088,8 +2088,6 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // Cache ensure function
 // ---------------------------------------------------------------------------
 
-/// Recursively collect interactive shapes from a shapes array, descending
-/// into groups to find nested interactive shapes.
 /// Recursively collect interactive shapes from a shape array, descending
 /// into groups. `offset_x`/`offset_y` accumulate group x/y translations
 /// so nested shapes' hit regions are in canvas-space coordinates.
