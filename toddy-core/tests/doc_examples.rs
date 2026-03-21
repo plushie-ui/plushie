@@ -12,8 +12,8 @@ use serde_json::json;
 use toddy_core::prelude::*;
 use toddy_core::testing::*;
 
-// The column! and row! macros need explicit imports to avoid
-// ambiguity between the prelude glob and iced's re-exports.
+// column and row are excluded from the prelude because the function
+// forms conflict with the column!/row! macros under glob import.
 use toddy_core::iced::widget::{column, row};
 
 // ============================================================================
@@ -44,6 +44,7 @@ impl WidgetExtension for DocGauge {
     }
 }
 
+// Validates: extension-guide.md "The trait" section
 #[test]
 fn extension_guide_gauge_renders() {
     let ext = DocGauge;
@@ -54,6 +55,7 @@ fn extension_guide_gauge_renders() {
     let _element = ext.render(&node, &env);
 }
 
+// Validates: extension-guide.md "The trait" section
 #[test]
 fn extension_guide_gauge_no_props() {
     let ext = DocGauge;
@@ -68,6 +70,7 @@ fn extension_guide_gauge_no_props() {
 // Extension guide: prop parsing patterns
 // ============================================================================
 
+// Validates: extension-guide.md "Parsing props" section
 #[test]
 fn extension_guide_prop_parsing() {
     let props_val = json!({
@@ -97,6 +100,7 @@ fn extension_guide_prop_parsing() {
 // Extension guide: rendering with theme
 // ============================================================================
 
+// Validates: extension-guide.md "Using the theme" section
 #[test]
 fn extension_guide_theme_access() {
     let test = TestEnv::default();
@@ -134,6 +138,7 @@ impl WidgetExtension for DocContainer {
     }
 }
 
+// Validates: extension-guide.md "Rendering children" section
 #[test]
 fn extension_guide_container_renders() {
     let ext = DocContainer;
@@ -188,6 +193,7 @@ impl WidgetExtension for DocSparkline {
     }
 }
 
+// Validates: extension-guide.md "Tier B: stateful with ExtensionCaches" section
 #[test]
 fn extension_guide_state_management() {
     let mut ext = DocSparkline;
@@ -211,6 +217,7 @@ struct ChartState {
     generation: GenerationCounter,
 }
 
+// Validates: extension-guide.md "Canvas cache invalidation" section
 #[test]
 fn extension_guide_generation_counter() {
     let mut caches = ExtensionCaches::new();
@@ -228,6 +235,7 @@ fn extension_guide_generation_counter() {
 // Extension guide: EventResult patterns
 // ============================================================================
 
+// Validates: extension-guide.md "Tier B: handling events" section
 #[test]
 fn extension_guide_event_result() {
     // Consumed: suppress original, emit replacement
@@ -258,6 +266,7 @@ fn extension_guide_event_result() {
 // Extension guide: CoalesceHint
 // ============================================================================
 
+// Validates: extension-guide.md "CoalesceHint for continuous events" section
 #[test]
 fn extension_guide_coalesce_hint() {
     let event =
@@ -308,6 +317,7 @@ impl WidgetExtension for DocCommandWidget {
     }
 }
 
+// Validates: extension-guide.md "Tier C: receiving commands from the host" section
 #[test]
 fn extension_guide_handle_command() {
     let mut ext = DocCommandWidget;
@@ -321,7 +331,9 @@ fn extension_guide_handle_command() {
 // Extension guide: cleanup pattern
 // ============================================================================
 
-struct DocCleanupWidget;
+struct DocCleanupWidget {
+    closed_connections: Vec<String>,
+}
 
 impl WidgetExtension for DocCleanupWidget {
     fn type_names(&self) -> &[&str] {
@@ -335,19 +347,22 @@ impl WidgetExtension for DocCleanupWidget {
         text("cleanup widget").into()
     }
 
-    fn cleanup(&mut self, node_id: &str, caches: &mut ExtensionCaches) {
-        caches.remove(self.config_key(), node_id);
+    fn cleanup(&mut self, node_id: &str, _caches: &mut ExtensionCaches) {
+        // Cache entry is auto-removed after this method returns.
+        // Only implement this for external resource cleanup.
+        self.closed_connections.push(node_id.to_string());
     }
 }
 
+// Validates: extension-guide.md "Cleanup" section
 #[test]
-fn extension_guide_cleanup_removes_cache() {
-    let mut ext = DocCleanupWidget;
+fn extension_guide_cleanup_external_resources() {
+    let mut ext = DocCleanupWidget {
+        closed_connections: vec![],
+    };
     let mut caches = ExtensionCaches::new();
-    caches.insert("doc_cleanup", "w1", 42u32);
-    assert!(caches.contains("doc_cleanup", "w1"));
     ext.cleanup("w1", &mut caches);
-    assert!(!caches.contains("doc_cleanup", "w1"));
+    assert_eq!(ext.closed_connections, vec!["w1"]);
 }
 
 // ============================================================================
@@ -386,13 +401,8 @@ impl WidgetExtension for DocRating {
 
             let star_text = text(label).size(size).color(star_color);
 
-            let star_id = id.clone();
             let star_button = button(star_text)
-                .on_press(Message::Event {
-                    id: star_id,
-                    family: "select".to_string(),
-                    data: json!({"value": i}),
-                })
+                .on_press(Message::widget_event(&id, "select", json!({"value": i})))
                 .padding(0)
                 .style(button::text);
 
@@ -407,6 +417,7 @@ impl WidgetExtension for DocRating {
     }
 }
 
+// Validates: extension-guide.md "Complete example: a rating widget" section
 #[test]
 fn extension_guide_rating_renders() {
     let ext = DocRating;
@@ -421,6 +432,7 @@ fn extension_guide_rating_renders() {
     let _element = ext.render(&node, &env);
 }
 
+// Validates: extension-guide.md "Complete example: a rating widget" section
 #[test]
 fn extension_guide_rating_no_props() {
     let ext = DocRating;
@@ -435,6 +447,7 @@ fn extension_guide_rating_no_props() {
 // Extension guide: new_instance
 // ============================================================================
 
+// Validates: extension-guide.md "Multi-session support" section
 #[test]
 fn extension_guide_new_instance() {
     let ext = DocRating;

@@ -25,9 +25,15 @@ pub use crate::protocol::{CoalesceHint, OutgoingEvent, TreeNode};
 pub use crate::prop_helpers::*;
 
 // -- Commonly needed iced types --
+//
+// Note: `column` and `row` are deliberately excluded. They conflict
+// with the `column!` and `row!` macros when glob-imported. Extension
+// authors should use the macros directly (available via
+// `toddy_core::iced`) or import explicitly:
+//   use toddy_core::iced::widget::{column, row};
 pub use crate::iced::widget::{
-    button, canvas, checkbox, column, container, image, pick_list, progress_bar, row, rule,
-    scrollable, slider, space, stack, text, toggler, tooltip,
+    button, canvas, checkbox, container, image, pick_list, progress_bar, rule, scrollable, slider,
+    space, stack, text, toggler, tooltip,
 };
 pub use crate::iced::{
     Color, Element, Font, Length, Padding, Pixels, Point, Size, Theme, alignment,

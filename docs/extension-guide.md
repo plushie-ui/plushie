@@ -28,12 +28,19 @@ setup.
 a fork (`toddy-iced`), and version mismatches will fail to compile.
 Use `toddy_core::iced::*` for any iced types not in the prelude.
 
-**Note:** The `column!` and `row!` macros may need explicit imports
-to resolve ambiguity with the prelude glob:
+**Note:** `column` and `row` are excluded from the prelude because
+the function forms conflict with the `column!`/`row!` macros under
+glob import. Import them explicitly:
 
 ```rust
 use toddy_core::iced::widget::{column, row};
 ```
+
+**Note:** `WidgetExtension` requires `Send + Sync + 'static`. Your
+extension struct cannot hold `Rc`, `Cell`, or other non-thread-safe
+types. Use `Arc` and `Mutex` if you need shared mutable state in
+the struct itself, or use `ExtensionCaches` (which also requires
+`Send + Sync` values).
 
 ## The trait
 
@@ -45,6 +52,7 @@ use toddy_core::prelude::*;
 
 Implement `WidgetExtension` with three required methods:
 
+<!-- test: extension_guide_gauge_renders — keep this code block in sync with the test -->
 ```rust
 pub struct Gauge;
 
@@ -149,6 +157,7 @@ what types they are.
 Use the prop helpers from the prelude. They handle missing keys,
 wrong types, and edge cases (NaN, overflow) gracefully:
 
+<!-- test: extension_guide_prop_parsing — keep this code block in sync with the test -->
 ```rust
 fn render<'a>(&self, node: &'a TreeNode, env: &WidgetEnv<'a>) -> Element<'a, Message> {
     let props = node.props();
@@ -284,6 +293,7 @@ Hard-coded colors look out of place when the user switches themes.
 
 Extensions can render child nodes from the host's tree:
 
+<!-- test: extension_guide_container_renders — keep this code block in sync with the test -->
 ```rust
 fn render<'a>(&self, node: &'a TreeNode, env: &WidgetEnv<'a>) -> Element<'a, Message> {
     let header = text(node.prop_str("title").unwrap_or_default());
@@ -344,6 +354,7 @@ computed layouts, iced widget state), use `ExtensionCaches`.
 
 Write in `prepare()`, read in `render()`:
 
+<!-- test: extension_guide_state_management — keep this code block in sync with the test -->
 ```rust
 fn prepare(&mut self, node: &TreeNode, caches: &mut ExtensionCaches, _theme: &Theme) {
     let data: Vec<f32> = prop_f32_array(node.props(), "data").unwrap_or_default();
@@ -384,6 +395,7 @@ cache needs explicit invalidation when data changes.
 `canvas::Cache` is `!Send + !Sync`, so it can't be stored in
 `ExtensionCaches`. Use `GenerationCounter` instead:
 
+<!-- test: extension_guide_generation_counter — keep this code block in sync with the test -->
 ```rust
 fn prepare(&mut self, node: &TreeNode, caches: &mut ExtensionCaches, _theme: &Theme) {
     let new_data = prop_f32_array(node.props(), "data").unwrap_or_default();
@@ -405,10 +417,10 @@ counter and clear the cache when it changes.
 
 There are two ways to emit events from your extension:
 
-1. **From `render()`:** Publish `Message::Event` via iced's
-   `on_press`, `on_submit`, etc. on the widgets you compose. This
-   is how the Rating example works -- each star button publishes a
-   Message when clicked.
+1. **From `render()`:** Use `Message::widget_event(id, family, data)`
+   in iced's `on_press`, `on_submit`, etc. callbacks. This is how
+   the Rating example works -- each star button publishes a Message
+   when clicked.
 
 2. **From `handle_event()`:** Intercept events that iced already
    generated, and transform, suppress, or augment them with
@@ -425,6 +437,7 @@ When the host interacts with your widget, toddy routes events
 through your extension before sending them to the host. You choose
 what to do:
 
+<!-- test: extension_guide_event_result — keep this code block in sync with the test -->
 ```rust
 fn handle_event(
     &mut self,
@@ -470,6 +483,7 @@ If your extension emits high-frequency events (position tracking,
 value scrubbing), set a `CoalesceHint` so the event throttling
 system can rate-limit them:
 
+<!-- test: extension_guide_coalesce_hint — keep this code block in sync with the test -->
 ```rust
 let event = OutgoingEvent::extension_event("cursor_pos", node_id,
     Some(serde_json::json!({"x": pos.x, "y": pos.y})),
@@ -489,6 +503,7 @@ node or `default_event_rate` in Settings.
 
 The host can send imperative commands to your extension:
 
+<!-- test: extension_guide_handle_command — keep this code block in sync with the test -->
 ```rust
 fn handle_command(
     &mut self,
@@ -521,19 +536,18 @@ The host SDK wraps them into typed function calls.
 
 ## Cleanup
 
-When a node is removed from the tree (the host stops rendering your
-widget), `cleanup()` is called:
+When a node is removed from the tree, toddy automatically removes
+its cache entry (under your `config_key()` namespace + node ID).
+You only need to implement `cleanup()` if you have external
+resources to release:
 
 ```rust
-fn cleanup(&mut self, node_id: &str, caches: &mut ExtensionCaches) {
-    caches.remove(self.config_key(), node_id);
+fn cleanup(&mut self, node_id: &str, _caches: &mut ExtensionCaches) {
+    // Cache entry is auto-removed after this method returns.
+    // Only implement this for external resource cleanup.
+    self.close_connection(node_id);
 }
 ```
-
-**Important:** If you don't implement `cleanup()`, cache entries
-for removed nodes accumulate permanently. The default `cleanup()`
-does nothing. Always remove your cache entries when a node leaves
-the tree.
 
 ## Accessibility
 
@@ -622,6 +636,7 @@ mod tests {
 `TestEnv` provides a minimal rendering environment. All fields are
 public -- customize them before calling `env()`:
 
+<!-- test: extension_guide_gauge_renders — keep this code block in sync with the test -->
 ```rust
 let mut test = TestEnv::default();
 test.theme = Theme::Light; // test with light theme
@@ -690,6 +705,7 @@ crashes on `--max-sessions > 1`.
 A star rating widget that displays 1-5 stars and emits click events
 when a star is selected.
 
+<!-- test: extension_guide_rating_renders — keep this code block in sync with the test -->
 ```rust
 use toddy_core::prelude::*;
 use serde_json::json;
@@ -720,13 +736,8 @@ impl WidgetExtension for Rating {
                 .size(size)
                 .color(star_color);
 
-            let star_id = id.clone();
             let star_button = button(star_text)
-                .on_press(Message::Event {
-                    id: star_id,
-                    family: "select".to_string(),
-                    data: json!({"value": i}),
-                })
+                .on_press(Message::widget_event(&id, "select", json!({"value": i})))
                 .padding(0)
                 .style(button::text);
 

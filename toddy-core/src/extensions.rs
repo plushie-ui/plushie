@@ -253,7 +253,13 @@ pub trait WidgetExtension: Send + Sync + 'static {
         vec![]
     }
 
-    /// Clean up when a node is removed from the tree.
+    /// Called when a node is removed from the tree. Use this for
+    /// external resource cleanup (file handles, connections, etc.).
+    ///
+    /// Cache entries for the removed node are automatically removed
+    /// after this method returns -- you do not need to call
+    /// `caches.remove()` yourself unless you have entries under
+    /// non-standard keys.
     fn cleanup(&mut self, _node_id: &str, _caches: &mut ExtensionCaches) {}
 
     /// Create a fresh instance for a new session. Required for
@@ -740,10 +746,14 @@ impl ExtensionDispatcher {
                         let msg = panic_message(&panic);
                         log::error!("extension `{ns}` panicked in cleanup: {msg}",);
                         self.poisoned[*ext_idx] = true;
-                        caches.remove(&ns, old_id);
                     }
+                    // Auto-remove cache entry after cleanup (whether it
+                    // panicked or not). Extensions that need the entry to
+                    // survive should not rely on stale nodes.
+                    caches.remove(&ns, old_id);
                 } else {
                     self.extensions[*ext_idx].cleanup(old_id, caches);
+                    caches.remove(&ns, old_id);
                 }
             }
         }

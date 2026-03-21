@@ -222,6 +222,23 @@ pub enum Message {
     FlushCoalesce,
 }
 
+impl Message {
+    /// Create a widget event message for use in `on_press`, `on_submit`,
+    /// and other iced widget callbacks inside extension `render()` methods.
+    ///
+    /// ```ignore
+    /// button("Click me")
+    ///     .on_press(Message::widget_event(&node.id, "clicked", json!({})))
+    /// ```
+    pub fn widget_event(id: impl Into<String>, family: impl Into<String>, data: Value) -> Self {
+        Message::Event {
+            id: id.into(),
+            family: family.into(),
+            data,
+        }
+    }
+}
+
 /// What the stdin reader thread sends back.
 #[derive(Debug, Clone)]
 pub enum StdinEvent {
