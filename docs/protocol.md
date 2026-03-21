@@ -1778,6 +1778,49 @@ thousands of nodes). Practical considerations for large trees:
 
 ---
 
+## Overlay widget
+
+The `overlay` widget positions a popup element relative to an anchor
+sibling. It takes exactly two children: the first is the anchor
+(rendered normally in the layout), the second is the overlay content
+(rendered as an iced overlay above all other content).
+
+```json
+{
+  "id": "dropdown-1",
+  "type": "overlay",
+  "props": {
+    "position": "below",
+    "gap": 4,
+    "offset_x": 0,
+    "offset_y": 0,
+    "flip": true,
+    "align": "start"
+  },
+  "children": [
+    {"id": "anchor", "type": "button", "props": {"label": "Open"}, "children": []},
+    {"id": "menu", "type": "column", "props": {}, "children": [...]}
+  ]
+}
+```
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `position` | string | `"below"` | Overlay placement: `"below"`, `"above"`, `"left"`, `"right"` |
+| `gap` | number | 0 | Pixel gap between anchor and overlay content |
+| `offset_x` | number | 0 | Horizontal pixel offset (applied after positioning) |
+| `offset_y` | number | 0 | Vertical pixel offset (applied after positioning) |
+| `flip` | bool | false | Auto-flip position when content overflows the viewport in the primary direction. Flips Below<->Above or Left<->Right. The flip only occurs if the opposite side has enough space; otherwise the original position is kept and viewport clamping applies. |
+| `align` | string | `"center"` | Cross-axis alignment: `"start"`, `"center"`, `"end"`. For Below/Above, controls horizontal alignment (start = left-aligned with anchor edge, center = centered on anchor, end = right-aligned with anchor edge). For Left/Right, controls vertical alignment. |
+
+**Focus and accessibility.** Both children participate in focus cycling
+(Tab/Shift+Tab) and the accessibility tree. Setting `a11y.modal = true`
+on the overlay node signals a modal popup, but focus trapping is the
+host SDK's responsibility -- toddy does not intercept focus navigation
+at the iced level.
+
+---
+
 ## Interactive canvas shapes
 
 Shapes within canvas layers can include an `interactive` object to
@@ -1977,5 +2020,5 @@ colors for background and text.
   `push_clip` regions (clipped shapes fall back to normal drawing).
 - The a11y tree for canvas shapes is flat -- nested group hierarchy
   is not reflected in the accessibility tree structure.
-- The overlay widget (used for positioned popups) does not auto-flip
-  when positioned near the viewport edge.
+- The overlay widget auto-flips when `flip: true` is set, but only
+  along the primary axis. It does not flip the cross-axis alignment.
