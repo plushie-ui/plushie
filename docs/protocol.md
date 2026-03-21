@@ -350,6 +350,15 @@ Operations are applied sequentially. If one fails (missing fields,
 out-of-bounds path), it is skipped with a warning and subsequent
 operations still apply.
 
+#### Ordering guarantee
+
+The host emits patch operations in a safe application order:
+removals (descending child index), then updates (with indices adjusted
+for prior removals), then inserts (ascending child index). The
+renderer MUST apply operations in the order they appear in the `ops`
+array. Reordering operations will produce incorrect results because
+update paths reference the tree state after removals but before inserts.
+
 ### Subscribe
 
 Subscribe to a category of events. The `tag` is included in events of
