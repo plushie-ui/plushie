@@ -1,6 +1,6 @@
 # Building for WASM
 
-toddy compiles to WebAssembly via the `toddy-wasm` crate. The WASM
+plushie compiles to WebAssembly via the `plushie-wasm` crate. The WASM
 module runs the full iced renderer in the browser (or any WASM host)
 and communicates with the host via JavaScript callbacks.
 
@@ -14,17 +14,17 @@ cargo install wasm-pack
 ## Quick build
 
 ```bash
-wasm-pack build toddy-wasm --target web
+wasm-pack build plushie-wasm --target web
 ```
 
-Output lands in `toddy-wasm/pkg/`:
+Output lands in `plushie-wasm/pkg/`:
 
 ```
-toddy-wasm/pkg/
-  toddy_wasm.js          # JS glue code (ESM)
-  toddy_wasm.d.ts        # TypeScript declarations
-  toddy_wasm_bg.wasm     # WASM binary
-  toddy_wasm_bg.wasm.d.ts
+plushie-wasm/pkg/
+  plushie_wasm.js          # JS glue code (ESM)
+  plushie_wasm.d.ts        # TypeScript declarations
+  plushie_wasm_bg.wasm     # WASM binary
+  plushie_wasm_bg.wasm.d.ts
   package.json
 ```
 
@@ -34,11 +34,11 @@ for webpack/vite. The `web` target works without a bundler.
 ## JavaScript API
 
 ```typescript
-import init, { ToddyApp } from './toddy_wasm.js';
+import init, { PlushieApp } from './plushie_wasm.js';
 
 await init();
 
-const app = new ToddyApp(settingsJson, (event: string) => {
+const app = new PlushieApp(settingsJson, (event: string) => {
     const parsed = JSON.parse(event);
     console.log(parsed.type, parsed);
 });
@@ -57,21 +57,21 @@ sent via `send_message()` are processed on the next event loop tick.
 ## Custom builds with extensions
 
 Extensions are Rust code compiled into the WASM binary. Create a
-crate that depends on `toddy-wasm` and registers extensions:
+crate that depends on `plushie-wasm` and registers extensions:
 
 ```rust
-use toddy_wasm::ToddyApp;
-use toddy_core::app::ToddyAppBuilder;
+use plushie_wasm::PlushieApp;
+use plushie_core::app::PlushieAppBuilder;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn create_app(
     settings: &str,
     on_event: js_sys::Function,
-) -> Result<ToddyApp, JsValue> {
-    let mut builder = ToddyAppBuilder::new();
+) -> Result<PlushieApp, JsValue> {
+    let mut builder = PlushieAppBuilder::new();
     builder.register(Box::new(MyCustomWidget));
-    ToddyApp::with_extensions(settings, on_event, builder)
+    PlushieApp::with_extensions(settings, on_event, builder)
 }
 ```
 
@@ -105,12 +105,12 @@ wasm-pack fails at the optimization step, run wasm-opt manually:
 
 ```bash
 # Build without wasm-opt
-cargo build --target wasm32-unknown-unknown --release -p toddy-wasm
+cargo build --target wasm32-unknown-unknown --release -p plushie-wasm
 
 # Run wasm-opt manually with all WASM features enabled
-wasm-opt target/wasm32-unknown-unknown/release/toddy_wasm.wasm \
+wasm-opt target/wasm32-unknown-unknown/release/plushie_wasm.wasm \
     -Oz --all-features \
-    -o toddy-wasm/pkg/toddy_wasm_bg.wasm
+    -o plushie-wasm/pkg/plushie_wasm_bg.wasm
 ```
 
 Install a recent wasm-opt via `npm install -g binaryen` or your
@@ -118,7 +118,7 @@ system package manager if the wasm-pack bundled version is too old.
 
 ### Size comparison
 
-Measured with Rust 1.92, toddy-iced 0.6, wasm-opt from binaryen:
+Measured with Rust 1.92, plushie-iced 0.6, wasm-opt from binaryen:
 
 | | Default | Profile opts | + wasm-opt -Oz |
 |---|---|---|---|
@@ -141,7 +141,7 @@ The largest contributors (approximate, based on feature analysis):
 - **canvas** -- 2D drawing, hit testing, tessellation
 
 Feature-gating `markdown`, `highlighter`, `image`, and `svg` in
-toddy-core would let WASM builds exclude unused capabilities. This
+plushie-core would let WASM builds exclude unused capabilities. This
 is not yet implemented but would be the next meaningful size
 reduction (estimated 20-30% for a minimal build).
 

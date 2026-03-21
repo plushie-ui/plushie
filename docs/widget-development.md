@@ -1,6 +1,6 @@
 # Widget Development
 
-Three ways to build custom widgets for toddy, each for a different
+Three ways to build custom widgets for plushie, each for a different
 situation.
 
 ## Canvas interactive shapes
@@ -18,7 +18,7 @@ section in the protocol docs.
 
 ## Extension widgets
 
-A Rust crate that implements `WidgetExtension` from `toddy-core`.
+A Rust crate that implements `WidgetExtension` from `plushie-core`.
 Your host SDK handles compilation and binary generation. You write
 the widget logic.
 
@@ -32,14 +32,14 @@ See the [Extension Guide](extension-guide.md).
 ## Reusable iced widgets
 
 An iced widget that works directly in Rust applications AND across
-every toddy SDK. You build the widget once as a standard iced
-widget, then add a thin WidgetExtension wrapper for toddy
+every plushie SDK. You build the widget once as a standard iced
+widget, then add a thin WidgetExtension wrapper for plushie
 compatibility.
 
 Use this for: widgets you want to share across the ecosystem --
 a chart library, a date picker, a color wheel. Rust developers
 use the widget directly. Elixir, Gleam, and other SDK users get
-it through toddy without any per-language widget code.
+it through plushie without any per-language widget code.
 
 See the [Core Widget Guide](core-widget-guide.md).
 

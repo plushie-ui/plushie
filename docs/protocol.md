@@ -120,7 +120,7 @@ protocol version:
   "session": "",
   "protocol": 1,
   "version": "0.3.0",
-  "name": "toddy",
+  "name": "plushie",
   "mode": "headless",
   "backend": "tiny-skia",
   "transport": "stdio",
@@ -132,7 +132,7 @@ protocol version:
 |-------|------|-------------|
 | `protocol` | number | Protocol version (currently 1) |
 | `version` | string | Renderer build version |
-| `name` | string | Renderer name (always `"toddy"`) |
+| `name` | string | Renderer name (always `"plushie"`) |
 | `mode` | string | Execution mode: `"windowed"`, `"headless"`, or `"mock"` |
 | `backend` | string | Rendering backend: `"wgpu"` (windowed), `"tiny-skia"` (headless), `"none"` (mock) |
 | `transport` | string | Transport backend: `"stdio"` (default) or `"exec"` (future: `"connect"`, `"listen"`) |
@@ -240,7 +240,7 @@ All fields inside `settings` are optional.
 **Log level.** Renderer log verbosity is controlled via the `RUST_LOG`
 environment variable on the renderer process, not via a Settings field.
 The renderer's built-in default level is `warn`. Examples:
-`RUST_LOG=toddy=debug`, `RUST_LOG=toddy_core::widgets=trace`.
+`RUST_LOG=plushie=debug`, `RUST_LOG=plushie_core::widgets=trace`.
 
 ### Snapshot
 
@@ -1406,16 +1406,16 @@ is connected to the host.
 ### stdio (default)
 
 The renderer reads from stdin and writes to stdout. The host spawns
-toddy as a subprocess and communicates over the pipe.
+plushie as a subprocess and communicates over the pipe.
 
 ### exec (`--exec <command>`)
 
 The renderer spawns a command via the system shell (`sh -c` on Unix,
 `cmd /c` on Windows) and uses its stdin/stdout as the protocol
-channel. The child's stderr is forwarded to toddy's stderr with a
+channel. The child's stderr is forwarded to plushie's stderr with a
 `[remote]` prefix.
 
-This enables remote rendering scenarios (e.g. `--exec "ssh host toddy"`)
+This enables remote rendering scenarios (e.g. `--exec "ssh host plushie"`)
 where the host process runs on a different machine. All modes
 (windowed, headless, mock) work with `--exec`.
 
@@ -1661,9 +1661,9 @@ then remaining fields override individual properties:
 
 ## Debugging
 
-### TODDY_NO_CATCH_UNWIND
+### PLUSHIE_NO_CATCH_UNWIND
 
-Set `TODDY_NO_CATCH_UNWIND=1` on the renderer process to disable
+Set `PLUSHIE_NO_CATCH_UNWIND=1` on the renderer process to disable
 panic isolation for widget extensions. When set, extension panics
 propagate normally instead of being caught by `catch_unwind`, which
 preserves full stack traces and allows debuggers (gdb, lldb) to
@@ -1816,7 +1816,7 @@ sibling. It takes exactly two children: the first is the anchor
 **Focus and accessibility.** Both children participate in focus cycling
 (Tab/Shift+Tab) and the accessibility tree. Setting `a11y.modal = true`
 on the overlay node signals a modal popup, but focus trapping is the
-host SDK's responsibility -- toddy does not intercept focus navigation
+host SDK's responsibility -- plushie does not intercept focus navigation
 at the iced level.
 
 ---
@@ -1985,7 +1985,7 @@ nodes in the accessibility tree, nested under the canvas widget's
 `Image` role.
 
 The `a11y` field uses the same `A11yOverrides` structure as all other
-widgets in toddy. All standard fields are supported: `role`, `label`,
+widgets in plushie. All standard fields are supported: `role`, `label`,
 `description`, `disabled`, `selected`, `expanded`, `toggled`, `value`,
 `orientation`, `position_in_set`, `size_of_set`, `hidden`, `required`,
 `live`, `busy`, `invalid`, `modal`, `read_only`, `mnemonic`,

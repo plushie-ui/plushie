@@ -1,10 +1,10 @@
-# toddy
+# plushie
 
 A standalone native GUI renderer driven by a simple wire protocol over
 stdin/stdout. Send it a tree of UI nodes as MessagePack or JSON, get
 native desktop windows. Send updates, get events back.
 
-Built for the [Toddy Elixir toolkit](https://github.com/toddy-ui/toddy-elixir),
+Built for the [Plushie Elixir toolkit](https://github.com/plushie-ui/plushie-elixir),
 but the renderer doesn't know or care what language is on the other
 end. Any language that can spawn a process and write bytes to its stdin
 can use it.
@@ -29,7 +29,7 @@ integration. They talk over stdio.
        | stdin    | stdout
        | trees    | events
        v          |
-  toddy (Rust binary)
+  plushie (Rust binary)
        |
   Native windows via iced
        |
@@ -97,7 +97,7 @@ There are two ways to update the UI:
   only the changes (prop updates, insertions, removals). More
   efficient for large trees or high-frequency updates. Requires the
   client to implement tree diffing -- the
-  [Toddy](https://github.com/toddy-ui/toddy-elixir) toolkit does
+  [Plushie](https://github.com/plushie-ui/plushie-elixir) toolkit does
   this, for example.
 
 Start with snapshots. Add patching later if you need the performance.
@@ -141,7 +141,7 @@ overrides.
 notifications -- requested over the protocol, results delivered as
 events.
 
-**Custom widget extensions.** The extension SDK (toddy-core) lets you
+**Custom widget extensions.** The extension SDK (plushie-core) lets you
 write new widget types in Rust without forking the renderer. Extensions
 range from simple render-only widgets to full interactive components
 with their own state, event handling, and lifecycle management.
@@ -150,7 +150,7 @@ with their own state, event handling, and lifecycle management.
 
 **Language communities without native GUI options.** If your language
 can write JSON to stdout and read it back, you can build a toolkit on
-top. The [Toddy](https://github.com/toddy-ui/toddy-elixir) toolkit for
+top. The [Plushie](https://github.com/plushie-ui/plushie-elixir) toolkit for
 Elixir was the first; Python, Go, Ruby, Node.js, or anything else
 could follow the same pattern.
 
@@ -209,12 +209,12 @@ wait for further messages on stdin (snapshots, patches, etc.).
 
 This workspace contains two crates:
 
-- **toddy-core** -- Library crate and public SDK. Wire protocol,
+- **plushie-core** -- Library crate and public SDK. Wire protocol,
   tree management, widget rendering, theming, platform effects, and the
   `WidgetExtension` trait for custom widgets. Extension authors depend
   on this crate.
 
-- **toddy** -- Binary crate. Wires toddy-core into an
+- **plushie** -- Binary crate. Wires plushie-core into an
   `iced::daemon` application. Handles stdin/stdout I/O, window
   lifecycle, and the iced event loop.
 
@@ -252,14 +252,14 @@ protocol includes a version handshake so host libraries can detect
 incompatibilities.
 
 The first toolkit built on this renderer is
-[Toddy](https://github.com/toddy-ui/toddy-elixir), a desktop GUI
+[Plushie](https://github.com/plushie-ui/plushie-elixir), a desktop GUI
 framework for Elixir.
 
 ## Documentation
 
 - [Protocol reference](docs/protocol.md) -- Wire format, message types,
   encoding, startup handshake
-- [Toddy](https://github.com/toddy-ui/toddy-elixir) -- Elixir desktop
+- [Plushie](https://github.com/plushie-ui/plushie-elixir) -- Elixir desktop
   GUI toolkit built on this renderer, with documentation of the tree
   format, event model, and UI builder DSL
 

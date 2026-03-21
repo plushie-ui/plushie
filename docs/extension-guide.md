@@ -1,6 +1,6 @@
 # Extension Guide
 
-Build native Rust widgets for toddy. Your host SDK handles
+Build native Rust widgets for plushie. Your host SDK handles
 compilation and binary wiring. You write a Rust crate that
 implements a trait, and the widget appears in the host's widget
 tree like any built-in widget.
@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-toddy-core = "0.3"
+plushie-core = "0.3"
 ```
 
 Your host SDK generates the binary that links your crate. You
@@ -24,16 +24,16 @@ never touch `main.rs`, `Cargo` workspaces, or build scripts.
 Consult your SDK's extension documentation for the host-side
 setup.
 
-**Important:** Never add a direct `iced` dependency. toddy uses
-a fork (`toddy-iced`), and version mismatches will fail to compile.
-Use `toddy_core::iced::*` for any iced types not in the prelude.
+**Important:** Never add a direct `iced` dependency. plushie uses
+a fork (`plushie-iced`), and version mismatches will fail to compile.
+Use `plushie_core::iced::*` for any iced types not in the prelude.
 
 **Note:** `column` and `row` are excluded from the prelude because
 the function forms conflict with the `column!`/`row!` macros under
 glob import. Import them explicitly:
 
 ```rust
-use toddy_core::iced::widget::{column, row};
+use plushie_core::iced::widget::{column, row};
 ```
 
 **Note:** `WidgetExtension` requires `Send + Sync + 'static`. Your
@@ -47,7 +47,7 @@ the struct itself, or use `ExtensionCaches` (which also requires
 Import everything from the prelude:
 
 ```rust
-use toddy_core::prelude::*;
+use plushie_core::prelude::*;
 ```
 
 Implement `WidgetExtension` with three required methods:
@@ -311,7 +311,7 @@ fn render<'a>(&self, node: &'a TreeNode, env: &WidgetEnv<'a>) -> Element<'a, Mes
 }
 ```
 
-`render_child` and `render_children` go through toddy's full
+`render_child` and `render_children` go through plushie's full
 dispatch. A child node with `"type": "button"` renders as an iced
 button. A child with `"type": "my_other_extension"` renders
 through that extension. Your extension doesn't need to know what
@@ -433,7 +433,7 @@ doesn't need.
 
 ### Tier B: handling events
 
-When the host interacts with your widget, toddy routes events
+When the host interacts with your widget, plushie routes events
 through your extension before sending them to the host. You choose
 what to do:
 
@@ -536,7 +536,7 @@ The host SDK wraps them into typed function calls.
 
 ## Cleanup
 
-When a node is removed from the tree, toddy automatically removes
+When a node is removed from the tree, plushie automatically removes
 its cache entry (under your `config_key()` namespace + node ID).
 You only need to implement `cleanup()` if you have external
 resources to release:
@@ -551,7 +551,7 @@ fn cleanup(&mut self, node_id: &str, _caches: &mut ExtensionCaches) {
 
 ## Accessibility
 
-Your extension gets accessibility support automatically. toddy's
+Your extension gets accessibility support automatically. plushie's
 `A11yOverride` wrapper intercepts `operate()` on your widget's
 output and applies any `a11y` props the host sets on the node.
 
@@ -574,14 +574,14 @@ through to the screen reader.
 
 ## Testing
 
-The `toddy_core::testing` module provides helpers for writing unit
+The `plushie_core::testing` module provides helpers for writing unit
 tests without a running renderer:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toddy_core::testing::*;
+    use plushie_core::testing::*;
     use serde_json::json;
 
     #[test]
@@ -661,12 +661,12 @@ your extension panics:
    a fresh start.
 5. Other extensions and the rest of the renderer are unaffected.
 
-**For debugging:** Set `TODDY_NO_CATCH_UNWIND=1` to let panics
+**For debugging:** Set `PLUSHIE_NO_CATCH_UNWIND=1` to let panics
 propagate normally. This gives you a full backtrace instead of
 the caught-and-logged message.
 
 **Important:** Your crate must not set `panic = "abort"` in
-Cargo.toml. toddy requires stack unwinding for panic isolation.
+Cargo.toml. plushie requires stack unwinding for panic isolation.
 A compile-time error fires if abort is detected.
 
 ## Multi-session support
@@ -707,7 +707,7 @@ when a star is selected.
 
 <!-- test: extension_guide_rating_renders — keep this code block in sync with the test -->
 ```rust
-use toddy_core::prelude::*;
+use plushie_core::prelude::*;
 use serde_json::json;
 
 pub struct Rating;
@@ -768,8 +768,8 @@ When a star is clicked, the host receives:
 ## Troubleshooting
 
 **Red "Extension error" placeholder.** Your extension panicked 3
-times in `render()`. Check the logs (`RUST_LOG=toddy_core=debug`)
-for the panic messages. Set `TODDY_NO_CATCH_UNWIND=1` for a full
+times in `render()`. Check the logs (`RUST_LOG=plushie_core=debug`)
+for the panic messages. Set `PLUSHIE_NO_CATCH_UNWIND=1` for a full
 backtrace.
 
 **Widget doesn't appear.** The node's `"type"` doesn't match any
@@ -777,7 +777,7 @@ string in your `type_names()`. Check for typos. Type names are
 case-sensitive.
 
 **Props are always None.** Make sure you're reading the correct
-key name. Use `RUST_LOG=toddy_core=trace` to see prop parsing
+key name. Use `RUST_LOG=plushie_core=trace` to see prop parsing
 trace logs.
 
 **ExtensionCaches returns None.** Either the key doesn't match
@@ -787,7 +787,7 @@ are logged as warnings.
 
 **Compilation fails with iced version conflict.** You have a
 direct `iced` dependency in your Cargo.toml. Remove it and use
-`toddy_core::iced::*` instead.
+`plushie_core::iced::*` instead.
 
 **Panic: "does not support multiplexed sessions".** Your extension
 is running with `--max-sessions > 1` but doesn't implement
@@ -795,9 +795,9 @@ is running with `--max-sessions > 1` but doesn't implement
 
 ## Further reading
 
-- `WidgetExtension` trait documentation in `toddy-core/src/extensions.rs`
-- Prop helpers API in `toddy-core/src/prop_helpers.rs`
-- Testing helpers in `toddy-core/src/testing.rs`
+- `WidgetExtension` trait documentation in `plushie-core/src/extensions.rs`
+- Prop helpers API in `plushie-core/src/prop_helpers.rs`
+- Testing helpers in `plushie-core/src/testing.rs`
 - [Core Widget Guide](core-widget-guide.md) for building reusable
   iced widgets
 - [Widget Development](widget-development.md) for the decision

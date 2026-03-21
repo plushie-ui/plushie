@@ -1,7 +1,7 @@
 # Core Widget Guide
 
 Build an iced widget once, use it everywhere: directly in Rust
-applications, and across every toddy-powered SDK (Elixir, Gleam,
+applications, and across every plushie-powered SDK (Elixir, Gleam,
 and any future host language).
 
 ## The two-crate pattern
@@ -9,17 +9,17 @@ and any future host language).
 A reusable widget is two crates:
 
 ```
-my-gauge/               depends on iced (via toddy-iced)
+my-gauge/               depends on iced (via plushie-iced)
   src/lib.rs            the Widget impl -- rendering, layout, events, a11y
   Cargo.toml
 
-my-gauge-toddy/         depends on toddy-core + my-gauge
+my-gauge-plushie/         depends on plushie-core + my-gauge
   src/lib.rs            WidgetExtension wrapper -- prop parsing, event bridging
   Cargo.toml
 ```
 
 **The widget crate** (`my-gauge`) is a pure iced widget. It knows
-nothing about toddy, JSON, protocols, or host SDKs. A Rust
+nothing about plushie, JSON, protocols, or host SDKs. A Rust
 developer imports it and uses it like any iced widget:
 
 ```rust
@@ -33,13 +33,13 @@ fn view(&self) -> Element<Message> {
 }
 ```
 
-**The extension crate** (`my-gauge-toddy`) wraps the widget for
-toddy's protocol. It parses JSON props, constructs the widget, and
+**The extension crate** (`my-gauge-plushie`) wraps the widget for
+plushie's protocol. It parses JSON props, constructs the widget, and
 bridges events. Every host SDK gets the widget through this single
 wrapper -- no per-language duplication:
 
 ```rust
-use toddy_core::prelude::*;
+use plushie_core::prelude::*;
 use my_gauge::gauge;
 
 pub struct GaugeExtension;
@@ -71,13 +71,13 @@ platform.
 
 ## Why two crates?
 
-Separation of concerns. The widget crate has zero toddy knowledge
+Separation of concerns. The widget crate has zero plushie knowledge
 -- it depends only on iced. This means:
 
 - **Testable in isolation.** Test the widget with iced's test
-  harness. No protocol, no JSON, no toddy runtime needed.
-- **Usable outside toddy.** Any iced application can use it. The
-  widget isn't locked to toddy's ecosystem.
+  harness. No protocol, no JSON, no plushie runtime needed.
+- **Usable outside plushie.** Any iced application can use it. The
+  widget isn't locked to plushie's ecosystem.
 - **Clean API.** The widget has typed Rust parameters (`f32`,
   `Color`, `Length`), not `&Value` JSON blobs. The extension
   wrapper handles the JSON-to-typed conversion.
@@ -97,16 +97,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { package = "toddy-iced", version = "0.6" }
+iced = { package = "plushie-iced", version = "0.6" }
 ```
 
-**Note:** Use `toddy-iced` (the fork), not upstream `iced`. toddy
+**Note:** Use `plushie-iced` (the fork), not upstream `iced`. plushie
 and all its SDKs use this fork. Using a different iced version
 causes type mismatches at compile time.
 
 If you're building a widget that should also work with upstream
 iced, you can use Cargo features to switch between the two. But
-for toddy ecosystem widgets, `toddy-iced` is the standard.
+for plushie ecosystem widgets, `plushie-iced` is the standard.
 
 ### The Widget trait
 
@@ -275,7 +275,7 @@ where
 }
 ```
 
-This widget works in any iced application. No toddy dependency.
+This widget works in any iced application. No plushie dependency.
 
 ### Layout
 
@@ -364,28 +364,28 @@ state that implements the `Focusable` trait.
 
 ---
 
-## Part 2: The toddy extension wrapper
+## Part 2: The plushie extension wrapper
 
-The wrapper crate bridges your iced widget to toddy's protocol.
+The wrapper crate bridges your iced widget to plushie's protocol.
 It's intentionally thin -- just prop parsing and event bridging.
 
 ### Dependencies
 
 ```toml
 [package]
-name = "my-gauge-toddy"
+name = "my-gauge-plushie"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-toddy-core = "0.3"
+plushie-core = "0.3"
 my-gauge = { path = "../my-gauge" }
 ```
 
 ### The wrapper
 
 ```rust
-use toddy_core::prelude::*;
+use plushie_core::prelude::*;
 use my_gauge::gauge;
 
 pub struct GaugeExtension;
@@ -423,8 +423,8 @@ translates JSON props to typed parameters.
 | Concern | Where |
 |---------|-------|
 | Layout, drawing, events, a11y | Widget crate (`my-gauge`) |
-| Prop parsing (JSON -> types) | Wrapper crate (`my-gauge-toddy`) |
-| Event bridging (toddy Message -> host) | Wrapper crate |
+| Prop parsing (JSON -> types) | Wrapper crate (`my-gauge-plushie`) |
+| Event bridging (plushie Message -> host) | Wrapper crate |
 | State management (ExtensionCaches) | Wrapper crate (if needed) |
 | Compilation, binary generation | Host SDK (automatic) |
 
@@ -466,13 +466,13 @@ Test the widget crate and wrapper crate independently:
 **Widget crate:** Standard iced widget testing. Construct the
 widget, verify it doesn't panic with various inputs.
 
-**Wrapper crate:** Use toddy's test helpers:
+**Wrapper crate:** Use plushie's test helpers:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toddy_core::testing::*;
+    use plushie_core::testing::*;
     use serde_json::json;
 
     #[test]
@@ -507,43 +507,43 @@ mod tests {
 ### Publishing
 
 Publish both crates. The widget crate is useful to Rust/iced
-developers directly. The toddy wrapper crate is used by host SDKs:
+developers directly. The plushie wrapper crate is used by host SDKs:
 
 ```
 crates.io:
   my-gauge         -- the iced widget (Rust developers use this)
-  my-gauge-toddy   -- the toddy wrapper (SDKs reference this)
+  my-gauge-plushie   -- the plushie wrapper (SDKs reference this)
 ```
 
-Host SDK authors add the toddy wrapper to their extension list.
+Host SDK authors add the plushie wrapper to their extension list.
 The SDK's build system compiles it into the renderer binary
 automatically.
 
 ---
 
-## Adding a widget to toddy's standard set
+## Adding a widget to plushie's standard set
 
-If your widget is general-purpose enough to ship with every toddy
+If your widget is general-purpose enough to ship with every plushie
 installation (like text_input, slider, or canvas), it can be added
-to toddy-core instead of distributed as a separate crate.
+to plushie-core instead of distributed as a separate crate.
 
-This is a contribution to the toddy project, not the normal
+This is a contribution to the plushie project, not the normal
 distribution path:
 
 | What | Where |
 |------|-------|
-| The iced widget (if new to iced) | `toddy-iced` fork |
-| The render function | `toddy-core/src/widgets/` |
-| The validate schema | `toddy-core/src/widgets/validate.rs` |
-| Message variants (if new) | `toddy-core/src/message.rs` |
-| OutgoingEvent constructors | `toddy-core/src/protocol/outgoing.rs` |
-| Message wiring | `toddy/src/renderer/emitters.rs` |
-| Dispatch table entry | `toddy-core/src/widgets/render.rs` |
+| The iced widget (if new to iced) | `plushie-iced` fork |
+| The render function | `plushie-core/src/widgets/` |
+| The validate schema | `plushie-core/src/widgets/validate.rs` |
+| Message variants (if new) | `plushie-core/src/message.rs` |
+| OutgoingEvent constructors | `plushie-core/src/protocol/outgoing.rs` |
+| Message wiring | `plushie/src/renderer/emitters.rs` |
+| Dispatch table entry | `plushie-core/src/widgets/render.rs` |
 
-The toddy-iced fork stays close to upstream iced. Only add to the
+The plushie-iced fork stays close to upstream iced. Only add to the
 fork for: new accessible roles, Widget trait extensions, or bug
-fixes not yet upstream. toddy-specific code (prop parsing, event
-emission, validation) belongs in toddy-core.
+fixes not yet upstream. plushie-specific code (prop parsing, event
+emission, validation) belongs in plushie-core.
 
 ## Further reading
 
@@ -553,4 +553,4 @@ emission, validation) belongs in toddy-core.
   framework
 - iced widget examples in the
   [iced repository](https://github.com/iced-rs/iced)
-- toddy-core rustdocs (`cargo doc --open` in the toddy workspace)
+- plushie-core rustdocs (`cargo doc --open` in the plushie workspace)

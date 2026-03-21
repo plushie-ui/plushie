@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to toddy will be documented in this file.
+All notable changes to plushie will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
@@ -56,7 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Color values standardized to hex-only format (`#RRGGBB` /
   `#RRGGBBAA`); other notations are rejected.
 - `parse_shaping` reads the `shaping` prop (was `text_shaping`).
-- Core is zero-I/O: platform effects moved out of `toddy-core` into the
+- Core is zero-I/O: platform effects moved out of `plushie-core` into the
   binary crate. Core now returns `CoreEffect` variants instead of
   performing I/O directly.
 - Shared message processing logic between daemon and headless modes

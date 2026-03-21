@@ -62,17 +62,17 @@ Use conventional commits:
 
 ## Extension Development
 
-toddy-core is the public SDK for writing widget extensions. The quick path:
+plushie-core is the public SDK for writing widget extensions. The quick path:
 
-1. Create a Rust crate that depends on `toddy-core`.
-2. Import everything from `toddy_core::prelude::*`.
+1. Create a Rust crate that depends on `plushie-core`.
+2. Import everything from `plushie_core::prelude::*`.
 3. Implement the `WidgetExtension` trait (three required methods:
    `type_names()`, `config_key()`, `render()`).
-4. For iced types not in the prelude, use `toddy_core::iced::*` instead
+4. For iced types not in the prelude, use `plushie_core::iced::*` instead
    of adding a direct `iced` dependency -- this avoids version conflicts.
 
 See the `WidgetExtension` trait docs and examples in
-`toddy-core/src/extensions.rs` for the full API reference.
+`plushie-core/src/extensions.rs` for the full API reference.
 
 ## Pull Requests
 
