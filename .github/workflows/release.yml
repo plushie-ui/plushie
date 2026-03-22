@@ -86,9 +86,50 @@ jobs:
             ${{ matrix.asset }}
             ${{ matrix.asset }}.sha256
 
+  build-wasm:
+    name: Build (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Install binaryen
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      - name: Build WASM
+        run: wasm-pack build plushie-wasm --target web
+
+      - name: Optimize with wasm-opt
+        run: |
+          wasm-opt plushie-wasm/pkg/plushie_wasm_bg.wasm \
+            -Oz --all-features \
+            -o plushie-wasm/pkg/plushie_wasm_bg.wasm
+
+      - name: Package
+        run: tar czf plushie-wasm.tar.gz -C plushie-wasm/pkg .
+
+      - name: Generate checksum
+        run: sha256sum plushie-wasm.tar.gz > plushie-wasm.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plushie-wasm
+          path: |
+            plushie-wasm.tar.gz
+            plushie-wasm.tar.gz.sha256
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-wasm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

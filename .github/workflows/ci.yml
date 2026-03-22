@@ -19,6 +19,7 @@ jobs:
         with:
           toolchain: "1.92.0"
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
 
@@ -39,3 +40,6 @@ jobs:
 
       - name: Test
         run: cargo nextest run --workspace
+
+      - name: Check WASM
+        run: cargo check --target wasm32-unknown-unknown -p plushie-core -p plushie-renderer -p plushie-wasm
