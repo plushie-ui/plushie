@@ -39,14 +39,43 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
         .unwrap_or(1)
         .max(1);
 
-    // Parse --exec <command> for transport selection.
+    // Parse --exec <command> and --listen [addr] for transport selection.
     let exec_command = args
         .windows(2)
         .find(|w| w[0] == "--exec")
         .map(|w| w[1].clone());
 
-    // Create transport: exec if --exec is present, otherwise stdio.
-    let transport = if let Some(cmd) = &exec_command {
+    let listen_arg = if has_flag("--listen") {
+        // --listen may have an optional argument (next arg if it doesn't start with --)
+        let idx = args.iter().position(|a| a == "--listen").unwrap();
+        let next = args.get(idx + 1);
+        match next {
+            Some(s) if !s.starts_with("--") => Some(Some(s.as_str())),
+            _ => Some(None), // --listen without argument
+        }
+    } else {
+        None
+    };
+
+    // Create transport based on flags.
+    let transport = if let Some(addr_arg) = listen_arg {
+        // --listen mode: socket transport.
+        let addr = match crate::transport::ListenAddr::parse(addr_arg) {
+            Ok(a) => a,
+            Err(e) => {
+                log::error!("invalid --listen address: {e}");
+                return Ok(());
+            }
+        };
+        match crate::transport::Transport::listen(&addr, exec_command.as_deref()) {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("failed to start listen transport: {e}");
+                return Ok(());
+            }
+        }
+    } else if let Some(cmd) = &exec_command {
+        // --exec without --listen: piped stdin/stdout.
         match crate::transport::Transport::exec(cmd) {
             Ok(t) => t,
             Err(e) => {
@@ -55,14 +84,14 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
             }
         }
     } else {
-        // Windows binary mode only needed for stdio transport.
         #[cfg(windows)]
         set_binary_mode();
         crate::transport::Transport::stdio()
     };
 
     let transport_name = transport.name();
-    let (reader, writer, _transport_guard) = transport.into_parts();
+    let expected_token = transport.expected_token.clone();
+    let (reader, writer, _transport_guard, _token) = transport.into_parts();
 
     // Initialize the global output writer before any protocol I/O.
     let is_headless = has_flag("--headless") || has_flag("--mock");
@@ -90,6 +119,7 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
             &ext_keys,
             transport_name,
             reader,
+            expected_token.as_deref(),
         );
         return Ok(());
     }
@@ -102,6 +132,7 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
             &ext_keys,
             transport_name,
             reader,
+            expected_token.as_deref(),
         );
         return Ok(());
     }
@@ -109,7 +140,7 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
     // Read the first message synchronously to get iced settings and font
     // data before the daemon starts.
     let (initial_settings, iced_settings, font_bytes, reader) =
-        read_initial_settings(forced_codec, reader);
+        read_initial_settings(forced_codec, reader, expected_token.as_deref());
 
     // Send the hello handshake before any other output.
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();

@@ -13,6 +13,18 @@ use plushie_core::message::StdinEvent;
 use plushie_core::protocol::IncomingMessage;
 use serde_json::Value;
 
+/// Constant-time byte comparison to prevent timing attacks on token verification.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// The generic reader type used throughout the transport layer.
 pub(crate) type TransportReader = BufReader<Box<dyn Read + Send>>;
 
@@ -116,6 +128,7 @@ pub(crate) fn spawn_stdin_reader(
 pub(crate) fn read_initial_settings(
     forced_codec: Option<Codec>,
     mut reader: TransportReader,
+    expected_token: Option<&str>,
 ) -> (Value, iced::Settings, Vec<Vec<u8>>, TransportReader) {
     // Determine codec: forced by CLI flag, or auto-detected from first byte.
     //
@@ -170,6 +183,21 @@ pub(crate) fn read_initial_settings(
     match msg {
         IncomingMessage::Settings { settings } => {
             log::info!("initial settings received");
+
+            // Verify token if listen mode requires one.
+            if let Some(expected_tok) = expected_token {
+                match settings.get("token").and_then(|v| v.as_str()) {
+                    Some(tok) if constant_time_eq(tok.as_bytes(), expected_tok.as_bytes()) => {
+                        log::info!("token verified");
+                    }
+                    Some(_) => {
+                        startup_exit(&codec, "token mismatch: connection rejected");
+                    }
+                    None => {
+                        startup_exit(&codec, "missing token in Settings: connection rejected");
+                    }
+                }
+            }
 
             // Enforce protocol version. If the host declares a version and it
             // doesn't match ours, log an error and bail -- running with a

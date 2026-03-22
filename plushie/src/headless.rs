@@ -899,6 +899,7 @@ pub(crate) fn run(
     ext_keys: &[String],
     transport_name: &str,
     mut reader: BufReader<Box<dyn Read + Send>>,
+    _expected_token: Option<&str>,
 ) {
     let codec = match forced_codec {
         Some(c) => c,
