@@ -214,7 +214,7 @@ pub(crate) fn run(builder: plushie_core::app::PlushieAppBuilder) -> iced::Result
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn set_binary_mode() {
-    extern "C" {
+    unsafe extern "C" {
         fn _setmode(fd: i32, mode: i32) -> i32;
     }
     const O_BINARY: i32 = 0x8000;
