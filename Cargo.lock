@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "plushie"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arboard",
  "base64",
@@ -3191,7 +3191,7 @@ dependencies = [
 
 [[package]]
 name = "plushie-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64",
  "log",
@@ -3456,7 +3456,7 @@ dependencies = [
 
 [[package]]
 name = "plushie-renderer"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64",
  "log",
@@ -3472,7 +3472,7 @@ dependencies = [
 
 [[package]]
 name = "plushie-wasm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "console_log",
  "futures",

@@ -15,8 +15,8 @@ crate-type = ["cdylib", "rlib"]
 workspace = true
 
 [dependencies]
-plushie-core = { version = "0.4.0", path = "../plushie-core" }
-plushie-renderer = { version = "0.4.0", path = "../plushie-renderer" }
+plushie-core = { version = "0.4.1", path = "../plushie-core" }
+plushie-renderer = { version = "0.4.1", path = "../plushie-renderer" }
 iced = { version = "0.7", package = "plushie-iced", features = ["advanced", "canvas", "a11y"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

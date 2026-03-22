@@ -4,6 +4,13 @@ All notable changes to plushie will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.1] - 2026-03-22
+
+### Fixed
+
+- Windows release build failure: `extern` block updated to `unsafe extern`
+  as required by Rust 2024 edition.
+
 ## [0.4.0] - 2026-03-21
 
 ### Breaking changes

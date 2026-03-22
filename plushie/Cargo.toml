@@ -23,8 +23,8 @@ name = "plushie"
 path = "src/main.rs"
 
 [dependencies]
-plushie-core = { version = "0.4.0", path = "../plushie-core" }
-plushie-renderer = { version = "0.4.0", path = "../plushie-renderer" }
+plushie-core = { version = "0.4.1", path = "../plushie-core" }
+plushie-renderer = { version = "0.4.1", path = "../plushie-renderer" }
 env_logger = "0.11"
 log = "0.4"
 iced = { version = "0.7", package = "plushie-iced", features = ["tokio", "advanced", "sysinfo", "a11y"] }
