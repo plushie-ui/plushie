@@ -332,10 +332,48 @@ fn child_bounds(child: &Value) -> Option<(f32, f32, f32, f32)> {
             let (min_x, min_y, max_x, max_y) = children_bounds(nested)?;
             Some((gx + min_x, gy + min_y, gx + max_x, gy + max_y))
         }
-        // Paths, transforms, clips, and other types can't have their
+        "path" => path_bounds(child),
+        // Transforms, clips, and other types can't have their
         // bounds automatically determined. Use hit_rect on the parent.
         _ => None,
     }
+}
+
+/// Compute bounding box of a path from its commands.
+/// Examines move_to, line_to, and arc endpoints. Bezier control points
+/// are included conservatively (they bound the curve).
+fn path_bounds(shape: &Value) -> Option<(f32, f32, f32, f32)> {
+    let commands = shape.get("commands")?.as_array()?;
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    let mut has_point = false;
+
+    for cmd in commands {
+        let points: Vec<f32> = if let Some(arr) = cmd.as_array() {
+            // ["move_to", x, y] or ["line_to", x, y] etc.
+            arr.iter()
+                .skip(1)
+                .filter_map(|v| v.as_f64().map(|f| f as f32))
+                .collect()
+        } else {
+            continue; // "close" or other string commands
+        };
+
+        // Take all numeric values as x,y pairs
+        for pair in points.chunks(2) {
+            if pair.len() == 2 {
+                min_x = min_x.min(pair[0]);
+                min_y = min_y.min(pair[1]);
+                max_x = max_x.max(pair[0]);
+                max_y = max_y.max(pair[1]);
+                has_point = true;
+            }
+        }
+    }
+
+    has_point.then_some((min_x, min_y, max_x, max_y))
 }
 
 /// Compute the union bounding box of a list of child shapes.
@@ -365,11 +403,18 @@ fn compute_hit_region(
     interactive: &serde_json::Map<String, Value>,
 ) -> Option<HitRegion> {
     // Explicit hit_rect overrides geometric inference.
+    // For groups, the hit_rect is relative to the group's origin,
+    // so we offset by the group's x/y position.
     if let Some(hr) = interactive.get("hit_rect").and_then(|v| v.as_object()) {
-        let x = hr.get("x")?.as_f64()? as f32;
-        let y = hr.get("y")?.as_f64()? as f32;
+        let mut x = hr.get("x")?.as_f64()? as f32;
+        let mut y = hr.get("y")?.as_f64()? as f32;
         let w = hr.get("w").or(hr.get("width"))?.as_f64()? as f32;
         let h = hr.get("h").or(hr.get("height"))?.as_f64()? as f32;
+        let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if shape_type == "group" {
+            x += json_f32(shape, "x");
+            y += json_f32(shape, "y");
+        }
         return Some(HitRegion::Rect { x, y, w, h });
     }
 
@@ -2869,5 +2914,107 @@ mod tests {
         assert!(ids.contains(&"top-rect"));
         assert!(ids.contains(&"grp"));
         assert!(ids.contains(&"nested-grp"));
+    }
+
+    #[test]
+    fn path_bounds_computes_from_commands() {
+        let shape = json!({
+            "type": "path",
+            "commands": [
+                ["move_to", 0.0, -12.0],
+                ["line_to", 11.4, -3.7],
+                ["line_to", 7.0, 9.7],
+                ["line_to", -7.0, 9.7],
+                ["line_to", -11.4, -3.7],
+                "close"
+            ]
+        });
+        let bounds = path_bounds(&shape).unwrap();
+        assert!(bounds.0 < -11.0); // min_x
+        assert!(bounds.1 < -11.0); // min_y
+        assert!(bounds.2 > 11.0); // max_x
+        assert!(bounds.3 > 9.0); // max_y
+    }
+
+    #[test]
+    fn interactive_group_with_path_child_gets_hit_region() {
+        let shape = json!({
+            "type": "group",
+            "x": 50.0,
+            "y": 50.0,
+            "interactive": {"id": "star", "on_click": true},
+            "children": [
+                {
+                    "type": "path",
+                    "commands": [
+                        ["move_to", 0.0, -12.0],
+                        ["line_to", 11.4, -3.7],
+                        ["line_to", 7.0, 9.7],
+                        ["line_to", -7.0, 9.7],
+                        ["line_to", -11.4, -3.7],
+                        "close"
+                    ],
+                    "fill": "#ff0000"
+                }
+            ]
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        let region = compute_hit_region(&shape, interactive);
+        assert!(
+            region.is_some(),
+            "group with path child should have a hit region"
+        );
+    }
+
+    #[test]
+    fn hit_rect_on_group_offsets_by_group_position() {
+        let shape = json!({
+            "type": "group",
+            "x": 50.0,
+            "y": 14.0,
+            "interactive": {
+                "id": "star",
+                "on_click": true,
+                "hit_rect": {"x": -12.0, "y": -12.0, "w": 28.0, "h": 28.0}
+            },
+            "children": [
+                {"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10}
+            ]
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        let region = compute_hit_region(&shape, interactive).unwrap();
+        match region {
+            HitRegion::Rect { x, y, w, h } => {
+                // hit_rect (-12, -12) offset by group position (50, 14)
+                assert!((x - 38.0).abs() < 0.01, "x should be 50-12=38, got {x}");
+                assert!((y - 2.0).abs() < 0.01, "y should be 14-12=2, got {y}");
+                assert!((w - 28.0).abs() < 0.01);
+                assert!((h - 28.0).abs() < 0.01);
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hit_rect_on_non_group_is_absolute() {
+        let shape = json!({
+            "type": "rect",
+            "x": 100.0, "y": 200.0, "w": 50.0, "h": 50.0,
+            "interactive": {
+                "id": "btn",
+                "on_click": true,
+                "hit_rect": {"x": 10.0, "y": 20.0, "w": 60.0, "h": 60.0}
+            }
+        });
+        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
+        let region = compute_hit_region(&shape, interactive).unwrap();
+        match region {
+            HitRegion::Rect { x, y, .. } => {
+                // Non-group hit_rect is NOT offset by shape position
+                assert!((x - 10.0).abs() < 0.01, "x should be 10, got {x}");
+                assert!((y - 20.0).abs() < 0.01, "y should be 20, got {y}");
+            }
+            other => panic!("expected Rect, got {other:?}"),
+        }
     }
 }

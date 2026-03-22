@@ -176,17 +176,17 @@ impl Codec {
                     .map_err(|e| format!("msgpack decode (rmpv): {e}"))?;
                 let json_val = rmpv_to_json(rmpv_val);
                 serde_json::from_value(json_val.clone()).map_err(|e| {
-                    let mut msg = format!("msgpack decode (tag dispatch): {e}");
+                    let msg = format!("msgpack decode (tag dispatch): {e}");
                     #[cfg(debug_assertions)]
-                    {
+                    let msg = {
                         let dump = json_val.to_string();
                         let truncated = if dump.len() > 512 {
                             format!("{}...", &dump[..512])
                         } else {
                             dump
                         };
-                        msg.push_str(&format!(" | json: {truncated}"));
-                    }
+                        format!("{msg} | json: {truncated}")
+                    };
                     msg
                 })
             }

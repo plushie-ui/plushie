@@ -308,8 +308,17 @@ impl Session {
             let messages = self
                 .with_ui(|ui, renderer, cursor| {
                     let mut messages = Vec::new();
-                    let _status =
+                    let statuses =
                         ui.update(std::slice::from_ref(event), cursor, renderer, &mut messages);
+
+                    // Post-process Tab for focus navigation (same as the normal
+                    // iced application loop). Without this, Tab doesn't move
+                    // focus between widgets in headless mode.
+                    let (_ui_state, event_statuses) = statuses;
+                    if let Some(&status) = event_statuses.first() {
+                        iced_test::runtime::keyboard::handle_tab(event, status, ui, renderer);
+                    }
+
                     messages
                 })
                 .unwrap_or_default();

@@ -1867,9 +1867,11 @@ object with the following fields:
 
 ### Shape groups
 
-The `"group"` shape type collects multiple shapes into a single
-interactive unit. Groups are the recommended way to build multi-shape
-clickable elements (e.g. a bar with a label, an icon with a badge).
+Groups wrap one or more shapes into a single interactive unit. To make
+any shape interactive (clickable, hoverable, draggable), wrap it in a
+group with the `interactive` field. The group computes its hit region
+automatically from its children's bounding boxes -- this works for all
+shape types including paths.
 
 ```json
 {
@@ -1887,6 +1889,20 @@ clickable elements (e.g. a bar with a label, an icon with a badge).
 }
 ```
 
+A group with a single child works too -- this is how you make an
+individual path or shape interactive:
+
+```json
+{
+  "type": "group",
+  "x": 100, "y": 50,
+  "interactive": {"id": "star", "on_click": true},
+  "children": [
+    {"type": "path", "commands": [["move_to", 0, -12], ...], "fill": "#f59e0b"}
+  ]
+}
+```
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `x`, `y` | number | Translation offset applied to all children |
@@ -1899,10 +1915,11 @@ work recursively -- each level adds its own translation.
 
 **Hit region.** The group's bounding box is computed automatically
 from its children. Shape types with computable bounds: `rect`,
-`circle`, `line`, `text`, `image`, `svg`, and nested `group`. If
-the children contain only shapes without automatic bounds (paths,
-clips, transforms), provide an explicit `hit_rect` on the
-`interactive` object.
+`circle`, `line`, `text`, `path`, `image`, `svg`, and nested `group`.
+If the children contain only shapes without automatic bounds (clips,
+transforms), provide an explicit `hit_rect` on the `interactive`
+object. For groups, `hit_rect` is relative to the group's origin
+(offset by the group's x/y position automatically).
 
 ### Hit testing
 
@@ -1913,6 +1930,7 @@ The renderer infers hit regions automatically for common shape types:
 | `rect` | Point-in-rect |
 | `circle` | Distance from center <= radius |
 | `line` | Distance to line segment (minimum 2px half-width for usability) |
+| `path` | Bounding box of path command coordinates |
 | `group` | Bounding box of children (see Shape groups above) |
 | Other shapes | No automatic inference -- use `hit_rect` for an explicit rectangular hit region |
 
