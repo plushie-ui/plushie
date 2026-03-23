@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-03-23
+
+### Fixed
+
+- WASM release builds now disable `wasm-bindgen` `externref`, avoiding
+  browser startup failures such as `RangeError: failed to grow table`.
+- Inline fonts supplied in settings are now loaded into the font system
+  before the first render. This fixes missing default text rendering on
+  WASM when no system fonts are available.
+
 ## [0.5.0] - 2026-03-23
 
 ### Breaking changes
