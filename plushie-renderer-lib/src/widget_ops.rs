@@ -66,10 +66,11 @@ impl App {
                 let focus_task =
                     iced::widget::operation::focus::<Message>(iced::widget::Id::from(target.clone()));
                 if !element_id.is_empty() {
-                    // Emit the focus event directly to the SDK.
-                    let _ = emit_event(OutgoingEvent::canvas_element_focused(
-                        target, element_id,
-                    ));
+                    // Store the pending focus in caches so the canvas
+                    // Program can set focused_id on the next update().
+                    self.core
+                        .caches
+                        .set_canvas_pending_focus(target, element_id);
                 }
                 focus_task
             }

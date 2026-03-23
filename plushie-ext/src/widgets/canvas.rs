@@ -916,6 +916,9 @@ struct CanvasState {
     /// in two-level navigation. `None` when navigating at the top level
     /// or when no focusable groups exist.
     focused_group: Option<String>,
+    /// Tracks the last consumed pending_focus to prevent re-firing.
+    /// See pending_focus consumption in update().
+    last_consumed_pending: Option<String>,
 }
 
 struct CanvasProgram<'a> {
@@ -935,6 +938,9 @@ struct CanvasProgram<'a> {
     interactive_elements: &'a [InteractiveElement],
     /// Arrow key navigation mode.
     arrow_mode: ArrowMode,
+    /// Pending programmatic focus from `focus_element` widget_op.
+    /// Consumed at the top of `update()` to set `focused_id`.
+    pending_focus: Option<String>,
 }
 
 impl CanvasProgram<'_> {
@@ -1158,6 +1164,230 @@ impl CanvasProgram<'_> {
                 // new design. Draw them directly.
                 draw_canvas_shape(frame, shape, images);
             }
+        }
+    }
+
+    /// Handle keyboard events for interactive element navigation.
+    ///
+    /// Extracted from `update()` for readability. Implements the roving
+    /// tabindex pattern with two-level navigation for focusable groups.
+    fn handle_keyboard(
+        &self,
+        state: &mut CanvasState,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+    ) -> Option<iced::widget::Action<Message>> {
+        if state.dragging.is_some() {
+            return Some(iced::widget::Action::capture());
+        }
+
+        use keyboard::key::Named;
+
+        let current_idx = self.resolve_focus_index(state);
+        if current_idx.is_none() && state.focused_id.is_some() {
+            state.focused_group = None;
+            if let Some(msg) = self.set_focus(state, None) {
+                return Some(iced::widget::Action::publish(msg).and_capture());
+            }
+        }
+
+        let focus_to = |state: &mut CanvasState, idx: Option<usize>| -> Option<iced::widget::Action<Message>> {
+            match self.set_focus(state, idx) {
+                Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
+                None => Some(iced::widget::Action::capture()),
+            }
+        };
+
+        let has_focusable_groups = self.interactive_elements.iter().any(|e| e.focusable);
+        let arrow_indices: Vec<usize> = if let Some(ref gid) = state.focused_group {
+            self.group_child_indices(gid)
+        } else if has_focusable_groups {
+            self.top_level_indices()
+        } else {
+            (0..self.interactive_elements.len()).collect()
+        };
+        let arrow_pos = current_idx.and_then(|ci| arrow_indices.iter().position(|&i| i == ci));
+        let arrow_count = arrow_indices.len();
+
+        match key {
+            keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
+                let top = self.top_level_indices();
+                let top_pos = current_idx.and_then(|ci| {
+                    if let Some(ref gid) = state.focused_group {
+                        top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                    } else {
+                        top.iter().position(|&i| i == ci)
+                    }
+                });
+                match top_pos {
+                    None => {
+                        if let Some(&first) = top.first() {
+                            state.focused_group = None;
+                            let elem = &self.interactive_elements[first];
+                            if elem.focusable {
+                                state.focused_group = Some(elem.id.clone());
+                                let children = self.group_child_indices(&elem.id);
+                                if let Some(&fc) = children.first() {
+                                    focus_to(state, Some(fc))
+                                } else {
+                                    focus_to(state, Some(first))
+                                }
+                            } else {
+                                focus_to(state, Some(first))
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    Some(pos) if pos + 1 < top.len() => {
+                        let next_idx = top[pos + 1];
+                        let elem = &self.interactive_elements[next_idx];
+                        if elem.focusable {
+                            state.focused_group = Some(elem.id.clone());
+                            let children = self.group_child_indices(&elem.id);
+                            if let Some(&fc) = children.first() {
+                                focus_to(state, Some(fc))
+                            } else {
+                                focus_to(state, Some(next_idx))
+                            }
+                        } else {
+                            state.focused_group = None;
+                            focus_to(state, Some(next_idx))
+                        }
+                    }
+                    Some(_) => None,
+                }
+            }
+            keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
+                let top = self.top_level_indices();
+                let top_pos = current_idx.and_then(|ci| {
+                    if let Some(ref gid) = state.focused_group {
+                        top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                    } else {
+                        top.iter().position(|&i| i == ci)
+                    }
+                });
+                match top_pos {
+                    None => {
+                        if let Some(&last) = top.last() {
+                            let elem = &self.interactive_elements[last];
+                            if elem.focusable {
+                                state.focused_group = Some(elem.id.clone());
+                                let children = self.group_child_indices(&elem.id);
+                                if let Some(&lc) = children.last() {
+                                    focus_to(state, Some(lc))
+                                } else {
+                                    focus_to(state, Some(last))
+                                }
+                            } else {
+                                state.focused_group = None;
+                                focus_to(state, Some(last))
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    Some(0) => None,
+                    Some(pos) => {
+                        let prev_idx = top[pos - 1];
+                        let elem = &self.interactive_elements[prev_idx];
+                        if elem.focusable {
+                            state.focused_group = Some(elem.id.clone());
+                            let children = self.group_child_indices(&elem.id);
+                            if let Some(&lc) = children.last() {
+                                focus_to(state, Some(lc))
+                            } else {
+                                focus_to(state, Some(prev_idx))
+                            }
+                        } else {
+                            state.focused_group = None;
+                            focus_to(state, Some(prev_idx))
+                        }
+                    }
+                }
+            }
+            keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight)
+                if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
+            {
+                match (arrow_pos, self.arrow_mode) {
+                    (None, _) => focus_to(state, Some(arrow_indices[0])),
+                    (Some(pos), ArrowMode::Wrap) => {
+                        focus_to(state, Some(arrow_indices[(pos + 1) % arrow_count]))
+                    }
+                    (Some(pos), _) if pos + 1 < arrow_count => {
+                        focus_to(state, Some(arrow_indices[pos + 1]))
+                    }
+                    (Some(_), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
+                    (Some(_), ArrowMode::Linear) => None,
+                    _ => None,
+                }
+            }
+            keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft)
+                if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
+            {
+                match (arrow_pos, self.arrow_mode) {
+                    (None, _) => focus_to(state, Some(*arrow_indices.last().unwrap())),
+                    (Some(0), ArrowMode::Wrap) => {
+                        focus_to(state, Some(*arrow_indices.last().unwrap()))
+                    }
+                    (Some(0), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
+                    (Some(0), ArrowMode::Linear) => None,
+                    (Some(pos), _) => focus_to(state, Some(arrow_indices[pos - 1])),
+                }
+            }
+            keyboard::Key::Named(Named::Enter | Named::Space) => {
+                if let Some(idx) = current_idx {
+                    let element = &self.interactive_elements[idx];
+                    if element.on_click {
+                        let center = hit_region_center(&element.hit_region);
+                        Some(iced::widget::Action::publish(Message::CanvasElementClick {
+                            canvas_id: self.id.clone(),
+                            element_id: element.id.clone(),
+                            x: center.x,
+                            y: center.y,
+                            button: "keyboard".to_string(),
+                        }).and_capture())
+                    } else {
+                        Some(iced::widget::Action::capture())
+                    }
+                } else {
+                    None
+                }
+            }
+            keyboard::Key::Named(Named::Escape) => {
+                if state.focused_group.is_some() {
+                    let gid = state.focused_group.take().unwrap();
+                    let group_idx = self.interactive_elements.iter().position(|e| e.id == gid);
+                    match self.set_focus(state, group_idx) {
+                        Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
+                        None => Some(iced::widget::Action::capture()),
+                    }
+                } else if state.focused_id.is_some() {
+                    match self.set_focus(state, None) {
+                        Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
+                        None => Some(iced::widget::Action::capture()),
+                    }
+                } else {
+                    None
+                }
+            }
+            keyboard::Key::Named(Named::Home) if !arrow_indices.is_empty() => {
+                focus_to(state, Some(arrow_indices[0]))
+            }
+            keyboard::Key::Named(Named::End) if !arrow_indices.is_empty() => {
+                focus_to(state, Some(*arrow_indices.last().unwrap()))
+            }
+            keyboard::Key::Named(Named::PageDown) if !arrow_indices.is_empty() => {
+                let page_size = 10.min(arrow_count);
+                let pos = arrow_pos.unwrap_or(0);
+                focus_to(state, Some(arrow_indices[(pos + page_size).min(arrow_count - 1)]))
+            }
+            keyboard::Key::Named(Named::PageUp) if !arrow_indices.is_empty() => {
+                let page_size = 10.min(arrow_count);
+                let pos = arrow_pos.unwrap_or(0);
+                focus_to(state, Some(arrow_indices[pos.saturating_sub(page_size)]))
+            }
+            _ => None,
         }
     }
 }
@@ -1943,6 +2173,27 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             }
         };
 
+        // Consume pending programmatic focus from focus_element widget_op.
+        // The cache entry persists across frames (can't drain from immutable
+        // ref), so we track consumption in state to prevent re-firing.
+        if let Some(ref pending) = self.pending_focus {
+            if state.last_consumed_pending.as_deref() != Some(pending.as_str()) {
+                state.last_consumed_pending = Some(pending.clone());
+                let idx = self
+                    .interactive_elements
+                    .iter()
+                    .position(|e| e.id == *pending);
+                if let Some(idx) = idx {
+                    if let Some(msg) = self.set_focus(state, Some(idx)) {
+                        state.focused_group = self.interactive_elements[idx]
+                            .parent_group
+                            .clone();
+                        return Some(iced::widget::Action::publish(msg));
+                    }
+                }
+            }
+        }
+
         match event {
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let mut action: Option<iced::widget::Action<Message>> = None;
@@ -2159,275 +2410,13 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if !self.interactive_elements.is_empty() =>
             {
-                // Suppress keyboard navigation during active drag.
-                if state.dragging.is_some() {
-                    return Some(iced::widget::Action::capture());
-                }
-
-                use keyboard::key::Named;
-
-                // Resolve focused_id to a current index. If the focused
-                // element was removed between renders, clear focus.
-                let current_idx = self.resolve_focus_index(state);
-                if current_idx.is_none() && state.focused_id.is_some() {
-                    state.focused_group = None;
-                    if let Some(msg) = self.set_focus(state, None) {
-                        return Some(iced::widget::Action::publish(msg).and_capture());
-                    }
-                }
-
-                // Helper: set focus and return a capturing action.
-                let focus_to = |state: &mut CanvasState, idx: Option<usize>| -> Option<iced::widget::Action<Message>> {
-                    match self.set_focus(state, idx) {
-                        Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
-                        None => Some(iced::widget::Action::capture()),
-                    }
-                };
-
-                // Determine the navigation scope: when inside a focusable
-                // group, arrows navigate the group's children. Otherwise,
-                // arrows navigate the full flat list. Tab always moves
-                // between top-level entries.
-                let has_focusable_groups = self.interactive_elements.iter().any(|e| e.focusable);
-
-                // Arrow navigation indices: group children if in a group,
-                // otherwise the full flat list.
-                let arrow_indices: Vec<usize> = if let Some(ref gid) = state.focused_group {
-                    self.group_child_indices(gid)
-                } else if has_focusable_groups {
-                    // At top level with focusable groups: arrows navigate
-                    // top-level entries only.
-                    self.top_level_indices()
-                } else {
-                    // No focusable groups at all: arrows navigate flat list.
-                    (0..self.interactive_elements.len()).collect()
-                };
-
-                // Find current element's position within the arrow scope.
-                let arrow_pos = current_idx.and_then(|ci| {
-                    arrow_indices.iter().position(|&i| i == ci)
-                });
-                let arrow_count = arrow_indices.len();
-
-                match key {
-                    // -- Tab: always moves between top-level entries --
-                    keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
-                        let top = self.top_level_indices();
-                        let top_pos = current_idx.and_then(|ci| {
-                            // Current element might be a group child.
-                            // Find the parent group's position in top-level.
-                            if let Some(ref gid) = state.focused_group {
-                                top.iter().position(|&i| self.interactive_elements[i].id == *gid)
-                            } else {
-                                top.iter().position(|&i| i == ci)
-                            }
-                        });
-                        match top_pos {
-                            None => {
-                                // No current focus -> focus first top-level entry.
-                                if let Some(&first) = top.first() {
-                                    state.focused_group = None;
-                                    let elem = &self.interactive_elements[first];
-                                    if elem.focusable {
-                                        // Enter the focusable group: focus its first child.
-                                        state.focused_group = Some(elem.id.clone());
-                                        let children = self.group_child_indices(&elem.id);
-                                        if let Some(&first_child) = children.first() {
-                                            focus_to(state, Some(first_child))
-                                        } else {
-                                            focus_to(state, Some(first))
-                                        }
-                                    } else {
-                                        focus_to(state, Some(first))
-                                    }
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(pos) if pos + 1 < top.len() => {
-                                // Move to next top-level entry.
-                                let next_idx = top[pos + 1];
-                                let elem = &self.interactive_elements[next_idx];
-                                if elem.focusable {
-                                    state.focused_group = Some(elem.id.clone());
-                                    let children = self.group_child_indices(&elem.id);
-                                    if let Some(&first_child) = children.first() {
-                                        focus_to(state, Some(first_child))
-                                    } else {
-                                        focus_to(state, Some(next_idx))
-                                    }
-                                } else {
-                                    state.focused_group = None;
-                                    focus_to(state, Some(next_idx))
-                                }
-                            }
-                            Some(_) => {
-                                // At last top-level entry. Let Tab propagate.
-                                None
-                            }
-                        }
-                    }
-                    keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
-                        let top = self.top_level_indices();
-                        let top_pos = current_idx.and_then(|ci| {
-                            if let Some(ref gid) = state.focused_group {
-                                top.iter().position(|&i| self.interactive_elements[i].id == *gid)
-                            } else {
-                                top.iter().position(|&i| i == ci)
-                            }
-                        });
-                        match top_pos {
-                            None => {
-                                if let Some(&last) = top.last() {
-                                    let elem = &self.interactive_elements[last];
-                                    if elem.focusable {
-                                        state.focused_group = Some(elem.id.clone());
-                                        let children = self.group_child_indices(&elem.id);
-                                        if let Some(&last_child) = children.last() {
-                                            focus_to(state, Some(last_child))
-                                        } else {
-                                            focus_to(state, Some(last))
-                                        }
-                                    } else {
-                                        state.focused_group = None;
-                                        focus_to(state, Some(last))
-                                    }
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(0) => {
-                                // At first top-level entry. Let Shift+Tab propagate.
-                                None
-                            }
-                            Some(pos) => {
-                                let prev_idx = top[pos - 1];
-                                let elem = &self.interactive_elements[prev_idx];
-                                if elem.focusable {
-                                    state.focused_group = Some(elem.id.clone());
-                                    let children = self.group_child_indices(&elem.id);
-                                    if let Some(&last_child) = children.last() {
-                                        focus_to(state, Some(last_child))
-                                    } else {
-                                        focus_to(state, Some(prev_idx))
-                                    }
-                                } else {
-                                    state.focused_group = None;
-                                    focus_to(state, Some(prev_idx))
-                                }
-                            }
-                        }
-                    }
-
-                    // -- Arrows: navigate within current scope --
-                    keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight)
-                        if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
-                    {
-                        match (arrow_pos, self.arrow_mode) {
-                            (None, _) => focus_to(state, Some(arrow_indices[0])),
-                            (Some(pos), ArrowMode::Wrap) => {
-                                focus_to(state, Some(arrow_indices[(pos + 1) % arrow_count]))
-                            }
-                            (Some(pos), _) if pos + 1 < arrow_count => {
-                                focus_to(state, Some(arrow_indices[pos + 1]))
-                            }
-                            (Some(_), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
-                            (Some(_), ArrowMode::Linear) => None,
-                            _ => None,
-                        }
-                    }
-                    keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft)
-                        if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
-                    {
-                        match (arrow_pos, self.arrow_mode) {
-                            (None, _) => focus_to(state, Some(*arrow_indices.last().unwrap())),
-                            (Some(0), ArrowMode::Wrap) => {
-                                focus_to(state, Some(*arrow_indices.last().unwrap()))
-                            }
-                            (Some(0), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
-                            (Some(0), ArrowMode::Linear) => None,
-                            (Some(pos), _) => {
-                                focus_to(state, Some(arrow_indices[pos - 1]))
-                            }
-                        }
-                    }
-
-                    keyboard::Key::Named(Named::Enter | Named::Space) => {
-                        if let Some(idx) = current_idx {
-                            let element = &self.interactive_elements[idx];
-                            if element.on_click {
-                                let center = hit_region_center(&element.hit_region);
-                                let msg = Message::CanvasElementClick {
-                                    canvas_id: self.id.clone(),
-                                    element_id: element.id.clone(),
-                                    x: center.x,
-                                    y: center.y,
-                                    button: "keyboard".to_string(),
-                                };
-                                Some(iced::widget::Action::publish(msg).and_capture())
-                            } else {
-                                Some(iced::widget::Action::capture())
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    keyboard::Key::Named(Named::Escape) => {
-                        if state.focused_group.is_some() {
-                            // Inside a focusable group: exit to group level.
-                            // Focus the group element itself (top-level entry).
-                            // The SDK infers group exit from the focus moving
-                            // to an element with parent_group == None.
-                            let gid = state.focused_group.take().unwrap();
-                            let group_idx = self.interactive_elements
-                                .iter()
-                                .position(|e| e.id == gid);
-                            match self.set_focus(state, group_idx) {
-                                Some(msg) => {
-                                    Some(iced::widget::Action::publish(msg).and_capture())
-                                }
-                                None => Some(iced::widget::Action::capture()),
-                            }
-                        } else if state.focused_id.is_some() {
-                            // At top level: blur and clear focus.
-                            match self.set_focus(state, None) {
-                                Some(msg) => {
-                                    Some(iced::widget::Action::publish(msg).and_capture())
-                                }
-                                None => Some(iced::widget::Action::capture()),
-                            }
-                        } else {
-                            // Nothing focused -- let Escape propagate.
-                            None
-                        }
-                    }
-
-                    // Home/End/PageUp/PageDown navigate within current scope.
-                    keyboard::Key::Named(Named::Home) if !arrow_indices.is_empty() => {
-                        focus_to(state, Some(arrow_indices[0]))
-                    }
-                    keyboard::Key::Named(Named::End) if !arrow_indices.is_empty() => {
-                        focus_to(state, Some(*arrow_indices.last().unwrap()))
-                    }
-                    keyboard::Key::Named(Named::PageDown) if !arrow_indices.is_empty() => {
-                        let page_size = 10.min(arrow_count);
-                        let pos = arrow_pos.unwrap_or(0);
-                        let new_pos = (pos + page_size).min(arrow_count - 1);
-                        focus_to(state, Some(arrow_indices[new_pos]))
-                    }
-                    keyboard::Key::Named(Named::PageUp) if !arrow_indices.is_empty() => {
-                        let page_size = 10.min(arrow_count);
-                        let pos = arrow_pos.unwrap_or(0);
-                        let new_pos = pos.saturating_sub(page_size);
-                        focus_to(state, Some(arrow_indices[new_pos]))
-                    }
-                    _ => None,
-                }
+                self.handle_keyboard(state, key, *modifiers)
             }
 
             _ => None,
         }
     }
+
 
     fn draw(
         &self,
@@ -2593,6 +2582,16 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         actions
     }
 
+    fn active_descendant_id(
+        &self,
+        state: &CanvasState,
+    ) -> Option<iced::widget::Id> {
+        state
+            .focused_id
+            .as_ref()
+            .map(|id| iced::widget::Id::from(id.clone()))
+    }
+
     fn operate_accessible(
         &self,
         _state: &CanvasState,
@@ -2627,9 +2626,12 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 height: (by - ty).abs(),
             };
 
+            // Pass widget ID so active_descendant references can resolve.
+            let wid = iced::widget::Id::from(element.id.clone());
+
             if element.focusable {
                 // Focusable group: emit as parent, then traverse children.
-                operation.accessible(None, element_bounds, &a11y.to_accessible());
+                operation.accessible(Some(&wid), element_bounds, &a11y.to_accessible());
                 operation.traverse(&mut |child_op| {
                     for child in self.interactive_elements.iter() {
                         if child.parent_group.as_deref() != Some(&element.id) {
@@ -2651,13 +2653,18 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                                 width: (cbx - ctx).abs(),
                                 height: (cby - cty).abs(),
                             };
-                            child_op.accessible(None, child_bounds, &child_a11y.to_accessible());
+                            let child_wid = iced::widget::Id::from(child.id.clone());
+                            child_op.accessible(
+                                Some(&child_wid),
+                                child_bounds,
+                                &child_a11y.to_accessible(),
+                            );
                         }
                     }
                 });
             } else if element.parent_group.is_none() {
                 // Top-level non-group element.
-                operation.accessible(None, element_bounds, &a11y.to_accessible());
+                operation.accessible(Some(&wid), element_bounds, &a11y.to_accessible());
             }
             // Elements with parent_group are emitted inside their group's traverse().
         }
@@ -2765,6 +2772,11 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         arrow_mode: prop_str(props, "arrow_mode")
             .map(|s| ArrowMode::from_str(&s))
             .unwrap_or_default(),
+        pending_focus: ctx
+            .caches
+            .canvas_pending_focus
+            .get(&node.id)
+            .cloned(),
     })
     .width(width)
     .height(height);
@@ -4123,6 +4135,7 @@ mod tests {
             images: &IMAGES,
             interactive_elements: elements,
             arrow_mode: ArrowMode::Wrap,
+            pending_focus: None,
         }
     }
 
@@ -4163,6 +4176,7 @@ mod tests {
             dragging: None,
             focused_id: Some("b".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         assert_eq!(program.resolve_focus_index(&state), Some(1));
     }
@@ -4178,6 +4192,7 @@ mod tests {
             dragging: None,
             focused_id: Some("deleted".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4193,6 +4208,7 @@ mod tests {
             dragging: None,
             focused_id: None,
             focused_group: None,
+            last_consumed_pending: None,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4208,6 +4224,7 @@ mod tests {
             dragging: None,
             focused_id: None,
             focused_group: None,
+            last_consumed_pending: None,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4236,6 +4253,7 @@ mod tests {
             dragging: None,
             focused_id: Some("a".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4264,6 +4282,7 @@ mod tests {
             dragging: None,
             focused_id: Some("a".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let msg = program.set_focus(&mut state, Some(0));
         assert!(msg.is_none());
@@ -4281,6 +4300,7 @@ mod tests {
             dragging: None,
             focused_id: Some("a".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_some());
@@ -4309,6 +4329,7 @@ mod tests {
             dragging: None,
             focused_id: None,
             focused_group: None,
+            last_consumed_pending: None,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_none());
@@ -4325,6 +4346,7 @@ mod tests {
             dragging: None,
             focused_id: Some("a".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         // Index 99 is out of bounds -> new_id becomes None -> blur.
         let msg = program.set_focus(&mut state, Some(99));
@@ -4347,6 +4369,7 @@ mod tests {
             dragging: None,
             focused_id: None,
             focused_group: None,
+            last_consumed_pending: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4365,6 +4388,7 @@ mod tests {
             dragging: None,
             focused_id: Some("btn".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4387,6 +4411,7 @@ mod tests {
             dragging: None,
             focused_id: Some("focus-btn".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers.len(), 2);
@@ -4411,6 +4436,7 @@ mod tests {
             dragging: None,
             focused_id: Some("focus-btn".to_string()),
             focused_group: None,
+            last_consumed_pending: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         // Should not duplicate "ui".
@@ -4428,6 +4454,7 @@ mod tests {
             dragging: None,
             focused_id: None,
             focused_group: None,
+            last_consumed_pending: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert!(layers.is_empty());

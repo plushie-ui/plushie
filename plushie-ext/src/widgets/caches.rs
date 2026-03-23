@@ -97,6 +97,11 @@ define_caches! {
     /// Per-canvas interactive element data parsed from group JSON. Used for
     /// hit testing in `Program::update()` without re-parsing every frame.
     canvas_interactions: Vec<super::canvas::InteractiveElement>,
+    /// Pending programmatic focus for a canvas element, set by the
+    /// `focus_element` widget_op. Read and drained by `render_canvas`,
+    /// which passes the value to `CanvasProgram`. The Program consumes
+    /// it at the top of `update()` to set `focused_id`.
+    canvas_pending_focus: String,
     /// Per-qr_code caches (content hash, canvas Cache).
     qr_code_caches: (u64, iced_canvas::Cache),
     /// Resolved themes for Themer widget nodes.
@@ -136,6 +141,13 @@ impl WidgetCaches {
     /// Get an immutable reference to a pane_grid State by node ID.
     pub fn pane_grid_state(&self, id: &str) -> Option<&pane_grid::State<String>> {
         self.pane_grid_states.get(id)
+    }
+
+    /// Set a pending programmatic focus for a canvas element.
+    /// Called by the `focus_element` widget_op. The canvas Program
+    /// consumes this on the next update cycle.
+    pub fn set_canvas_pending_focus(&mut self, canvas_id: String, element_id: String) {
+        self.canvas_pending_focus.insert(canvas_id, element_id);
     }
 }
 
