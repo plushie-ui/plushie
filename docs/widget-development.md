@@ -18,7 +18,7 @@ section in the protocol docs.
 
 ## Extension widgets
 
-A Rust crate that implements `WidgetExtension` from `plushie-core`.
+A Rust crate that implements `WidgetExtension` from `plushie-ext`.
 Your host SDK handles compilation and binary generation. You write
 the widget logic.
 

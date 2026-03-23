@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-plushie-core = "0.3"
+plushie-ext = "0.3"
 ```
 
 Your host SDK generates the binary that links your crate. You
@@ -26,14 +26,14 @@ setup.
 
 **Important:** Never add a direct `iced` dependency. plushie uses
 a fork (`plushie-iced`), and version mismatches will fail to compile.
-Use `plushie_core::iced::*` for any iced types not in the prelude.
+Use `plushie_ext::iced::*` for any iced types not in the prelude.
 
 **Note:** `column` and `row` are excluded from the prelude because
 the function forms conflict with the `column!`/`row!` macros under
 glob import. Import them explicitly:
 
 ```rust
-use plushie_core::iced::widget::{column, row};
+use plushie_ext::iced::widget::{column, row};
 ```
 
 **Note:** `WidgetExtension` requires `Send + Sync + 'static`. Your
@@ -47,7 +47,7 @@ the struct itself, or use `ExtensionCaches` (which also requires
 Import everything from the prelude:
 
 ```rust
-use plushie_core::prelude::*;
+use plushie_ext::prelude::*;
 ```
 
 Implement `WidgetExtension` with three required methods:
@@ -574,14 +574,14 @@ through to the screen reader.
 
 ## Testing
 
-The `plushie_core::testing` module provides helpers for writing unit
+The `plushie_ext::testing` module provides helpers for writing unit
 tests without a running renderer:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plushie_core::testing::*;
+    use plushie_ext::testing::*;
     use serde_json::json;
 
     #[test]
@@ -707,7 +707,7 @@ when a star is selected.
 
 <!-- test: extension_guide_rating_renders — keep this code block in sync with the test -->
 ```rust
-use plushie_core::prelude::*;
+use plushie_ext::prelude::*;
 use serde_json::json;
 
 pub struct Rating;
@@ -768,7 +768,7 @@ When a star is clicked, the host receives:
 ## Troubleshooting
 
 **Red "Extension error" placeholder.** Your extension panicked 3
-times in `render()`. Check the logs (`RUST_LOG=plushie_core=debug`)
+times in `render()`. Check the logs (`RUST_LOG=plushie_ext=debug`)
 for the panic messages. Set `PLUSHIE_NO_CATCH_UNWIND=1` for a full
 backtrace.
 
@@ -777,7 +777,7 @@ string in your `type_names()`. Check for typos. Type names are
 case-sensitive.
 
 **Props are always None.** Make sure you're reading the correct
-key name. Use `RUST_LOG=plushie_core=trace` to see prop parsing
+key name. Use `RUST_LOG=plushie_ext=trace` to see prop parsing
 trace logs.
 
 **ExtensionCaches returns None.** Either the key doesn't match
@@ -787,7 +787,7 @@ are logged as warnings.
 
 **Compilation fails with iced version conflict.** You have a
 direct `iced` dependency in your Cargo.toml. Remove it and use
-`plushie_core::iced::*` instead.
+`plushie_ext::iced::*` instead.
 
 **Panic: "does not support multiplexed sessions".** Your extension
 is running with `--max-sessions > 1` but doesn't implement
@@ -795,9 +795,9 @@ is running with `--max-sessions > 1` but doesn't implement
 
 ## Further reading
 
-- `WidgetExtension` trait documentation in `plushie-core/src/extensions.rs`
-- Prop helpers API in `plushie-core/src/prop_helpers.rs`
-- Testing helpers in `plushie-core/src/testing.rs`
+- `WidgetExtension` trait documentation in `plushie-ext/src/extensions.rs`
+- Prop helpers API in `plushie-ext/src/prop_helpers.rs`
+- Testing helpers in `plushie-ext/src/testing.rs`
 - [Core Widget Guide](core-widget-guide.md) for building reusable
   iced widgets
 - [Widget Development](widget-development.md) for the decision

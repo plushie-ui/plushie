@@ -1,4 +1,4 @@
-# plushie
+# plushie-renderer
 
 A standalone native GUI renderer driven by a simple wire protocol over
 stdin/stdout. Send it a tree of UI nodes as MessagePack or JSON, get
@@ -29,7 +29,7 @@ integration. They talk over stdio.
        | stdin    | stdout
        | trees    | events
        v          |
-  plushie (Rust binary)
+  plushie-renderer (Rust binary)
        |
   Native windows via iced
        |
@@ -141,7 +141,7 @@ overrides.
 notifications -- requested over the protocol, results delivered as
 events.
 
-**Custom widget extensions.** The extension SDK (plushie-core) lets you
+**Custom widget extensions.** The extension SDK (plushie-ext) lets you
 write new widget types in Rust without forking the renderer. Extensions
 range from simple render-only widgets to full interactive components
 with their own state, event handling, and lifecycle management.
@@ -207,16 +207,23 @@ wait for further messages on stdin (snapshots, patches, etc.).
 
 ## Project structure
 
-This workspace contains two crates:
+This workspace contains four crates:
 
-- **plushie-core** -- Library crate and public SDK. Wire protocol,
+- **plushie-ext** -- Library crate and public SDK. Wire protocol,
   tree management, widget rendering, theming, platform effects, and the
   `WidgetExtension` trait for custom widgets. Extension authors depend
   on this crate.
 
-- **plushie** -- Binary crate. Wires plushie-core into an
+- **plushie-renderer-lib** -- Shared renderer logic that compiles to
+  both native and wasm32. Contains the App struct, effect handler trait,
+  event processing, and window management.
+
+- **plushie-renderer** -- Binary crate. Wires plushie-ext into an
   `iced::daemon` application. Handles stdin/stdout I/O, window
   lifecycle, and the iced event loop.
+
+- **plushie-renderer-wasm** -- WASM entry point (cdylib). Runs the
+  renderer in the browser via wasm-bindgen.
 
 ## Capabilities included
 

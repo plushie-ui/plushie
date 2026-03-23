@@ -1,36 +1,33 @@
-//! Shared renderer logic for plushie.
+//! # plushie
 //!
-//! This crate contains the platform-independent rendering engine that
-//! processes incoming messages, dispatches iced updates, and emits
-//! outgoing events. It compiles to both native and wasm32 targets.
+//! Native GUI renderer binary. Three execution modes:
 //!
-//! Platform-specific behavior (I/O, effects, sleep) is injected via
-//! traits and cfg-gated dependencies. The `plushie` binary crate and
-//! `plushie-web` WASM crate each provide their own implementations.
+//! - **Windowed (default):** `plushie` -- Full iced rendering with real
+//!   windows and GPU. Production mode. Reports `"mode": "windowed"`.
+//! - **Headless:** `plushie --headless` -- No display server. Real
+//!   rendering via tiny-skia with persistent widget state. Accurate
+//!   screenshots after interactions. For CI with visual verification.
+//! - **Mock:** `plushie --mock` -- No rendering. Core + wire protocol
+//!   only. Stub screenshots. For fast protocol-level testing from
+//!   any language.
+//!
+//! All modes handle scripting messages (Query, Interact, TreeHash,
+//! Screenshot, Reset) for programmatic inspection and interaction.
+//!
+//! Wire codec auto-detection: the first byte of stdin determines the format
+//! (`{` = JSON, anything else = MessagePack). Override with `--json` or
+//! `--msgpack`.
 
-pub mod app;
-pub mod apply;
-pub mod constants;
-pub mod emitter;
-pub mod emitters;
-pub mod events;
-pub mod message_processing;
-pub mod scripting;
-pub mod settings;
-pub mod subscriptions;
-pub mod update;
-pub mod view;
-pub mod widget_ops;
-pub mod window_map;
-pub mod window_ops;
+mod effects;
+mod headless;
+mod output;
+mod renderer;
+pub(crate) mod transport;
 
-pub mod effects;
-
-/// The iced daemon application. See [`app::App`] for details.
-pub use app::App;
-
-/// Clamp or reject invalid scale factors. See [`app::validate_scale_factor`].
-pub use app::validate_scale_factor;
-
-/// Trait for platform-specific side effects. See [`effects::EffectHandler`].
-pub use effects::EffectHandler;
+/// Entry point for the plushie renderer.
+///
+/// Extension packages create a `PlushieAppBuilder`, register their extensions,
+/// and pass it here. The default `main.rs` simply passes an empty builder.
+pub fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result {
+    renderer::run(builder)
+}

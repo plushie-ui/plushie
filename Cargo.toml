@@ -1,5 +1,5 @@
 [workspace]
-members = ["plushie-core", "plushie-renderer", "plushie", "plushie-wasm"]
+members = ["plushie-ext", "plushie-renderer-lib", "plushie-renderer", "plushie-renderer-wasm"]
 resolver = "2"
 
 [workspace.package]
@@ -7,7 +7,7 @@ version = "0.4.1"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/plushie-ui/plushie"
+repository = "https://github.com/plushie-ui/plushie-renderer"
 authors = ["Daniel Hedlund <daniel@digitree.org>"]
 keywords = ["gui", "desktop", "renderer", "native", "iced"]
 categories = ["gui", "rendering"]

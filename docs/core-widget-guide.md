@@ -13,7 +13,7 @@ my-gauge/               depends on iced (via plushie-iced)
   src/lib.rs            the Widget impl -- rendering, layout, events, a11y
   Cargo.toml
 
-my-gauge-plushie/         depends on plushie-core + my-gauge
+my-gauge-plushie/         depends on plushie-ext + my-gauge
   src/lib.rs            WidgetExtension wrapper -- prop parsing, event bridging
   Cargo.toml
 ```
@@ -39,7 +39,7 @@ bridges events. Every host SDK gets the widget through this single
 wrapper -- no per-language duplication:
 
 ```rust
-use plushie_core::prelude::*;
+use plushie_ext::prelude::*;
 use my_gauge::gauge;
 
 pub struct GaugeExtension;
@@ -378,14 +378,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-plushie-core = "0.3"
+plushie-ext = "0.3"
 my-gauge = { path = "../my-gauge" }
 ```
 
 ### The wrapper
 
 ```rust
-use plushie_core::prelude::*;
+use plushie_ext::prelude::*;
 use my_gauge::gauge;
 
 pub struct GaugeExtension;
@@ -472,7 +472,7 @@ widget, verify it doesn't panic with various inputs.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plushie_core::testing::*;
+    use plushie_ext::testing::*;
     use serde_json::json;
 
     #[test]
@@ -525,7 +525,7 @@ automatically.
 
 If your widget is general-purpose enough to ship with every plushie
 installation (like text_input, slider, or canvas), it can be added
-to plushie-core instead of distributed as a separate crate.
+to plushie-ext instead of distributed as a separate crate.
 
 This is a contribution to the plushie project, not the normal
 distribution path:
@@ -533,17 +533,17 @@ distribution path:
 | What | Where |
 |------|-------|
 | The iced widget (if new to iced) | `plushie-iced` fork |
-| The render function | `plushie-core/src/widgets/` |
-| The validate schema | `plushie-core/src/widgets/validate.rs` |
-| Message variants (if new) | `plushie-core/src/message.rs` |
-| OutgoingEvent constructors | `plushie-core/src/protocol/outgoing.rs` |
-| Message wiring | `plushie/src/renderer/emitters.rs` |
-| Dispatch table entry | `plushie-core/src/widgets/render.rs` |
+| The render function | `plushie-ext/src/widgets/` |
+| The validate schema | `plushie-ext/src/widgets/validate.rs` |
+| Message variants (if new) | `plushie-ext/src/message.rs` |
+| OutgoingEvent constructors | `plushie-ext/src/protocol/outgoing.rs` |
+| Message wiring | `plushie-renderer-lib/src/emitters.rs` |
+| Dispatch table entry | `plushie-ext/src/widgets/render.rs` |
 
 The plushie-iced fork stays close to upstream iced. Only add to the
 fork for: new accessible roles, Widget trait extensions, or bug
 fixes not yet upstream. plushie-specific code (prop parsing, event
-emission, validation) belongs in plushie-core.
+emission, validation) belongs in plushie-ext.
 
 ## Further reading
 
@@ -553,4 +553,4 @@ emission, validation) belongs in plushie-core.
   framework
 - iced widget examples in the
   [iced repository](https://github.com/iced-rs/iced)
-- plushie-core rustdocs (`cargo doc --open` in the plushie workspace)
+- plushie-ext rustdocs (`cargo doc --open` in the plushie-renderer workspace)

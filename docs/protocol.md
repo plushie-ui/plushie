@@ -120,7 +120,7 @@ protocol version:
   "session": "",
   "protocol": 1,
   "version": "0.3.0",
-  "name": "plushie",
+  "name": "plushie-renderer",
   "mode": "headless",
   "backend": "tiny-skia",
   "transport": "stdio",
@@ -132,7 +132,7 @@ protocol version:
 |-------|------|-------------|
 | `protocol` | number | Protocol version (currently 1) |
 | `version` | string | Renderer build version |
-| `name` | string | Renderer name (always `"plushie"`) |
+| `name` | string | Renderer name (always `"plushie-renderer"`) |
 | `mode` | string | Execution mode: `"windowed"`, `"headless"`, or `"mock"` |
 | `backend` | string | Rendering backend: `"wgpu"` (windowed), `"tiny-skia"` (headless), `"none"` (mock) |
 | `transport` | string | Transport backend: `"stdio"` (default) or `"exec"` (future: `"connect"`, `"listen"`) |
@@ -240,7 +240,7 @@ All fields inside `settings` are optional.
 **Log level.** Renderer log verbosity is controlled via the `RUST_LOG`
 environment variable on the renderer process, not via a Settings field.
 The renderer's built-in default level is `warn`. Examples:
-`RUST_LOG=plushie=debug`, `RUST_LOG=plushie_core::widgets=trace`.
+`RUST_LOG=plushie_renderer=debug`, `RUST_LOG=plushie_ext::widgets=trace`.
 
 ### Snapshot
 

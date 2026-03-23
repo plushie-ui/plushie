@@ -1,6 +1,6 @@
 # Building for WASM
 
-plushie compiles to WebAssembly via the `plushie-wasm` crate. The WASM
+plushie compiles to WebAssembly via the `plushie-renderer-wasm` crate. The WASM
 module runs the full iced renderer in the browser (or any WASM host)
 and communicates with the host via JavaScript callbacks.
 
@@ -14,17 +14,17 @@ cargo install wasm-pack
 ## Quick build
 
 ```bash
-wasm-pack build plushie-wasm --target web
+wasm-pack build plushie-renderer-wasm --target web
 ```
 
-Output lands in `plushie-wasm/pkg/`:
+Output lands in `plushie-renderer-wasm/pkg/`:
 
 ```
-plushie-wasm/pkg/
-  plushie_wasm.js          # JS glue code (ESM)
-  plushie_wasm.d.ts        # TypeScript declarations
-  plushie_wasm_bg.wasm     # WASM binary
-  plushie_wasm_bg.wasm.d.ts
+plushie-renderer-wasm/pkg/
+  plushie_renderer_wasm.js          # JS glue code (ESM)
+  plushie_renderer_wasm.d.ts        # TypeScript declarations
+  plushie_renderer_wasm_bg.wasm     # WASM binary
+  plushie_renderer_wasm_bg.wasm.d.ts
   package.json
 ```
 
@@ -34,7 +34,7 @@ for webpack/vite. The `web` target works without a bundler.
 ## JavaScript API
 
 ```typescript
-import init, { PlushieApp } from './plushie_wasm.js';
+import init, { PlushieApp } from './plushie_renderer_wasm.js';
 
 await init();
 
@@ -57,11 +57,11 @@ sent via `send_message()` are processed on the next event loop tick.
 ## Custom builds with extensions
 
 Extensions are Rust code compiled into the WASM binary. Create a
-crate that depends on `plushie-wasm` and registers extensions:
+crate that depends on `plushie-renderer-wasm` and registers extensions:
 
 ```rust
-use plushie_wasm::PlushieApp;
-use plushie_core::app::PlushieAppBuilder;
+use plushie_renderer_wasm::PlushieApp;
+use plushie_ext::app::PlushieAppBuilder;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -105,12 +105,12 @@ wasm-pack fails at the optimization step, run wasm-opt manually:
 
 ```bash
 # Build without wasm-opt
-cargo build --target wasm32-unknown-unknown --release -p plushie-wasm
+cargo build --target wasm32-unknown-unknown --release -p plushie-renderer-wasm
 
 # Run wasm-opt manually with all WASM features enabled
-wasm-opt target/wasm32-unknown-unknown/release/plushie_wasm.wasm \
+wasm-opt target/wasm32-unknown-unknown/release/plushie_renderer_wasm.wasm \
     -Oz --all-features \
-    -o plushie-wasm/pkg/plushie_wasm_bg.wasm
+    -o plushie-renderer-wasm/pkg/plushie_renderer_wasm_bg.wasm
 ```
 
 Install a recent wasm-opt via `npm install -g binaryen` or your
@@ -141,7 +141,7 @@ The largest contributors (approximate, based on feature analysis):
 - **canvas** -- 2D drawing, hit testing, tessellation
 
 Feature-gating `markdown`, `highlighter`, `image`, and `svg` in
-plushie-core would let WASM builds exclude unused capabilities. This
+plushie-ext would let WASM builds exclude unused capabilities. This
 is not yet implemented but would be the next meaningful size
 reduction (estimated 20-30% for a minimal build).
 
