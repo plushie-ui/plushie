@@ -106,7 +106,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y binaryen
 
       - name: Build WASM
-        run: wasm-pack build plushie-renderer-wasm --target web
+        run: WASM_BINDGEN_EXTERNREF=0 wasm-pack build plushie-renderer-wasm --target web
 
       - name: Optimize with wasm-opt
         run: |
@@ -116,7 +116,6 @@ jobs:
             --enable-mutable-globals \
             --enable-nontrapping-float-to-int \
             --enable-sign-ext \
-            --enable-reference-types \
             --enable-multivalue \
             -o plushie-renderer-wasm/pkg/plushie_renderer_wasm_bg.wasm
 
