@@ -2600,23 +2600,66 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         operation: &mut dyn iced::advanced::widget::Operation,
     ) {
         let mut seen_ids = std::collections::HashSet::new();
-        for shape in self.interactive_elements {
-            let a11y = match &shape.a11y {
+
+        // Emit accessible nodes for each interactive element with a11y metadata.
+        // Focusable groups use traverse() to create parent-child relationships
+        // in the accessibility tree.
+        for element in self.interactive_elements {
+            let a11y = match &element.a11y {
                 Some(a) => a,
                 None => continue,
             };
-            // Deduplicate by ID (composites may share IDs).
-            if !seen_ids.insert(&shape.id) {
+            if !seen_ids.insert(&element.id) {
                 continue;
             }
-            let shape_rect = hit_region_to_rect(&shape.hit_region);
-            let shape_bounds = Rectangle {
-                x: canvas_bounds.x + shape_rect.x,
-                y: canvas_bounds.y + shape_rect.y,
-                width: shape_rect.width,
-                height: shape_rect.height,
+
+            // Compute bounds in canvas space using the element's transform.
+            let local_rect = hit_region_to_rect(&element.hit_region);
+            let (tx, ty) = element.transform.transform_point(local_rect.x, local_rect.y);
+            let (bx, by) = element.transform.transform_point(
+                local_rect.x + local_rect.width,
+                local_rect.y + local_rect.height,
+            );
+            let element_bounds = Rectangle {
+                x: canvas_bounds.x + tx.min(bx),
+                y: canvas_bounds.y + ty.min(by),
+                width: (bx - tx).abs(),
+                height: (by - ty).abs(),
             };
-            operation.accessible(None, shape_bounds, &a11y.to_accessible());
+
+            if element.focusable {
+                // Focusable group: emit as parent, then traverse children.
+                operation.accessible(None, element_bounds, &a11y.to_accessible());
+                operation.traverse(&mut |child_op| {
+                    for child in self.interactive_elements.iter() {
+                        if child.parent_group.as_deref() != Some(&element.id) {
+                            continue;
+                        }
+                        if let Some(ref child_a11y) = child.a11y {
+                            if !seen_ids.insert(&child.id) {
+                                continue;
+                            }
+                            let cr = hit_region_to_rect(&child.hit_region);
+                            let (ctx, cty) = child.transform.transform_point(cr.x, cr.y);
+                            let (cbx, cby) = child.transform.transform_point(
+                                cr.x + cr.width,
+                                cr.y + cr.height,
+                            );
+                            let child_bounds = Rectangle {
+                                x: canvas_bounds.x + ctx.min(cbx),
+                                y: canvas_bounds.y + cty.min(cby),
+                                width: (cbx - ctx).abs(),
+                                height: (cby - cty).abs(),
+                            };
+                            child_op.accessible(None, child_bounds, &child_a11y.to_accessible());
+                        }
+                    }
+                });
+            } else if element.parent_group.is_none() {
+                // Top-level non-group element.
+                operation.accessible(None, element_bounds, &a11y.to_accessible());
+            }
+            // Elements with parent_group are emitted inside their group's traverse().
         }
     }
 }
@@ -2779,6 +2822,12 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 /// cursor falls within this clip region.
 ///
 /// `focusable_parent` is the ID of the nearest ancestor focusable group.
+///
+/// **Limitation**: Nested focusable groups (focusable inside focusable)
+/// are not fully supported. The inner group appears as a child of the
+/// outer group in arrow navigation, but there is no keyboard mechanism
+/// to "drill into" the inner group. This is an uncommon edge case --
+/// most canvases have at most one level of focusable groups.
 /// Children of a focusable group get `parent_group = Some(group_id)`,
 /// which controls two-level keyboard navigation: Tab moves between
 /// top-level entries, arrows navigate within a focused group's children.
@@ -2897,6 +2946,81 @@ fn intersect_rects(
 // stay in local coordinates; the inverse matrix maps cursor positions
 // from canvas space to local space during hit testing.
 
+/// Validate interactive elements and emit log warnings for common
+/// accessibility issues. Called once per tree snapshot/patch.
+fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement]) {
+    for element in elements {
+        // Interactive element without a11y metadata.
+        if element.a11y.is_none() {
+            log::warn!(
+                "canvas '{}': interactive element '{}' has no a11y metadata; \
+                 focusable but invisible to screen readers",
+                canvas_id,
+                element.id,
+            );
+        }
+
+        if let Some(ref a11y) = element.a11y {
+            // Switch without toggled state.
+            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::Switch))
+                && a11y.toggled.is_none()
+            {
+                log::warn!(
+                    "canvas '{}': element '{}' has role 'switch' without 'toggled' state",
+                    canvas_id,
+                    element.id,
+                );
+            }
+            // Radio without selected state.
+            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::RadioButton))
+                && a11y.selected.is_none()
+            {
+                log::warn!(
+                    "canvas '{}': element '{}' has role 'radio' without 'selected' state",
+                    canvas_id,
+                    element.id,
+                );
+            }
+            // Checkbox without toggled state.
+            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::CheckBox))
+                && a11y.toggled.is_none()
+            {
+                log::warn!(
+                    "canvas '{}': element '{}' has role 'check_box' without 'toggled' state",
+                    canvas_id,
+                    element.id,
+                );
+            }
+        }
+    }
+
+    // Multiple elements without position_in_set.
+    let interactive_count = elements
+        .iter()
+        .filter(|e| e.parent_group.is_none())
+        .count();
+    if interactive_count > 1 {
+        let missing_position = elements
+            .iter()
+            .filter(|e| e.parent_group.is_none())
+            .filter(|e| {
+                e.a11y
+                    .as_ref()
+                    .map(|a| a.position_in_set.is_none())
+                    .unwrap_or(true)
+            })
+            .count();
+        if missing_position == interactive_count {
+            log::info!(
+                "canvas '{}': {} interactive elements without position_in_set/size_of_set; \
+                 consider adding set position for screen reader context",
+                canvas_id,
+                interactive_count,
+            );
+        }
+    }
+}
+
 pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
     // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
@@ -2910,6 +3034,9 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
             collect_interactive_elements(shapes_arr, layer_name, TransformMatrix::identity(), None, None, &mut interactive_elements);
         }
     }
+    // A11y validation diagnostics (logged as warnings).
+    validate_interactive_elements(&node.id, &interactive_elements);
+
     caches
         .canvas_interactions
         .insert(node.id.clone(), interactive_elements);

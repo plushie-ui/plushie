@@ -45,6 +45,34 @@ impl App {
             "focus" => {
                 iced::widget::operation::focus::<Message>(iced::widget::Id::from(get_target()))
             }
+            "focus_element" => {
+                // Focus a specific interactive element within a canvas.
+                // Focuses the canvas widget (so it receives keyboard events),
+                // then emits a CanvasElementFocused event so the SDK knows
+                // which element should be considered focused.
+                //
+                // Note: this sets iced-level focus on the canvas but does
+                // NOT set the canvas's internal focused_id. The internal
+                // state will be set when on_focus_gained fires (if the
+                // canvas had a previously focused element) or on the first
+                // keyboard interaction. Full programmatic element focus
+                // requires a custom iced operation (future enhancement).
+                let target = get_target();
+                let element_id = payload
+                    .get("element_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let focus_task =
+                    iced::widget::operation::focus::<Message>(iced::widget::Id::from(target.clone()));
+                if !element_id.is_empty() {
+                    // Emit the focus event directly to the SDK.
+                    let _ = emit_event(OutgoingEvent::canvas_element_focused(
+                        target, element_id,
+                    ));
+                }
+                focus_task
+            }
             "focus_next" => iced::widget::operation::focus_next(),
             "focus_previous" => iced::widget::operation::focus_previous(),
             "scroll_to" => {

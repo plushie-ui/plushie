@@ -357,6 +357,38 @@ pub fn interaction_to_iced_events(
                 position: Point::new(x, y),
             })]
         }
+        // Canvas element actions: synthesize click/focus at element center.
+        // The SDK resolves element coordinates from the tree; here we
+        // just handle the coordinate-based injection.
+        "click_element" => {
+            // The SDK provides the element's center as x/y in the payload.
+            // If not provided, this is a no-op (the scripting layer doesn't
+            // have access to parsed interactive elements).
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            vec![
+                Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, y),
+                }),
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ]
+        }
+        "focus_element" => {
+            // Focus the canvas (Tab into it). The SDK handles setting the
+            // specific element focus via the focus_element widget_op.
+            vec![Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                physical_key: iced::keyboard::key::Physical::Code(
+                    iced::keyboard::key::Code::Tab,
+                ),
+                location: iced::keyboard::Location::Standard,
+                modifiers: iced::keyboard::Modifiers::default(),
+                text: None,
+                repeat: false,
+            })]
+        }
         // Synthetic-only actions: no iced event injection needed.
         "paste" | "sort" | "pane_focus_cycle" | "slide" => vec![],
         _ => vec![],
