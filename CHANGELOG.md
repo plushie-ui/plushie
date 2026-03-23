@@ -83,6 +83,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `text_editor` cursor movement, selection, and click-to-position now
   work. All actions (not just edits) are performed on the Content.
 
+### Changed
+
+- Release binary assets renamed from `plushie-{os}-{arch}` to
+  `plushie-renderer-{os}-{arch}`. WASM archive renamed from
+  `plushie-wasm.tar.gz` to `plushie-renderer-wasm.tar.gz`.
+- Updated to plushie-iced 0.8.0.
+
 ## [0.4.1] - 2026-03-22
 
 ### Fixed

@@ -20,21 +20,21 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: plushie
-            asset: plushie-linux-x86_64
+            binary: plushie-renderer
+            asset: plushie-renderer-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: plushie
-            asset: plushie-linux-aarch64
+            binary: plushie-renderer
+            asset: plushie-renderer-linux-aarch64
             cross: true
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: plushie
-            asset: plushie-darwin-aarch64
+            binary: plushie-renderer
+            asset: plushie-renderer-darwin-aarch64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: plushie.exe
-            asset: plushie-windows-x86_64.exe
+            binary: plushie-renderer.exe
+            asset: plushie-renderer-windows-x86_64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -106,11 +106,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y binaryen
 
       - name: Build WASM
-        run: wasm-pack build plushie-wasm --target web
+        run: wasm-pack build plushie-renderer-wasm --target web
 
       - name: Optimize with wasm-opt
         run: |
-          wasm-opt plushie-wasm/pkg/plushie_wasm_bg.wasm \
+          wasm-opt plushie-renderer-wasm/pkg/plushie_renderer_wasm_bg.wasm \
             -Oz \
             --enable-bulk-memory \
             --enable-bulk-memory-opt \
@@ -119,20 +119,20 @@ jobs:
             --enable-sign-ext \
             --enable-reference-types \
             --enable-multivalue \
-            -o plushie-wasm/pkg/plushie_wasm_bg.wasm
+            -o plushie-renderer-wasm/pkg/plushie_renderer_wasm_bg.wasm
 
       - name: Package
-        run: tar czf plushie-wasm.tar.gz -C plushie-wasm/pkg .
+        run: tar czf plushie-renderer-wasm.tar.gz -C plushie-renderer-wasm/pkg .
 
       - name: Generate checksum
-        run: sha256sum plushie-wasm.tar.gz > plushie-wasm.tar.gz.sha256
+        run: sha256sum plushie-renderer-wasm.tar.gz > plushie-renderer-wasm.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: plushie-wasm
+          name: plushie-renderer-wasm
           path: |
-            plushie-wasm.tar.gz
-            plushie-wasm.tar.gz.sha256
+            plushie-renderer-wasm.tar.gz
+            plushie-renderer-wasm.tar.gz.sha256
 
   release:
     name: Create Release

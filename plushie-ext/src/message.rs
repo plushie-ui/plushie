@@ -218,15 +218,9 @@ pub enum Message {
     /// The canvas widget itself lost iced-level focus.
     CanvasBlurred { canvas_id: String },
     /// A focusable group gained group-level focus (two-level navigation).
-    CanvasGroupFocused {
-        canvas_id: String,
-        group_id: String,
-    },
+    CanvasGroupFocused { canvas_id: String, group_id: String },
     /// A focusable group lost group-level focus.
-    CanvasGroupBlurred {
-        canvas_id: String,
-        group_id: String,
-    },
+    CanvasGroupBlurred { canvas_id: String, group_id: String },
     /// Renderer-side validation diagnostic (a11y, hit regions, etc.).
     Diagnostic {
         canvas_id: String,

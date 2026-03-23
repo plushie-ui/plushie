@@ -458,10 +458,10 @@ fn find_hit_element(point: Point, elements: &[InteractiveElement]) -> Option<&In
             return false;
         }
         // Clip test in canvas space.
-        if let Some((cx, cy, cw, ch)) = e.clip_rect {
-            if point.x < cx || point.x > cx + cw || point.y < cy || point.y > cy + ch {
-                return false;
-            }
+        if let Some((cx, cy, cw, ch)) = e.clip_rect
+            && (point.x < cx || point.x > cx + cw || point.y < cy || point.y > cy + ch)
+        {
+            return false;
         }
         // Transform cursor to element's local space.
         let local = match &e.inverse_transform {
@@ -497,20 +497,33 @@ fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<Interact
 
     // Validate known fields -- warn on typos like "on_clck" or "focussable".
     const KNOWN_GROUP_FIELDS: &[&str] = &[
-        "type", "children", "transforms", "clip",
+        "type",
+        "children",
+        "transforms",
+        "clip",
         // Interactive
-        "id", "on_click", "on_hover", "cursor", "draggable", "drag_axis",
-        "drag_bounds", "tooltip", "hit_rect", "hover_style", "pressed_style",
-        "focus_style", "show_focus_ring", "focus_ring_radius", "focusable",
+        "id",
+        "on_click",
+        "on_hover",
+        "cursor",
+        "draggable",
+        "drag_axis",
+        "drag_bounds",
+        "tooltip",
+        "hit_rect",
+        "hover_style",
+        "pressed_style",
+        "focus_style",
+        "show_focus_ring",
+        "focus_ring_radius",
+        "focusable",
         // Accessibility
         "a11y",
     ];
     if let Some(obj) = group.as_object() {
         for key in obj.keys() {
             if !KNOWN_GROUP_FIELDS.contains(&key.as_str()) {
-                log::warn!(
-                    "canvas element '{id}': unknown field '{key}'"
-                );
+                log::warn!("canvas element '{id}': unknown field '{key}'");
             }
         }
     }
@@ -685,14 +698,24 @@ fn draw_with_group_clip(
     images: &crate::image_registry::ImageRegistry,
     theme: &iced::Theme,
     children: &[&Value],
-    draw_fn: impl FnOnce(&mut canvas::Frame, &[&Value], &crate::image_registry::ImageRegistry, &iced::Theme),
+    draw_fn: impl FnOnce(
+        &mut canvas::Frame,
+        &[&Value],
+        &crate::image_registry::ImageRegistry,
+        &iced::Theme,
+    ),
 ) {
     if let Some(clip) = group.get("clip").and_then(|v| v.as_object()) {
         let x = clip.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let y = clip.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let w = clip.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let h = clip.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-        let clip_rect = iced::Rectangle { x, y, width: w, height: h };
+        let clip_rect = iced::Rectangle {
+            x,
+            y,
+            width: w,
+            height: h,
+        };
         frame.with_clip(clip_rect, |f| {
             draw_fn(f, children, images, theme);
         });
@@ -990,27 +1013,25 @@ impl CanvasProgram<'_> {
             .pressed_element
             .as_deref()
             .or(state.hovered_element.as_deref());
-        if let Some(id) = active_id {
-            if let Some(shape) = self.interactive_elements.iter().find(|s| s.id == id) {
-                if shape.has_hover_style || shape.has_pressed_style {
-                    layers.push(shape.layer.clone());
-                }
-            }
+        if let Some(id) = active_id
+            && let Some(shape) = self.interactive_elements.iter().find(|s| s.id == id)
+            && (shape.has_hover_style || shape.has_pressed_style)
+        {
+            layers.push(shape.layer.clone());
         }
 
         // Keyboard focus with focus_style (only when canvas has iced focus).
-        if state.canvas_focused && state.focus_visible {
-        if let Some(ref focused_id) = state.focused_id {
-            if let Some(shape) = self
+        if state.canvas_focused
+            && state.focus_visible
+            && let Some(ref focused_id) = state.focused_id
+            && let Some(shape) = self
                 .interactive_elements
                 .iter()
                 .find(|s| &s.id == focused_id)
-            {
-                if shape.has_focus_style && !layers.contains(&shape.layer) {
-                    layers.push(shape.layer.clone());
-                }
-            }
-        }
+            && shape.has_focus_style
+            && !layers.contains(&shape.layer)
+        {
+            layers.push(shape.layer.clone());
         }
 
         layers
@@ -1046,11 +1067,7 @@ impl CanvasProgram<'_> {
     ///
     /// Returns `None` if no state change occurred (already focused on
     /// the target, or clearing focus when nothing was focused).
-    fn set_focus(
-        &self,
-        state: &mut CanvasState,
-        new_index: Option<usize>,
-    ) -> Option<Message> {
+    fn set_focus(&self, state: &mut CanvasState, new_index: Option<usize>) -> Option<Message> {
         let old_id = state.focused_id.take();
 
         let new_id = new_index
@@ -1137,7 +1154,8 @@ impl CanvasProgram<'_> {
                 let is_focused = group_id.is_some_and(|gid| focused == Some(gid));
 
                 if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
-                    let has_transforms = shape.get("transforms")
+                    let has_transforms = shape
+                        .get("transforms")
                         .and_then(|v| v.as_array())
                         .is_some_and(|a| !a.is_empty());
 
@@ -1153,31 +1171,59 @@ impl CanvasProgram<'_> {
                     } else {
                         None
                     }
-                    .or_else(|| if is_hovered { shape.get("hover_style") } else { None })
-                    .or_else(|| if is_focused { shape.get("focus_style") } else { None });
-
-                    let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry, theme: &iced::Theme| {
-                        if let Some(overrides) = group_override {
-                            for &child in child_refs {
-                                // Apply group-level style override to each child.
-                                // Children can also have their own per-child overrides
-                                // which take precedence (merged on top).
-                                let child_override = if is_pressed {
-                                    child.get("pressed_style")
-                                } else {
-                                    None
-                                }
-                                .or_else(|| if is_hovered { child.get("hover_style") } else { None })
-                                .or_else(|| if is_focused { child.get("focus_style") } else { None });
-
-                                let effective = child_override.unwrap_or(overrides);
-                                let merged = merge_shape_style(child, effective);
-                                draw_canvas_shape(f, &merged, img, theme);
-                            }
+                    .or_else(|| {
+                        if is_hovered {
+                            shape.get("hover_style")
                         } else {
-                            draw_canvas_shapes(f, child_refs, img, theme);
+                            None
                         }
-                    };
+                    })
+                    .or_else(|| {
+                        if is_focused {
+                            shape.get("focus_style")
+                        } else {
+                            None
+                        }
+                    });
+
+                    let draw_children =
+                        |f: &mut canvas::Frame,
+                         child_refs: &[&Value],
+                         img: &crate::image_registry::ImageRegistry,
+                         theme: &iced::Theme| {
+                            if let Some(overrides) = group_override {
+                                for &child in child_refs {
+                                    // Apply group-level style override to each child.
+                                    // Children can also have their own per-child overrides
+                                    // which take precedence (merged on top).
+                                    let child_override = if is_pressed {
+                                        child.get("pressed_style")
+                                    } else {
+                                        None
+                                    }
+                                    .or_else(|| {
+                                        if is_hovered {
+                                            child.get("hover_style")
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .or_else(|| {
+                                        if is_focused {
+                                            child.get("focus_style")
+                                        } else {
+                                            None
+                                        }
+                                    });
+
+                                    let effective = child_override.unwrap_or(overrides);
+                                    let merged = merge_shape_style(child, effective);
+                                    draw_canvas_shape(f, &merged, img, theme);
+                                }
+                            } else {
+                                draw_canvas_shapes(f, child_refs, img, theme);
+                            }
+                        };
 
                     let child_refs: Vec<&Value> = children.iter().collect();
                     draw_with_group_clip(frame, shape, images, theme, &child_refs, draw_children);
@@ -1218,7 +1264,9 @@ impl CanvasProgram<'_> {
             }
         }
 
-        let focus_to = |state: &mut CanvasState, idx: Option<usize>| -> Option<iced::widget::Action<Message>> {
+        let focus_to = |state: &mut CanvasState,
+                        idx: Option<usize>|
+         -> Option<iced::widget::Action<Message>> {
             match self.set_focus(state, idx) {
                 Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
                 None => Some(iced::widget::Action::capture()),
@@ -1241,7 +1289,8 @@ impl CanvasProgram<'_> {
                 let top = self.top_level_indices();
                 let top_pos = current_idx.and_then(|ci| {
                     if let Some(ref gid) = state.focused_group {
-                        top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                        top.iter()
+                            .position(|&i| self.interactive_elements[i].id == *gid)
                     } else {
                         top.iter().position(|&i| i == ci)
                     }
@@ -1289,7 +1338,8 @@ impl CanvasProgram<'_> {
                 let top = self.top_level_indices();
                 let top_pos = current_idx.and_then(|ci| {
                     if let Some(ref gid) = state.focused_group {
-                        top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                        top.iter()
+                            .position(|&i| self.interactive_elements[i].id == *gid)
                     } else {
                         top.iter().position(|&i| i == ci)
                     }
@@ -1367,13 +1417,16 @@ impl CanvasProgram<'_> {
                     let element = &self.interactive_elements[idx];
                     if element.on_click {
                         let center = hit_region_center(&element.hit_region);
-                        Some(iced::widget::Action::publish(Message::CanvasElementClick {
-                            canvas_id: self.id.clone(),
-                            element_id: element.id.clone(),
-                            x: center.x,
-                            y: center.y,
-                            button: "keyboard".to_string(),
-                        }).and_capture())
+                        Some(
+                            iced::widget::Action::publish(Message::CanvasElementClick {
+                                canvas_id: self.id.clone(),
+                                element_id: element.id.clone(),
+                                x: center.x,
+                                y: center.y,
+                                button: "keyboard".to_string(),
+                            })
+                            .and_capture(),
+                        )
                     } else {
                         Some(iced::widget::Action::capture())
                     }
@@ -1407,7 +1460,10 @@ impl CanvasProgram<'_> {
             keyboard::Key::Named(Named::PageDown) if !arrow_indices.is_empty() => {
                 let page_size = 10.min(arrow_count);
                 let pos = arrow_pos.unwrap_or(0);
-                focus_to(state, Some(arrow_indices[(pos + page_size).min(arrow_count - 1)]))
+                focus_to(
+                    state,
+                    Some(arrow_indices[(pos + page_size).min(arrow_count - 1)]),
+                )
             }
             keyboard::Key::Named(Named::PageUp) if !arrow_indices.is_empty() => {
                 let page_size = 10.min(arrow_count);
@@ -1471,9 +1527,7 @@ fn draw_focus_ring(
 
     match &element.hit_region {
         HitRegion::Rect { x, y, w, h } => {
-            let radius = element
-                .focus_ring_radius
-                .unwrap_or(inflate + 1.0);
+            let radius = element.focus_ring_radius.unwrap_or(inflate + 1.0);
             let path = canvas::Path::rounded_rectangle(
                 Point::new(x - inflate, y - inflate),
                 Size::new(w + inflate * 2.0, h + inflate * 2.0),
@@ -1486,7 +1540,11 @@ fn draw_focus_ring(
             frame.stroke(&path, ring_stroke);
         }
         HitRegion::Line {
-            x1, y1, x2, y2, half_width,
+            x1,
+            y1,
+            x2,
+            y2,
+            half_width,
         } => {
             // Draw a capsule (stadium shape) around the line.
             // This is a rounded rectangle oriented along the line.
@@ -2006,7 +2064,10 @@ fn draw_canvas_shape(
                 canvas::Path::rectangle(Point::new(x, y), Size::new(w, h))
             };
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
+                let fill = apply_opacity_to_fill(
+                    shape,
+                    parse_canvas_fill_themed(fill_val, shape, Some(theme)),
+                );
                 frame.fill(&rect_path, fill);
             } else if shape.get("stroke").is_none() {
                 // Legacy fallback: no fill or stroke key means solid white fill
@@ -2014,7 +2075,10 @@ fn draw_canvas_shape(
                 frame.fill_rectangle(Point::new(x, y), Size::new(w, h), color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
+                let stroke = apply_opacity_to_stroke(
+                    shape,
+                    parse_canvas_stroke_themed(stroke_val, Some(theme)),
+                );
                 frame.stroke(&rect_path, stroke);
             }
         }
@@ -2024,14 +2088,20 @@ fn draw_canvas_shape(
             let r = json_f32(shape, "r");
             let circle_path = canvas::Path::circle(Point::new(x, y), r);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
+                let fill = apply_opacity_to_fill(
+                    shape,
+                    parse_canvas_fill_themed(fill_val, shape, Some(theme)),
+                );
                 frame.fill(&circle_path, fill);
             } else if shape.get("stroke").is_none() {
                 let color = apply_opacity_to_color(shape, Color::WHITE);
                 frame.fill(&circle_path, color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
+                let stroke = apply_opacity_to_stroke(
+                    shape,
+                    parse_canvas_stroke_themed(stroke_val, Some(theme)),
+                );
                 frame.stroke(&circle_path, stroke);
             }
         }
@@ -2042,7 +2112,10 @@ fn draw_canvas_shape(
             let y2 = json_f32(shape, "y2");
             let line_path = canvas::Path::line(Point::new(x1, y1), Point::new(x2, y2));
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
+                let stroke = apply_opacity_to_stroke(
+                    shape,
+                    parse_canvas_stroke_themed(stroke_val, Some(theme)),
+                );
                 frame.stroke(&line_path, stroke);
             } else {
                 // Legacy: use fill color as stroke color
@@ -2100,11 +2173,17 @@ fn draw_canvas_shape(
                 .unwrap_or(&[]);
             let path = build_path_from_commands(commands);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
+                let fill = apply_opacity_to_fill(
+                    shape,
+                    parse_canvas_fill_themed(fill_val, shape, Some(theme)),
+                );
                 frame.fill(&path, fill);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
+                let stroke = apply_opacity_to_stroke(
+                    shape,
+                    parse_canvas_stroke_themed(stroke_val, Some(theme)),
+                );
                 frame.stroke(&path, stroke);
             }
         }
@@ -2178,7 +2257,8 @@ fn draw_canvas_shape(
         "group" => {
             if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
                 let child_refs: Vec<&Value> = children.iter().collect();
-                let has_transforms = shape.get("transforms")
+                let has_transforms = shape
+                    .get("transforms")
                     .and_then(|v| v.as_array())
                     .is_some_and(|a| !a.is_empty());
 
@@ -2189,9 +2269,16 @@ fn draw_canvas_shape(
 
                 // draw_with_group_clip handles the clip field (if present)
                 // using frame.with_clip, which manages its own scope.
-                draw_with_group_clip(frame, shape, images, theme, &child_refs, |f, c, img, theme| {
-                    draw_canvas_shapes(f, c, img, theme);
-                });
+                draw_with_group_clip(
+                    frame,
+                    shape,
+                    images,
+                    theme,
+                    &child_refs,
+                    |f, c, img, theme| {
+                        draw_canvas_shapes(f, c, img, theme);
+                    },
+                );
 
                 if has_transforms {
                     frame.pop_transform();
@@ -2215,30 +2302,29 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         // Keyboard events don't depend on cursor position -- handle them
         // before the cursor check so they work when the mouse is outside.
         if matches!(event, iced::Event::Keyboard(..)) {
-            if !self.interactive_elements.is_empty() {
-                if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
-                    return self.handle_keyboard(state, key, *modifiers);
-                }
+            if !self.interactive_elements.is_empty()
+                && let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
+                    event
+            {
+                return self.handle_keyboard(state, key, *modifiers);
             }
             return None;
         }
 
         // Consume pending programmatic focus (not position-dependent).
-        if let Some(ref pending) = self.pending_focus {
-            if state.last_consumed_pending.as_deref() != Some(pending.as_str()) {
-                state.last_consumed_pending = Some(pending.clone());
-                let idx = self
-                    .interactive_elements
-                    .iter()
-                    .position(|e| e.id == *pending);
-                if let Some(idx) = idx {
-                    if let Some(msg) = self.set_focus(state, Some(idx)) {
-                        state.focused_group = self.interactive_elements[idx]
-                            .parent_group
-                            .clone();
-                        return Some(iced::widget::Action::publish(msg));
-                    }
-                }
+        if let Some(ref pending) = self.pending_focus
+            && state.last_consumed_pending.as_deref() != Some(pending.as_str())
+        {
+            state.last_consumed_pending = Some(pending.clone());
+            let idx = self
+                .interactive_elements
+                .iter()
+                .position(|e| e.id == *pending);
+            if let Some(idx) = idx
+                && let Some(msg) = self.set_focus(state, Some(idx))
+            {
+                state.focused_group = self.interactive_elements[idx].parent_group.clone();
+                return Some(iced::widget::Action::publish(msg));
             }
         }
 
@@ -2502,7 +2588,6 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
     }
 
-
     fn draw(
         &self,
         state: &CanvasState,
@@ -2563,17 +2648,19 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
         // Focus ring overlay (uncached, drawn on top of everything).
         // Only drawn when the canvas has iced-level focus.
-        if state.canvas_focused && state.focus_visible {
-        if let Some(focused_id) = &state.focused_id {
-            if let Some(element) = self.interactive_elements.iter().find(|e| &e.id == focused_id) {
-                if element.show_focus_ring {
-                    let mut frame = canvas::Frame::new(renderer, bounds.size());
-                    let focus_color = theme.palette().primary.base.color;
-                    draw_focus_ring(&mut frame, element, focus_color, 2.0, 2.0);
-                    geometries.push(frame.into_geometry());
-                }
-            }
-        }
+        if state.canvas_focused
+            && state.focus_visible
+            && let Some(focused_id) = &state.focused_id
+            && let Some(element) = self
+                .interactive_elements
+                .iter()
+                .find(|e| &e.id == focused_id)
+            && element.show_focus_ring
+        {
+            let mut frame = canvas::Frame::new(renderer, bounds.size());
+            let focus_color = theme.palette().primary.base.color;
+            draw_focus_ring(&mut frame, element, focus_color, 2.0, 2.0);
+            geometries.push(frame.into_geometry());
         }
 
         geometries
@@ -2591,7 +2678,10 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
         // Per-shape cursor.
         if let Some(ref hovered_id) = state.hovered_element
-            && let Some(shape) = self.interactive_elements.iter().find(|s| &s.id == hovered_id)
+            && let Some(shape) = self
+                .interactive_elements
+                .iter()
+                .find(|s| &s.id == hovered_id)
         {
             if let Some(ref cursor_name) = shape.cursor {
                 return parse_cursor_interaction(cursor_name);
@@ -2649,10 +2739,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         actions
     }
 
-    fn on_focus_lost(
-        &self,
-        state: &mut CanvasState,
-    ) -> Vec<iced::widget::Action<Message>> {
+    fn on_focus_lost(&self, state: &mut CanvasState) -> Vec<iced::widget::Action<Message>> {
         state.canvas_focused = false;
         let mut actions = Vec::new();
         // Emit blur for the currently focused element (but DON'T clear
@@ -2672,10 +2759,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         actions
     }
 
-    fn active_descendant_id(
-        &self,
-        state: &CanvasState,
-    ) -> Option<iced::widget::Id> {
+    fn active_descendant_id(&self, state: &CanvasState) -> Option<iced::widget::Id> {
         state
             .focused_id
             .as_ref()
@@ -2704,7 +2788,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
             // Compute bounds in canvas space using the element's transform.
             let local_rect = hit_region_to_rect(&element.hit_region);
-            let (tx, ty) = element.transform.transform_point(local_rect.x, local_rect.y);
+            let (tx, ty) = element
+                .transform
+                .transform_point(local_rect.x, local_rect.y);
             let (bx, by) = element.transform.transform_point(
                 local_rect.x + local_rect.width,
                 local_rect.y + local_rect.height,
@@ -2733,10 +2819,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             }
                             let cr = hit_region_to_rect(&child.hit_region);
                             let (ctx, cty) = child.transform.transform_point(cr.x, cr.y);
-                            let (cbx, cby) = child.transform.transform_point(
-                                cr.x + cr.width,
-                                cr.y + cr.height,
-                            );
+                            let (cbx, cby) = child
+                                .transform
+                                .transform_point(cr.x + cr.width, cr.y + cr.height);
                             let child_bounds = Rectangle {
                                 x: canvas_bounds.x + ctx.min(cbx),
                                 y: canvas_bounds.y + cty.min(cby),
@@ -2862,11 +2947,7 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         arrow_mode: prop_str(props, "arrow_mode")
             .map(|s| ArrowMode::from_str(&s))
             .unwrap_or_default(),
-        pending_focus: ctx
-            .caches
-            .canvas_pending_focus
-            .get(&node.id)
-            .cloned(),
+        pending_focus: ctx.caches.canvas_pending_focus.get(&node.id).cloned(),
     })
     .width(width)
     .height(height);
@@ -3074,10 +3155,7 @@ fn collect_interactive_elements(
 /// Intersect two axis-aligned rectangles. Returns the intersection rect
 /// as `(x, y, w, h)`. If the rectangles don't overlap, returns a
 /// zero-area rect (w=0 or h=0).
-fn intersect_rects(
-    a: (f32, f32, f32, f32),
-    b: (f32, f32, f32, f32),
-) -> (f32, f32, f32, f32) {
+fn intersect_rects(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
     let x = a.0.max(b.0);
     let y = a.1.max(b.1);
     let w = ((a.0 + a.2).min(b.0 + b.2) - x).max(0.0);
@@ -3106,8 +3184,10 @@ fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement
 
         if let Some(ref a11y) = element.a11y {
             // Switch without toggled state.
-            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::Switch))
-                && a11y.toggled.is_none()
+            if matches!(
+                a11y.role,
+                Some(iced::advanced::widget::operation::accessible::Role::Switch)
+            ) && a11y.toggled.is_none()
             {
                 log::warn!(
                     "canvas '{}': element '{}' has role 'switch' without 'toggled' state",
@@ -3116,8 +3196,10 @@ fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement
                 );
             }
             // Radio without selected state.
-            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::RadioButton))
-                && a11y.selected.is_none()
+            if matches!(
+                a11y.role,
+                Some(iced::advanced::widget::operation::accessible::Role::RadioButton)
+            ) && a11y.selected.is_none()
             {
                 log::warn!(
                     "canvas '{}': element '{}' has role 'radio' without 'selected' state",
@@ -3126,8 +3208,10 @@ fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement
                 );
             }
             // Checkbox without toggled state.
-            if matches!(a11y.role, Some(iced::advanced::widget::operation::accessible::Role::CheckBox))
-                && a11y.toggled.is_none()
+            if matches!(
+                a11y.role,
+                Some(iced::advanced::widget::operation::accessible::Role::CheckBox)
+            ) && a11y.toggled.is_none()
             {
                 log::warn!(
                     "canvas '{}': element '{}' has role 'check_box' without 'toggled' state",
@@ -3139,10 +3223,7 @@ fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement
     }
 
     // Multiple elements without position_in_set.
-    let interactive_count = elements
-        .iter()
-        .filter(|e| e.parent_group.is_none())
-        .count();
+    let interactive_count = elements.iter().filter(|e| e.parent_group.is_none()).count();
     if interactive_count > 1 {
         let missing_position = elements
             .iter()
@@ -3175,7 +3256,14 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
     let mut interactive_elements = Vec::new();
     for (layer_name, shapes_val) in &layer_map {
         if let Some(shapes_arr) = shapes_val.as_array() {
-            collect_interactive_elements(shapes_arr, layer_name, TransformMatrix::identity(), None, None, &mut interactive_elements);
+            collect_interactive_elements(
+                shapes_arr,
+                layer_name,
+                TransformMatrix::identity(),
+                None,
+                None,
+                &mut interactive_elements,
+            );
         }
     }
     // A11y validation diagnostics (logged as warnings).
@@ -3844,7 +3932,14 @@ mod tests {
             }),
         ];
         let mut result = Vec::new();
-        collect_interactive_elements(&shapes, "default", TransformMatrix::identity(), None, None, &mut result);
+        collect_interactive_elements(
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut result,
+        );
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
         // Non-group "top-rect" is NOT collected.
         assert!(!ids.contains(&"top-rect"));
@@ -3970,8 +4065,14 @@ mod tests {
         // Forward then inverse should return to original.
         let (fx, fy) = m.transform_point(10.0, 20.0);
         let (rx, ry) = inv.transform_point(fx, fy);
-        assert!((rx - 10.0).abs() < 0.01, "roundtrip x: expected 10, got {rx}");
-        assert!((ry - 20.0).abs() < 0.01, "roundtrip y: expected 20, got {ry}");
+        assert!(
+            (rx - 10.0).abs() < 0.01,
+            "roundtrip x: expected 10, got {rx}"
+        );
+        assert!(
+            (ry - 20.0).abs() < 0.01,
+            "roundtrip y: expected 20, got {ry}"
+        );
     }
 
     #[test]
@@ -4008,7 +4109,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 1);
 
@@ -4029,12 +4135,17 @@ mod tests {
             "type": "group",
             "id": "rotated",
             "on_click": true,
-            "transforms": [{"type": "rotate", "angle": 0.7854}],
+            "transforms": [{"type": "rotate", "angle": (std::f64::consts::FRAC_PI_4)}],
             "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 20}]
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
 
         // Canvas point (35, 35) -> local via inverse rotate(-45deg):
@@ -4064,7 +4175,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
 
         // Inside clip region.
@@ -4073,7 +4189,10 @@ mod tests {
 
         // Inside hit region but outside clip.
         let miss = find_hit_element(Point::new(75.0, 75.0), &elements);
-        assert!(miss.is_none(), "should miss outside clip despite being in hit region");
+        assert!(
+            miss.is_none(),
+            "should miss outside clip despite being in hit region"
+        );
     }
 
     #[test]
@@ -4108,7 +4227,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let e = &elements[0];
@@ -4166,7 +4290,12 @@ mod tests {
     #[test]
     fn hit_test_rect_boundary_with_epsilon() {
         // Point exactly on the boundary should hit (within epsilon).
-        let region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let region = HitRegion::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
         assert!(hit_test(Point::new(0.0, 0.0), &region));
         assert!(hit_test(Point::new(100.0, 50.0), &region));
         // Slightly outside but within epsilon (0.5px).
@@ -4197,7 +4326,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let clip = elements[0].clip_rect.unwrap();
@@ -4224,7 +4358,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let clip = elements[0].clip_rect.unwrap();
@@ -4244,7 +4383,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert!(elements[0].clip_rect.is_none());
     }
@@ -4276,7 +4420,12 @@ mod tests {
         InteractiveElement {
             id: id.to_string(),
             layer: "default".to_string(),
-            hit_region: HitRegion::Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
+            hit_region: HitRegion::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+            },
             transform: TransformMatrix::identity(),
             inverse_transform: Some(TransformMatrix::identity()),
             clip_rect: None,
@@ -4640,7 +4789,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 1);
         assert!(elements[0].inverse_transform.is_none());
@@ -4653,9 +4807,19 @@ mod tests {
     fn find_hit_element_topmost_wins() {
         // Two overlapping elements. Last in list = topmost = tested first.
         let mut a = test_element("bottom");
-        a.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        a.hit_region = HitRegion::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let mut b = test_element("top");
-        b.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        b.hit_region = HitRegion::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let elements = vec![a, b];
         let hit = find_hit_element(Point::new(50.0, 50.0), &elements).unwrap();
         assert_eq!(hit.id, "top");
@@ -4666,7 +4830,12 @@ mod tests {
         // Element with on_click=false, on_hover=false, draggable=false.
         let mut elem = test_element("passive");
         elem.on_click = false;
-        elem.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        elem.hit_region = HitRegion::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         let elements = vec![elem];
         let hit = find_hit_element(Point::new(50.0, 50.0), &elements);
         assert!(hit.is_none());
@@ -4688,7 +4857,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         let clip = elements[0].clip_rect.unwrap();
         assert!((clip.0 - 100.0).abs() < 0.01, "clip x={}", clip.0);
@@ -4829,7 +5003,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         // Should collect: toolbar, btn-a, btn-b
         assert_eq!(elements.len(), 3);
@@ -4860,7 +5039,12 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+            &shapes,
+            "default",
+            TransformMatrix::identity(),
+            None,
+            None,
+            &mut elements,
         );
         assert_eq!(elements.len(), 2);
         assert_eq!(elements[0].parent_group, None);

@@ -3209,7 +3209,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245dc131c428b9b80e204870b42601a418204c709240c5c21772359aaef5bf9c"
 dependencies = [
  "image",
  "plushie-iced-core",
@@ -3225,7 +3227,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-core"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5319180f271c680c775191fc56f713744bd4a5e8a48dc35aefd2adf43644d9a8"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -3241,7 +3245,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-cryoglyph"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2224ac207b33b4a80e84c43420ac32307c519d272f6dc12a89e1546b1c7cd2a6"
 dependencies = [
  "cosmic-text",
  "etagere",
@@ -3252,7 +3258,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-debug"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee7d5304d0fe40ec26b74981dda2852ff991048c506e9937cabc9bc1f381a91e"
 dependencies = [
  "log",
  "plushie-iced-core",
@@ -3261,7 +3269,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-futures"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51f6afb9091ab995ee4d0ff4146f898130e29cb8d9b6309fed0a4a6f69e16000"
 dependencies = [
  "futures",
  "log",
@@ -3274,7 +3284,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-graphics"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58e2548b0cdd06e58261c533be60fbda2ebeeda2015f56f158f4335063ea8c14"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -3294,7 +3306,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-highlighter"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cfcaeadd4fe5af4a4cdcbaa06725125bce83124d788db3988710c783e6ee4a1"
 dependencies = [
  "plushie-iced-core",
  "two-face",
@@ -3302,17 +3316,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-program"
-version = "0.7.0"
-dependencies = [
- "plushie-iced-graphics",
- "plushie-iced-runtime",
-]
-
-[[package]]
-name = "plushie-iced-program"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b4854792019c070d2568349b0f5cba78f114fce454659f1cc52afb271f18f1e"
+checksum = "9a1513d93b28822084fe45514f66aef06e898d7a8e86c5cf384a887acc44652f"
 dependencies = [
  "plushie-iced-graphics",
  "plushie-iced-runtime",
@@ -3320,7 +3326,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-renderer"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a96836e82b6388c9c9e41748335bd5542a28675b5770de8cbacc5d74bf626d"
 dependencies = [
  "log",
  "plushie-iced-graphics",
@@ -3331,7 +3339,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-runtime"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eda48091176d7b22e69745fcb84e6b2fddefe43af7a198410384ab4113bad0de"
 dependencies = [
  "bytes",
  "plushie-iced-core",
@@ -3342,22 +3352,22 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-selector"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ead478ee90d3482158bc6a7d40d1e49def55d453c2883b21963969c91884aa20"
+checksum = "9e36b6395f96075d5ac86ecb261f48939b88b3ba8d3ea132e3727ce91fc3aad0"
 dependencies = [
  "plushie-iced-core",
 ]
 
 [[package]]
 name = "plushie-iced-test"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac59b609dddc288492ebd6aefb864bd4803eb2d9cc4863dc00712809f10d1bce"
+checksum = "668bde63d4ac382c32d8aea2580707bec2ad5037ec28bcdeadd281200d403110"
 dependencies = [
  "nom",
  "plushie-iced-futures",
- "plushie-iced-program 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "plushie-iced-program",
  "plushie-iced-renderer",
  "plushie-iced-runtime",
  "plushie-iced-selector",
@@ -3368,7 +3378,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-tiny-skia"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "244aa0fd4801df62fd363cbb276e561902c1bbdecf41829bdf36c39b86ab462f"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -3384,7 +3396,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-wgpu"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd3fc95ed0e8331eaa97cb51b0b0cbca2cfe502f91832b6790186f2a98666e60"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -3404,7 +3418,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-widget"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0697519b5edae7b31e9373ea003d2aebb15f50ec12d0f10b3cf556034714e88d"
 dependencies = [
  "log",
  "num-traits",
@@ -3418,7 +3434,9 @@ dependencies = [
 
 [[package]]
 name = "plushie-iced-winit"
-version = "0.7.0"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25a7b9d7ac1c0cf0d3407206eb223f6df79ec1d28b9c7454d964fc695c848424"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -3427,7 +3445,7 @@ dependencies = [
  "mundy",
  "objc2 0.5.2",
  "plushie-iced-debug",
- "plushie-iced-program 0.7.0",
+ "plushie-iced-program",
  "plushie-iced-runtime",
  "rustc-hash 2.1.1",
  "sysinfo",

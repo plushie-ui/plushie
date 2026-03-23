@@ -380,9 +380,7 @@ pub fn interaction_to_iced_events(
             vec![Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
                 modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
-                physical_key: iced::keyboard::key::Physical::Code(
-                    iced::keyboard::key::Code::Tab,
-                ),
+                physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::Tab),
                 location: iced::keyboard::Location::Standard,
                 modifiers: iced::keyboard::Modifiers::default(),
                 text: None,

@@ -63,8 +63,9 @@ impl App {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let focus_task =
-                    iced::widget::operation::focus::<Message>(iced::widget::Id::from(target.clone()));
+                let focus_task = iced::widget::operation::focus::<Message>(iced::widget::Id::from(
+                    target.clone(),
+                ));
                 if !element_id.is_empty() {
                     // Store the pending focus in caches so the canvas
                     // Program can set focused_id on the next update().
