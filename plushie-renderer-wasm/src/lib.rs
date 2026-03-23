@@ -138,6 +138,31 @@ impl PlushieApp {
         let iced_settings = plushie_renderer_lib::settings::parse_iced_settings(&settings);
         let font_bytes = plushie_renderer_lib::settings::parse_inline_fonts(&settings);
 
+        // Load inline fonts directly into the global font system so they're
+        // available before the first render. On WASM there are no system fonts,
+        // so without this all text renders blank. Also set the sans-serif
+        // family mapping -- the default Family::SansSerif won't resolve to
+        // anything unless this mapping exists.
+        if !font_bytes.is_empty() {
+            let font_system = iced::advanced::graphics::text::font_system();
+            let mut fs = font_system.write().expect("font_system lock");
+            for bytes in &font_bytes {
+                fs.load_font(std::borrow::Cow::Owned(bytes.clone()));
+            }
+            // Find the first non-icon font and set it as sans-serif fallback.
+            let family_name = {
+                let raw = fs.raw();
+                let db = raw.db();
+                db.faces()
+                    .find(|f| !f.families.iter().any(|(n, _)| n == "Iced-Icons"))
+                    .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
+            };
+            if let Some(name) = family_name {
+                log::info!("setting sans-serif family to: {}", name);
+                fs.raw().db_mut().set_sans_serif_family(name);
+            }
+        }
+
         // Include extension keys in the hello message.
         let ext_keys: Vec<String> = builder
             .extension_keys()
