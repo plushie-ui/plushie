@@ -49,7 +49,17 @@ pub(crate) struct A11yOverrides {
     /// Live region urgency override.
     pub live: Option<accessible::Live>,
     /// Whether the widget is busy (loading/processing).
-    pub busy: bool,
+    ///
+    /// Maps to WAI-ARIA `aria-busy`. When true, assistive technology
+    /// suppresses announcements for this node until busy clears,
+    /// then announces the final state as a single unit. This prevents
+    /// rapid-fire value announcements during continuous interactions
+    /// like slider drag.
+    ///
+    /// `None` means "use the widget's auto-detected state" (e.g. slider
+    /// sets busy during drag). `Some(true)` or `Some(false)` from the
+    /// host explicitly overrides the widget's state.
+    pub busy: Option<bool>,
     /// Whether the widget's value is invalid (form validation).
     pub invalid: bool,
     /// Whether this dialog is modal (restricts AT navigation).
@@ -85,7 +95,7 @@ pub(crate) struct A11yOverrides {
     /// Whether the widget is disabled (not interactive).
     ///
     /// Overrides the widget-native disabled state when `Some`. Unlike
-    /// bool-OR fields (required, busy), this replaces the base value
+    /// bool-OR fields (required, invalid, etc.), this replaces the base value
     /// so the host can explicitly enable or disable a widget.
     pub disabled: Option<bool>,
     /// Position of this item in a set (1-based).
@@ -155,7 +165,7 @@ impl A11yOverrides {
             .and_then(|v| v.as_str())
             .and_then(parse_live);
 
-        let busy = a11y.get("busy").and_then(|v| v.as_bool()).unwrap_or(false);
+        let busy = a11y.get("busy").and_then(|v| v.as_bool());
 
         let invalid = a11y
             .get("invalid")
@@ -265,7 +275,7 @@ impl A11yOverrides {
             || self.level.is_some()
             || self.mnemonic.is_some()
             || self.required
-            || self.busy
+            || self.busy.is_some()
             || self.invalid
             || self.modal
             || self.read_only
@@ -287,6 +297,8 @@ impl A11yOverrides {
     ///
     /// - `Option` fields: override wins if `Some`, falls back to base.
     /// - `bool` fields: OR-ed (override enables, never disables).
+    /// - `busy`: `Option<bool>` -- `Some(v)` overrides the widget's
+    ///   auto-detected state, `None` falls back to the base value.
     fn apply_to<'a>(&'a self, base: &Accessible<'a>) -> Accessible<'a> {
         let value_override = self.value.as_deref().map(accessible::Value::Text);
 
@@ -298,7 +310,7 @@ impl A11yOverrides {
             live: self.live.or(base.live),
             level: self.level.or(base.level),
             required: self.required || base.required,
-            busy: self.busy || base.busy,
+            busy: self.busy.unwrap_or(base.busy),
             invalid: self.invalid || base.invalid,
             modal: self.modal || base.modal,
             read_only: self.read_only || base.read_only,
@@ -805,7 +817,7 @@ mod tests {
         assert!(o.required);
         assert_eq!(o.level, Some(2));
         assert_eq!(o.live, Some(accessible::Live::Assertive));
-        assert!(o.busy);
+        assert_eq!(o.busy, Some(true));
         assert!(o.invalid);
         assert!(o.modal);
         assert!(o.read_only);
@@ -1051,7 +1063,34 @@ mod tests {
         };
         let merged = overrides.apply_to(&base);
         assert!(merged.required); // From override.
-        assert!(merged.busy); // From base.
+        assert!(merged.busy); // From base (override is None, falls through).
+    }
+
+    #[test]
+    fn busy_override_wins_over_base() {
+        // SDK explicitly sets busy=false, overriding widget auto-busy.
+        let overrides = A11yOverrides {
+            busy: Some(false),
+            ..Default::default()
+        };
+        let base = Accessible {
+            busy: true,
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert!(!merged.busy); // SDK override wins.
+    }
+
+    #[test]
+    fn busy_none_uses_base() {
+        // SDK doesn't set busy, widget auto-detected state is used.
+        let overrides = A11yOverrides::default();
+        let base = Accessible {
+            busy: true,
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert!(merged.busy); // Base preserved.
     }
 
     #[test]

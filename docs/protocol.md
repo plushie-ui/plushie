@@ -1568,7 +1568,7 @@ accessibility behaviour. All fields are optional.
 | `required` | bool | Required field indicator |
 | `level` | number | Heading level (1-6) |
 | `live` | string | Live region: `"off"`, `"polite"`, `"assertive"` |
-| `busy` | bool | Content is loading/updating |
+| `busy` | bool | Suppresses AT announcements until cleared (maps to `aria-busy`). Omit to use widget auto-detection (e.g. sliders set busy during drag). Set explicitly to override. |
 | `invalid` | bool | Validation failed |
 | `modal` | bool | Modal container |
 | `read_only` | bool | Read-only field |
