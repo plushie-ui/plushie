@@ -18,13 +18,14 @@ use std::hash::Hasher;
 
 use iced::widget::canvas;
 use iced::{
-    Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Vector, alignment, keyboard,
-    mouse,
+    Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Theme, Vector, alignment,
+    keyboard, mouse,
 };
 use serde_json::Value;
 
 use super::caches::{WidgetCaches, canvas_layer_map, hash_json_value};
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
@@ -217,7 +218,7 @@ impl TransformMatrix {
     /// and `frame.pop_transform()` after.
     ///
     /// [`Frame`]: iced::widget::canvas::Frame
-    pub fn apply_to_frame(&self, frame: &mut canvas::Frame) {
+    pub fn apply_to_frame<R: PlushieRenderer>(&self, frame: &mut canvas::Frame<R>) {
         let (tx, ty, angle, sx, sy) = self.decompose();
         frame.translate(Vector::new(tx, ty));
         if angle.abs() > 1e-6 {
@@ -655,7 +656,7 @@ fn group_translation(group: &Value) -> (f32, f32) {
 /// Supported transform types: `translate`, `rotate`, `scale`.
 /// The caller is responsible for calling `frame.push_transform()` before
 /// and `frame.pop_transform()` after this function.
-fn apply_group_transforms(frame: &mut canvas::Frame, group: &Value) {
+fn apply_group_transforms<R: PlushieRenderer>(frame: &mut canvas::Frame<R>, group: &Value) {
     let transforms = match group.get("transforms").and_then(|v| v.as_array()) {
         Some(arr) => arr,
         None => return,
@@ -692,14 +693,14 @@ fn apply_group_transforms(frame: &mut canvas::Frame, group: &Value) {
 ///
 /// If the group has a `"clip"` field with `{x, y, w, h}`, children are
 /// drawn clipped to that rectangle. Otherwise children are drawn directly.
-fn draw_with_group_clip(
-    frame: &mut canvas::Frame,
+fn draw_with_group_clip<R: PlushieRenderer>(
+    frame: &mut canvas::Frame<R>,
     group: &Value,
     images: &crate::image_registry::ImageRegistry,
     theme: &iced::Theme,
     children: &[&Value],
     draw_fn: impl FnOnce(
-        &mut canvas::Frame,
+        &mut canvas::Frame<R>,
         &[&Value],
         &crate::image_registry::ImageRegistry,
         &iced::Theme,
@@ -968,11 +969,11 @@ struct CanvasState {
     focus_visible: bool,
 }
 
-struct CanvasProgram<'a> {
+struct CanvasProgram<'a, R: PlushieRenderer = iced::Renderer> {
     /// Sorted layer data: (layer_name, shapes array).
     layers: Vec<(String, Vec<Value>)>,
     /// Per-layer caches from WidgetCaches.
-    caches: Option<&'a HashMap<String, (u64, canvas::Cache)>>,
+    caches: Option<&'a HashMap<String, (u64, canvas::Cache<R>)>>,
     background: Option<Color>,
     id: String,
     on_press: bool,
@@ -990,7 +991,7 @@ struct CanvasProgram<'a> {
     pending_focus: Option<String>,
 }
 
-impl CanvasProgram<'_> {
+impl<R: PlushieRenderer> CanvasProgram<'_, R> {
     fn is_interactive(&self) -> bool {
         self.on_press
             || self.on_release
@@ -1128,7 +1129,7 @@ impl CanvasProgram<'_> {
     /// per-child style overrides applied. Priority: pressed > hover > focus.
     fn draw_shapes_with_overrides(
         &self,
-        frame: &mut canvas::Frame,
+        frame: &mut canvas::Frame<R>,
         shapes: &[&Value],
         state: &CanvasState,
         images: &crate::image_registry::ImageRegistry,
@@ -1187,7 +1188,7 @@ impl CanvasProgram<'_> {
                     });
 
                     let draw_children =
-                        |f: &mut canvas::Frame,
+                        |f: &mut canvas::Frame<R>,
                          child_refs: &[&Value],
                          img: &crate::image_registry::ImageRegistry,
                          theme: &iced::Theme| {
@@ -1547,8 +1548,8 @@ fn merge_shape_style(shape: &Value, overrides: &Value) -> Value {
 /// **Clipping note**: when the hit region fills the entire canvas, the
 /// outset ring may be clipped. SDKs should add padding to the canvas
 /// (e.g. 4px on each side) to accommodate the focus ring.
-fn draw_focus_ring(
-    frame: &mut canvas::Frame,
+fn draw_focus_ring<R: PlushieRenderer>(
+    frame: &mut canvas::Frame<R>,
     element: &InteractiveElement,
     color: Color,
     stroke_width: f32,
@@ -1617,8 +1618,8 @@ fn draw_focus_ring(
 }
 
 /// Draw a tooltip overlay at the cursor position.
-fn draw_tooltip(
-    frame: &mut canvas::Frame,
+fn draw_tooltip<R: PlushieRenderer>(
+    frame: &mut canvas::Frame<R>,
     text: &str,
     cursor: Point,
     bounds: Size,
@@ -1991,8 +1992,8 @@ fn build_path_from_commands(commands: &[Value]) -> canvas::Path {
 /// Clips and transforms are handled at the group level -- each group
 /// carries its own `"transforms"` and `"clip"` fields, applied in
 /// [`draw_canvas_shape`] when rendering the `"group"` type.
-fn draw_canvas_shapes(
-    frame: &mut canvas::Frame,
+fn draw_canvas_shapes<R: PlushieRenderer>(
+    frame: &mut canvas::Frame<R>,
     shapes: &[&Value],
     images: &crate::image_registry::ImageRegistry,
     theme: &iced::Theme,
@@ -2068,8 +2069,8 @@ fn parse_canvas_text_align_y(value: Option<&Value>) -> alignment::Vertical {
 }
 
 /// Draw a single shape (or transform command) into the frame.
-fn draw_canvas_shape(
-    frame: &mut canvas::Frame,
+fn draw_canvas_shape<R: PlushieRenderer>(
+    frame: &mut canvas::Frame<R>,
     shape: &Value,
     images: &crate::image_registry::ImageRegistry,
     theme: &iced::Theme,
@@ -2325,7 +2326,7 @@ fn draw_canvas_shape(
     }
 }
 
-impl canvas::Program<Message> for CanvasProgram<'_> {
+impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProgram<'_, R> {
     type State = CanvasState;
 
     fn update(
@@ -2627,11 +2628,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
     fn draw(
         &self,
         state: &CanvasState,
-        renderer: &iced::Renderer,
+        renderer: &R,
         theme: &iced::Theme,
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
+    ) -> Vec<canvas::Geometry<R>> {
         let mut geometries = Vec::new();
 
         // Background fill -- cheap single rect, not cached.
@@ -2939,7 +2940,10 @@ fn serialize_mouse_button_for_canvas(button: &mouse::Button) -> String {
     }
 }
 
-pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_canvas<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Fill);
     let height = prop_length(props, "height", Length::Fixed(200.0));
@@ -2969,7 +2973,7 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         .unwrap_or(&[]);
     let has_interactive_elements = !interactive_elements.is_empty();
 
-    let mut c = iced::widget::canvas(CanvasProgram {
+    let mut c = iced::widget::Canvas::<_, Message, iced::Theme, R>::new(CanvasProgram {
         layers,
         caches: node_caches,
         background,
@@ -3282,7 +3286,10 @@ fn validate_interactive_elements(canvas_id: &str, elements: &[InteractiveElement
     }
 }
 
-pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_canvas_cache<R: PlushieRenderer>(
+    node: &crate::protocol::TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
     let layer_map = canvas_layer_map(props);

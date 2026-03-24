@@ -15,11 +15,12 @@ use iced::widget::{
     checkbox, combo_box, container, pick_list, slider, text, text_editor, text_input, toggler,
     vertical_slider,
 };
-use iced::{Element, Font, Length, Pixels, keyboard, widget};
+use iced::{Element, Font, Length, Pixels, Theme, keyboard, widget};
 use serde_json::Value;
 
 use super::caches::{WidgetCaches, hash_str};
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
@@ -28,10 +29,10 @@ use crate::protocol::TreeNode;
 // Text Input
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_text_input<'a>(
+pub(crate) fn render_text_input<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let value = prop_str(props, "value").unwrap_or_default();
     let placeholder = prop_str(props, "placeholder").unwrap_or_default();
@@ -364,10 +365,10 @@ struct KeyRule {
 // Text Editor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_text_editor<'a>(
+pub(crate) fn render_text_editor<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let height = prop_length(props, "height", Length::Shrink);
     let placeholder = prop_str(props, "placeholder").unwrap_or_default();
@@ -382,7 +383,7 @@ pub(crate) fn render_text_editor<'a>(
     };
 
     let editor_id = id;
-    let mut te = text_editor(content)
+    let mut te = text_editor::TextEditor::<'_, _, Message, iced::Theme, R>::new(content)
         .on_action(move |action| Message::TextEditorAction(editor_id.clone(), action))
         .height(height);
 
@@ -666,7 +667,10 @@ pub(crate) fn render_text_editor<'a>(
 // Checkbox
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_checkbox<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_checkbox<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let label = prop_str(props, "label").unwrap_or_default();
     let checked = prop_bool_default(props, "checked", false);
@@ -824,7 +828,10 @@ pub(crate) fn render_checkbox<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
 // Toggler
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_toggler<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_toggler<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let is_toggled = prop_bool_default(props, "is_toggled", false);
     let label = prop_str(props, "label");
@@ -974,7 +981,10 @@ pub(crate) fn render_toggler<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 ///
 /// Roving tabindex (arrow-key navigation within the group) is also a
 /// future improvement that requires iced-level focus changes.
-pub(crate) fn render_radio<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_radio<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let value = prop_str(props, "value").unwrap_or_default();
     let selected_str = prop_str(props, "selected").unwrap_or_default();
@@ -1078,7 +1088,10 @@ fn apply_rail_overrides(
     }
 }
 
-pub(crate) fn render_slider<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_slider<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
     let value = prop_f64(props, "value").unwrap_or(*range.start());
@@ -1177,10 +1190,10 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // Vertical Slider
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_vertical_slider<'a>(
+pub(crate) fn render_vertical_slider<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
     let value = prop_f64(props, "value").unwrap_or(*range.start());
@@ -1271,7 +1284,10 @@ pub(crate) fn render_vertical_slider<'a>(
 // Pick List
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_pick_list<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_pick_list<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let options: Vec<String> = props
         .and_then(|p| p.get("options"))
@@ -1393,7 +1409,10 @@ pub(crate) fn render_pick_list<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // Combo Box
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_combo_box<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let state = match ctx.caches.combo_states.get(&node.id) {
         Some(s) => s,
         None => {
@@ -1553,7 +1572,10 @@ pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 /// is truncated with a warning.
 const MAX_TEXT_EDITOR_CONTENT: usize = 10_485_760; // 10 MB
 
-pub(crate) fn ensure_text_editor_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_text_editor_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     let mut content_str = prop_str(props, "content").unwrap_or_default();
     if content_str.len() > MAX_TEXT_EDITOR_CONTENT {
@@ -1585,7 +1607,10 @@ pub(crate) fn ensure_text_editor_cache(node: &TreeNode, caches: &mut WidgetCache
     // any user edits that happened since the last prop sync.
 }
 
-pub(crate) fn ensure_combo_box_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_combo_box_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     let options: Vec<String> = props
         .and_then(|p| p.get("options"))

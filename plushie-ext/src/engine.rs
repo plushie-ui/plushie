@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use iced::Font;
 use serde_json::Value;
 
+use crate::PlushieRenderer;
 use crate::protocol::{IncomingMessage, OutgoingEvent};
 use crate::theming;
 use crate::tree::Tree;
@@ -133,11 +134,16 @@ pub enum CoreEffect {
 /// Owns the retained UI tree, widget caches, active subscriptions, and
 /// global rendering defaults. The host calls [`apply`](Self::apply) with
 /// each incoming message and executes the returned [`CoreEffect`]s.
-pub struct Core {
+///
+/// The `R` parameter selects the renderer backend for widget caches.
+/// `iced::Renderer` for headless/windowed modes, `()` (null renderer)
+/// for mock mode. Defaults to `iced::Renderer` so existing non-generic
+/// code continues to work unchanged.
+pub struct Core<R: PlushieRenderer = iced::Renderer> {
     /// The retained UI tree (snapshots replace it, patches update it).
     pub tree: Tree,
     /// Caches for stateful widgets (text_editor content, markdown items, etc.).
-    pub caches: WidgetCaches,
+    pub caches: WidgetCaches<R>,
     /// Active event subscriptions: kind -> tag.
     pub active_subscriptions: HashMap<String, String>,
     /// Per-subscription max_rate values from Subscribe messages.
@@ -166,13 +172,13 @@ pub struct Core {
     pub effect_stubs: HashMap<String, Value>,
 }
 
-impl Default for Core {
+impl<R: PlushieRenderer> Default for Core<R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Core {
+impl<R: PlushieRenderer> Core<R> {
     pub fn new() -> Self {
         Self {
             tree: Tree::new(),
@@ -516,25 +522,25 @@ mod tests {
 
     #[test]
     fn new_returns_empty_tree() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert!(core.tree.root().is_none());
     }
 
     #[test]
     fn new_has_empty_active_subscriptions() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert!(core.active_subscriptions.is_empty());
     }
 
     #[test]
     fn new_has_no_default_text_size() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert!(core.default_text_size.is_none());
     }
 
     #[test]
     fn new_has_no_default_font() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert!(core.default_font.is_none());
     }
 
@@ -542,7 +548,7 @@ mod tests {
 
     #[test]
     fn snapshot_sets_tree_and_returns_sync_windows() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Snapshot {
             tree: make_node("root", "column"),
         };
@@ -557,7 +563,7 @@ mod tests {
 
     #[test]
     fn snapshot_with_theme_prop_returns_theme_changed() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Snapshot {
             tree: make_node_with_props("root", "column", serde_json::json!({"theme": "dark"})),
         };
@@ -570,7 +576,7 @@ mod tests {
 
     #[test]
     fn snapshot_without_theme_prop_has_no_theme_changed() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Snapshot {
             tree: make_node("root", "column"),
         };
@@ -585,7 +591,7 @@ mod tests {
 
     #[test]
     fn patch_with_no_ops_returns_sync_windows() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         // First put a tree in place so patch has something to work with
         let snapshot_msg = IncomingMessage::Snapshot {
             tree: make_node("root", "column"),
@@ -602,7 +608,7 @@ mod tests {
 
     #[test]
     fn settings_sets_default_text_size() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_text_size": 18.0}),
         };
@@ -612,7 +618,7 @@ mod tests {
 
     #[test]
     fn settings_sets_default_font_monospace() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_font": {"family": "monospace"}}),
         };
@@ -622,7 +628,7 @@ mod tests {
 
     #[test]
     fn settings_sets_default_font_default_for_unknown_family() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_font": {"family": "sans-serif"}}),
         };
@@ -632,7 +638,7 @@ mod tests {
 
     #[test]
     fn settings_sets_default_event_rate() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_event_rate": 60}),
         };
@@ -642,7 +648,7 @@ mod tests {
 
     #[test]
     fn settings_without_default_event_rate_leaves_none() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_text_size": 14.0}),
         };
@@ -652,7 +658,7 @@ mod tests {
 
     #[test]
     fn subscribe_with_max_rate_stores_rate() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "on_mouse_move".to_string(),
             tag: "mouse".to_string(),
@@ -667,7 +673,7 @@ mod tests {
 
     #[test]
     fn subscribe_without_max_rate_does_not_store_rate() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "on_key_press".to_string(),
             tag: "keys".to_string(),
@@ -679,7 +685,7 @@ mod tests {
 
     #[test]
     fn unsubscribe_removes_subscription_rate() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         core.apply(IncomingMessage::Subscribe {
             kind: "on_mouse_move".to_string(),
             tag: "mouse".to_string(),
@@ -693,7 +699,7 @@ mod tests {
 
     #[test]
     fn settings_without_extension_config_returns_no_effects() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({"default_text_size": 14.0}),
         };
@@ -703,7 +709,7 @@ mod tests {
 
     #[test]
     fn settings_with_extension_config_emits_effect() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({
                 "default_text_size": 14.0,
@@ -721,7 +727,7 @@ mod tests {
 
     #[test]
     fn settings_with_extension_config_contains_correct_value() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let config_val = serde_json::json!({"terminal": {"shell": "/bin/zsh"}});
         let msg = IncomingMessage::Settings {
             settings: serde_json::json!({
@@ -743,7 +749,7 @@ mod tests {
 
     #[test]
     fn subscription_register_adds_to_active_subscriptions() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "time".to_string(),
             tag: "tick".to_string(),
@@ -758,7 +764,7 @@ mod tests {
 
     #[test]
     fn subscription_register_returns_no_effects() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "keyboard".to_string(),
             tag: "key".to_string(),
@@ -770,7 +776,7 @@ mod tests {
 
     #[test]
     fn subscription_unregister_removes_from_active_subscriptions() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         core.active_subscriptions
             .insert("time".to_string(), "tick".to_string());
         let msg = IncomingMessage::Unsubscribe {
@@ -782,7 +788,7 @@ mod tests {
 
     #[test]
     fn subscription_unregister_returns_no_effects() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let msg = IncomingMessage::Unsubscribe {
             kind: "time".to_string(),
         };
@@ -794,7 +800,7 @@ mod tests {
 
     #[test]
     fn unhandled_message_returns_empty_effects() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         // Query is handled by the scripting layer, not Core -- hits the catch-all
         let msg = IncomingMessage::Query {
             id: "q1".to_string(),
@@ -809,7 +815,7 @@ mod tests {
 
     #[test]
     fn snapshot_preserves_extension_caches() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
 
         // Simulate extension storing data in extension caches.
         core.caches.extension.insert("ext", "node-1", 42u32);
@@ -828,7 +834,7 @@ mod tests {
 
     #[test]
     fn snapshot_clears_builtin_caches() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
 
         // Populate a built-in cache by applying a snapshot with a text_editor.
         let editor_node = make_node_with_props(
@@ -862,7 +868,7 @@ mod tests {
 
     #[test]
     fn multi_window_snapshot_two_windows_produces_sync_windows() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let mut root = make_node("root", "column");
         root.children.push(make_window_node("win-a"));
         root.children.push(make_window_node("win-b"));
@@ -881,7 +887,7 @@ mod tests {
 
     #[test]
     fn multi_window_second_snapshot_removes_window() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
 
         // First snapshot: two windows.
         let mut root1 = make_node("root", "column");
@@ -905,7 +911,7 @@ mod tests {
 
     #[test]
     fn multi_window_snapshot_then_add_window_via_second_snapshot() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
 
         // First: one window.
         let mut root1 = make_node("root", "column");
@@ -931,7 +937,7 @@ mod tests {
 
     #[test]
     fn snapshot_with_duplicate_ids_emits_error_event() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let mut root = make_node("root", "column");
         root.children.push(make_node("dupe", "text"));
         root.children.push(make_node("dupe", "button"));
@@ -948,7 +954,7 @@ mod tests {
 
     #[test]
     fn snapshot_without_duplicates_has_no_error_event() {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let mut root = make_node("root", "column");
         root.children.push(make_node("a", "text"));
         root.children.push(make_node("b", "button"));

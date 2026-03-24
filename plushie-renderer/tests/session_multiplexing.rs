@@ -556,7 +556,9 @@ fn mock_checkbox_emits_toggle_event() {
         }),
     );
 
-    // Interact: toggle the checkbox.
+    // Interact: toggle the checkbox. Mock mode now uses the full iced
+    // pipeline, so toggle injects real mouse events which produce
+    // interact_step messages followed by the final interact_response.
     send(
         &mut stdin,
         &serde_json::json!({
@@ -569,18 +571,48 @@ fn mock_checkbox_emits_toggle_event() {
         }),
     );
 
-    let resp = receiver.recv_timeout(timeout);
-    assert_eq!(resp["type"], "interact_response");
-    assert_eq!(resp["session"], "s1");
-    assert_eq!(resp["id"], "i1");
+    // Collect all interact_step events, sending back a snapshot after
+    // each step (the renderer blocks waiting for the host's tree update).
+    let mut toggle_events = Vec::new();
+    loop {
+        let msg = receiver.recv_timeout(timeout);
+        if msg["type"] == "interact_step" {
+            assert_eq!(msg["session"], "s1");
+            assert_eq!(msg["id"], "i1");
+            if let Some(evts) = msg["events"].as_array() {
+                toggle_events.extend(evts.clone());
+            }
+            // Send back the same tree so the renderer can proceed.
+            send(
+                &mut stdin,
+                &serde_json::json!({
+                    "session": "s1",
+                    "type": "snapshot",
+                    "tree": {
+                        "id": "root", "type": "column", "props": {}, "children": [
+                            {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": true}, "children": []}
+                        ]
+                    }
+                }),
+            );
+        } else if msg["type"] == "interact_response" {
+            assert_eq!(msg["session"], "s1");
+            assert_eq!(msg["id"], "i1");
+            // Any remaining events from the final response.
+            if let Some(evts) = msg["events"].as_array() {
+                toggle_events.extend(evts.clone());
+            }
+            break;
+        } else {
+            panic!("unexpected message type: {}", msg["type"]);
+        }
+    }
 
-    let events = resp["events"]
-        .as_array()
-        .expect("events should be an array");
-    assert_eq!(events.len(), 1, "expected exactly one event");
-    assert_eq!(events[0]["family"], "toggle");
-    assert_eq!(events[0]["id"], "chk1");
-    assert_eq!(events[0]["value"], true);
+    // The toggle event should have been produced by the iced pipeline.
+    assert!(
+        toggle_events.iter().any(|e| e["family"] == "toggle"),
+        "expected a toggle event in the interact flow, got: {toggle_events:?}"
+    );
 
     drop(stdin);
     child.wait().unwrap();

@@ -18,6 +18,7 @@
 //! }
 //! ```
 
+use crate::PlushieRenderer;
 use crate::extensions::{ExtensionDispatcher, WidgetExtension};
 
 /// Builder for registering [`WidgetExtension`]s before starting the
@@ -25,11 +26,15 @@ use crate::extensions::{ExtensionDispatcher, WidgetExtension};
 ///
 /// Each extension must have a unique `config_key()` and unique
 /// `type_names()`. Duplicates panic at startup.
-pub struct PlushieAppBuilder {
-    extensions: Vec<Box<dyn WidgetExtension>>,
+///
+/// The `R` parameter selects the renderer backend. Defaults to
+/// `iced::Renderer` which is used by headless and windowed modes.
+/// Mock mode uses `ExtensionDispatcher::<()>::default()` directly.
+pub struct PlushieAppBuilder<R: PlushieRenderer = iced::Renderer> {
+    extensions: Vec<Box<dyn WidgetExtension<R>>>,
 }
 
-impl std::fmt::Debug for PlushieAppBuilder {
+impl<R: PlushieRenderer> std::fmt::Debug for PlushieAppBuilder<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PlushieAppBuilder")
             .field("extensions", &self.extensions.len())
@@ -37,14 +42,14 @@ impl std::fmt::Debug for PlushieAppBuilder {
     }
 }
 
-impl PlushieAppBuilder {
+impl<R: PlushieRenderer> PlushieAppBuilder<R> {
     /// Create an empty builder with no extensions registered.
     pub fn new() -> Self {
         Self { extensions: vec![] }
     }
 
     /// Register a widget extension.
-    pub fn extension(mut self, ext: impl WidgetExtension + 'static) -> Self {
+    pub fn extension(mut self, ext: impl WidgetExtension<R> + 'static) -> Self {
         self.extensions.push(Box::new(ext));
         self
     }
@@ -53,7 +58,7 @@ impl PlushieAppBuilder {
     ///
     /// Useful for dynamically loaded extensions (e.g. via `libloading`)
     /// where the concrete type is erased at the plugin boundary.
-    pub fn extension_boxed(mut self, ext: Box<dyn WidgetExtension>) -> Self {
+    pub fn extension_boxed(mut self, ext: Box<dyn WidgetExtension<R>>) -> Self {
         self.extensions.push(ext);
         self
     }
@@ -64,12 +69,12 @@ impl PlushieAppBuilder {
     }
 
     /// Consume the builder and produce an [`ExtensionDispatcher`].
-    pub fn build_dispatcher(self) -> ExtensionDispatcher {
+    pub fn build_dispatcher(self) -> ExtensionDispatcher<R> {
         ExtensionDispatcher::new(self.extensions)
     }
 }
 
-impl Default for PlushieAppBuilder {
+impl<R: PlushieRenderer> Default for PlushieAppBuilder<R> {
     fn default() -> Self {
         Self::new()
     }

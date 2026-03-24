@@ -18,6 +18,7 @@ use iced::widget::canvas as iced_canvas;
 use iced::widget::{combo_box, markdown, pane_grid, text_editor};
 use serde_json::Value;
 
+use crate::PlushieRenderer;
 use crate::protocol::TreeNode;
 
 /// Maximum recursion depth for tree walks (render, ensure_caches, prepare).
@@ -34,91 +35,119 @@ const MAX_HASH_DEPTH: usize = 256;
 // Widget caches
 // ---------------------------------------------------------------------------
 
-/// Generates the [`WidgetCaches`] struct with automatic `new()`,
-/// `clear_builtin()`, and `prune_stale()` implementations. Adding a
-/// new cache field only requires adding it to this macro invocation --
-/// clear and prune can never fall out of sync.
-macro_rules! define_caches {
-    ($($(#[$meta:meta])* $field:ident : $value:ty),* $(,)?) => {
-        /// Per-widget mutable state that persists across renders.
-        ///
-        /// Fields are `pub(crate)` to avoid leaking internal HashMap
-        /// structure to extension authors. The renderer binary accesses
-        /// specific entries through the accessor methods below.
-        pub struct WidgetCaches {
-            $($(#[$meta])* pub(crate) $field: HashMap<String, $value>,)*
-            /// Extension-owned caches. Public so extension authors can
-            /// access their own cached state during render/prepare/cleanup.
-            pub extension: crate::extensions::ExtensionCaches,
-        }
-
-        impl WidgetCaches {
-            pub fn new() -> Self {
-                Self {
-                    $($field: HashMap::new(),)*
-                    extension: crate::extensions::ExtensionCaches::new(),
-                }
-            }
-
-            /// Clear per-node widget caches without touching extension caches.
-            ///
-            /// Used by the Snapshot handler so that extension cleanup callbacks
-            /// (via `ExtensionDispatcher::prepare_all`) can run before the
-            /// extension cache entries are removed.
-            pub fn clear_builtin(&mut self) {
-                $(self.$field.clear();)*
-            }
-
-            /// Remove entries whose node IDs are no longer in the live set.
-            fn prune_stale(&mut self, live_ids: &HashSet<String>) {
-                $(self.$field.retain(|id, _| live_ids.contains(id));)*
-            }
-        }
-    };
-}
-
-define_caches! {
+/// Per-widget mutable state that persists across renders.
+///
+/// Fields are `pub(crate)` to avoid leaking internal HashMap
+/// structure to extension authors. The renderer binary accesses
+/// specific entries through the accessor methods below.
+///
+/// The `R` parameter selects the renderer backend. Some caches
+/// (text_editor Content, canvas Cache) are parameterized on the
+/// renderer type because iced's widget state depends on it.
+pub struct WidgetCaches<R: PlushieRenderer = iced::Renderer> {
     /// text_editor Content state (preserves cursor, undo history).
-    editor_contents: text_editor::Content,
+    pub(crate) editor_contents: HashMap<String, text_editor::Content<R>>,
     /// Hash of last-synced "content" prop per text_editor. Detects
     /// host-side prop changes without clobbering user edits.
-    editor_content_hashes: u64,
+    pub(crate) editor_content_hashes: HashMap<String, u64>,
     /// Parsed markdown items with content hash for invalidation.
-    markdown_items: (u64, Vec<markdown::Item>),
+    pub(crate) markdown_items: HashMap<String, (u64, Vec<markdown::Item>)>,
     /// combo_box filter/selection state.
-    combo_states: combo_box::State<String>,
+    pub(crate) combo_states: HashMap<String, combo_box::State<String>>,
     /// combo_box option lists for change detection.
-    combo_options: Vec<String>,
+    pub(crate) combo_options: HashMap<String, Vec<String>>,
     /// pane_grid layout state.
-    pane_grid_states: pane_grid::State<String>,
+    pub(crate) pane_grid_states: HashMap<String, pane_grid::State<String>>,
     /// Per-canvas, per-layer geometry caches. Inner key is layer name,
     /// u64 is content hash for invalidation.
-    canvas_caches: HashMap<String, (u64, iced_canvas::Cache)>,
+    pub(crate) canvas_caches: HashMap<String, HashMap<String, (u64, iced_canvas::Cache<R>)>>,
     /// Per-canvas interactive element data parsed from group JSON. Used for
     /// hit testing in `Program::update()` without re-parsing every frame.
-    canvas_interactions: Vec<super::canvas::InteractiveElement>,
+    pub(crate) canvas_interactions: HashMap<String, Vec<super::canvas::InteractiveElement>>,
     /// Pending programmatic focus for a canvas element, set by the
     /// `focus_element` widget_op. Read and drained by `render_canvas`,
     /// which passes the value to `CanvasProgram`. The Program consumes
     /// it at the top of `update()` to set `focused_id`.
-    canvas_pending_focus: String,
+    pub(crate) canvas_pending_focus: HashMap<String, String>,
     /// Per-qr_code caches (content hash, canvas Cache).
-    qr_code_caches: (u64, iced_canvas::Cache),
+    pub(crate) qr_code_caches: HashMap<String, (u64, iced_canvas::Cache<R>)>,
     /// Resolved themes for Themer widget nodes.
-    themer_themes: iced::Theme,
+    pub(crate) themer_themes: HashMap<String, iced::Theme>,
     /// Parsed style overrides with content hash for invalidation.
     /// Populated in `ensure_caches_walk` for any node with a `style`
     /// object prop; read during render to avoid re-parsing every frame.
-    style_overrides: (u64, super::helpers::StyleOverrides),
+    pub(crate) style_overrides: HashMap<String, (u64, super::helpers::StyleOverrides)>,
+    /// Extension-owned caches. Public so extension authors can
+    /// access their own cached state during render/prepare/cleanup.
+    pub extension: crate::extensions::ExtensionCaches,
 }
 
-impl Default for WidgetCaches {
+impl<R: PlushieRenderer> WidgetCaches<R> {
+    pub fn new() -> Self {
+        Self {
+            editor_contents: HashMap::new(),
+            editor_content_hashes: HashMap::new(),
+            markdown_items: HashMap::new(),
+            combo_states: HashMap::new(),
+            combo_options: HashMap::new(),
+            pane_grid_states: HashMap::new(),
+            canvas_caches: HashMap::new(),
+            canvas_interactions: HashMap::new(),
+            canvas_pending_focus: HashMap::new(),
+            qr_code_caches: HashMap::new(),
+            themer_themes: HashMap::new(),
+            style_overrides: HashMap::new(),
+            extension: crate::extensions::ExtensionCaches::new(),
+        }
+    }
+
+    /// Clear per-node widget caches without touching extension caches.
+    ///
+    /// Used by the Snapshot handler so that extension cleanup callbacks
+    /// (via `ExtensionDispatcher::prepare_all`) can run before the
+    /// extension cache entries are removed.
+    pub fn clear_builtin(&mut self) {
+        self.editor_contents.clear();
+        self.editor_content_hashes.clear();
+        self.markdown_items.clear();
+        self.combo_states.clear();
+        self.combo_options.clear();
+        self.pane_grid_states.clear();
+        self.canvas_caches.clear();
+        self.canvas_interactions.clear();
+        self.canvas_pending_focus.clear();
+        self.qr_code_caches.clear();
+        self.themer_themes.clear();
+        self.style_overrides.clear();
+    }
+
+    /// Remove entries whose node IDs are no longer in the live set.
+    fn prune_stale(&mut self, live_ids: &HashSet<String>) {
+        self.editor_contents.retain(|id, _| live_ids.contains(id));
+        self.editor_content_hashes
+            .retain(|id, _| live_ids.contains(id));
+        self.markdown_items.retain(|id, _| live_ids.contains(id));
+        self.combo_states.retain(|id, _| live_ids.contains(id));
+        self.combo_options.retain(|id, _| live_ids.contains(id));
+        self.pane_grid_states.retain(|id, _| live_ids.contains(id));
+        self.canvas_caches.retain(|id, _| live_ids.contains(id));
+        self.canvas_interactions
+            .retain(|id, _| live_ids.contains(id));
+        self.canvas_pending_focus
+            .retain(|id, _| live_ids.contains(id));
+        self.qr_code_caches.retain(|id, _| live_ids.contains(id));
+        self.themer_themes.retain(|id, _| live_ids.contains(id));
+        self.style_overrides.retain(|id, _| live_ids.contains(id));
+    }
+}
+
+impl<R: PlushieRenderer> Default for WidgetCaches<R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl WidgetCaches {
+impl<R: PlushieRenderer> WidgetCaches<R> {
     pub fn clear(&mut self) {
         self.clear_builtin();
         self.extension.clear();
@@ -129,7 +158,7 @@ impl WidgetCaches {
     // extension authors, but the renderer binary needs access to a few.
 
     /// Get a mutable reference to a text_editor Content by node ID.
-    pub fn editor_content_mut(&mut self, id: &str) -> Option<&mut text_editor::Content> {
+    pub fn editor_content_mut(&mut self, id: &str) -> Option<&mut text_editor::Content<R>> {
         self.editor_contents.get_mut(id)
     }
 
@@ -178,16 +207,16 @@ impl WidgetCaches {
 /// layers, etc.) is guarded by per-node content hashes, so unchanged
 /// nodes are O(1). A dirty-flag optimization would only skip those hash
 /// lookups, which are already cheap relative to the tree walk itself.
-pub fn ensure_caches(node: &TreeNode, caches: &mut WidgetCaches) {
+pub fn ensure_caches<R: PlushieRenderer>(node: &TreeNode, caches: &mut WidgetCaches<R>) {
     let mut live_ids = HashSet::new();
     ensure_caches_walk(node, caches, &mut live_ids, 0);
     caches.prune_stale(&live_ids);
 }
 
 /// Inner recursive walk: populate caches and collect live node IDs.
-fn ensure_caches_walk(
+fn ensure_caches_walk<R: PlushieRenderer>(
     node: &TreeNode,
-    caches: &mut WidgetCaches,
+    caches: &mut WidgetCaches<R>,
     live_ids: &mut HashSet<String>,
     depth: usize,
 ) {
@@ -253,7 +282,7 @@ pub(crate) fn canvas_layer_map(
 
 /// Cache parsed `StyleOverrides` for a node's `style` prop. Only
 /// re-parses when the content hash of the JSON value changes.
-fn ensure_style_overrides_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+fn ensure_style_overrides_cache<R: PlushieRenderer>(node: &TreeNode, caches: &mut WidgetCaches<R>) {
     let style_val = match node.props.get("style").and_then(|v| v.as_object()) {
         Some(obj) => obj,
         None => return,
@@ -279,8 +308,8 @@ fn ensure_style_overrides_cache(node: &TreeNode, caches: &mut WidgetCaches) {
 /// node has no `style` prop or if `ensure_caches` hasn't run yet.
 /// Used by widget render functions to avoid re-parsing the style JSON
 /// on every frame.
-pub(crate) fn cached_style_overrides<'a>(
-    caches: &'a WidgetCaches,
+pub(crate) fn cached_style_overrides<'a, R: PlushieRenderer>(
+    caches: &'a WidgetCaches<R>,
     node_id: &str,
 ) -> Option<&'a super::helpers::StyleOverrides> {
     caches.style_overrides.get(node_id).map(|(_, ov)| ov)
@@ -363,7 +392,7 @@ mod tests {
 
     #[test]
     fn widget_caches_new_is_empty() {
-        let c = WidgetCaches::new();
+        let c: WidgetCaches = WidgetCaches::new();
         assert!(c.editor_contents.is_empty());
         assert!(c.markdown_items.is_empty());
         assert!(c.combo_states.is_empty());
@@ -373,7 +402,7 @@ mod tests {
 
     #[test]
     fn widget_caches_clear_empties_maps() {
-        let mut c = WidgetCaches::new();
+        let mut c: WidgetCaches = WidgetCaches::new();
         c.combo_options.insert("x".into(), vec!["a".into()]);
         c.clear();
         assert!(c.combo_options.is_empty());
@@ -383,7 +412,7 @@ mod tests {
 
     #[test]
     fn clear_builtin_preserves_extension_caches() {
-        let mut caches = WidgetCaches::new();
+        let mut caches: WidgetCaches = WidgetCaches::new();
 
         // Add a built-in cache entry and an extension cache entry.
         caches
@@ -401,7 +430,7 @@ mod tests {
 
     #[test]
     fn clear_wipes_both_builtin_and_extension() {
-        let mut caches = WidgetCaches::new();
+        let mut caches: WidgetCaches = WidgetCaches::new();
 
         caches
             .editor_contents

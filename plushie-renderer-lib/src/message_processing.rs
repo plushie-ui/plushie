@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use iced::widget::pane_grid;
 
+use plushie_ext::PlushieRenderer;
 use plushie_ext::extensions::{EventResult, ExtensionDispatcher};
 use plushie_ext::message::Message;
 use plushie_ext::protocol::OutgoingEvent;
@@ -37,10 +38,10 @@ use crate::emitters::message_to_event;
 /// Both the daemon and headless modes call this with references to their
 /// respective state. The caller is responsible for emitting the returned
 /// events (stdout, WireWriter, etc.).
-pub fn process_widget_message(
+pub fn process_widget_message<R: PlushieRenderer>(
     msg: Message,
-    caches: &mut WidgetCaches,
-    dispatcher: &mut ExtensionDispatcher,
+    caches: &mut WidgetCaches<R>,
+    dispatcher: &mut ExtensionDispatcher<R>,
     last_slide_values: &mut HashMap<String, f64>,
 ) -> Vec<OutgoingEvent> {
     match msg {
@@ -184,10 +185,10 @@ pub fn process_widget_message(
 }
 
 /// Process a pane grid drag event into outgoing events.
-fn process_pane_drag(
+fn process_pane_drag<R: PlushieRenderer>(
     grid_id: &str,
     evt: &pane_grid::DragEvent,
-    caches: &mut WidgetCaches,
+    caches: &mut WidgetCaches<R>,
 ) -> Vec<OutgoingEvent> {
     match evt {
         pane_grid::DragEvent::Picked { pane } => {

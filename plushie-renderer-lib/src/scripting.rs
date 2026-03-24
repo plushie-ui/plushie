@@ -20,6 +20,7 @@ use smol_str::SmolStr;
 
 use serde_json::Value;
 
+use plushie_ext::PlushieRenderer;
 use plushie_ext::codec::Codec;
 use plushie_ext::engine::Core;
 use plushie_ext::protocol::{
@@ -497,35 +498,35 @@ fn is_focused(node: &TreeNode) -> bool {
 
 // -- Public API (node as Value) ---------------------------------------------
 
-pub fn find_node_by_id(core: &Core, widget_id: &str) -> Value {
+pub fn find_node_by_id(core: &Core<impl PlushieRenderer>, widget_id: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| n.id == widget_id, &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub fn find_node_by_text(core: &Core, text: &str) -> Value {
+pub fn find_node_by_text(core: &Core<impl PlushieRenderer>, text: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_text(n, text), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub fn find_node_by_role(core: &Core, role: &str) -> Value {
+pub fn find_node_by_role(core: &Core<impl PlushieRenderer>, role: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_role(n, role), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub fn find_node_by_label(core: &Core, label: &str) -> Value {
+pub fn find_node_by_label(core: &Core<impl PlushieRenderer>, label: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_label(n, label), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub fn find_focused_node(core: &Core) -> Value {
+pub fn find_focused_node(core: &Core<impl PlushieRenderer>) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &is_focused, &node_to_value))
@@ -556,7 +557,7 @@ pub fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
 
 /// Build a QueryResponse without writing it anywhere.
 pub fn build_query_response(
-    core: &Core,
+    core: &Core<impl PlushieRenderer>,
     id: String,
     target: String,
     selector: Value,
@@ -584,12 +585,17 @@ pub fn build_query_response(
 }
 
 /// Build and emit a QueryResponse to stdout.
-pub fn handle_query(core: &Core, id: String, target: String, selector: Value) -> io::Result<()> {
+pub fn handle_query(
+    core: &Core<impl PlushieRenderer>,
+    id: String,
+    target: String,
+    selector: Value,
+) -> io::Result<()> {
     emit_wire(&build_query_response(core, id, target, selector))
 }
 
 /// Resolve a selector to a widget ID without emitting anything.
-pub fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String> {
+pub fn resolve_widget_id(core: &Core<impl PlushieRenderer>, selector: &Value) -> Option<String> {
     match parse_selector(selector)? {
         Selector::Id(wid) => Some(wid),
         Selector::Text(text) => core
@@ -610,7 +616,7 @@ pub fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String> {
 
 /// Build an InteractResponse without writing it anywhere.
 pub fn build_interact_response(
-    core: &Core,
+    core: &Core<impl PlushieRenderer>,
     id: String,
     action: String,
     selector: Value,
@@ -732,7 +738,7 @@ pub fn build_interact_response(
 
 /// Build and emit an InteractResponse to stdout.
 pub fn handle_interact(
-    core: &Core,
+    core: &Core<impl PlushieRenderer>,
     id: String,
     action: String,
     selector: Value,
@@ -744,18 +750,22 @@ pub fn handle_interact(
 }
 
 /// Reset core to a blank state and return the response.
-pub fn build_reset_response(core: &mut Core, id: String) -> ResetResponse {
+pub fn build_reset_response<R: PlushieRenderer>(core: &mut Core<R>, id: String) -> ResetResponse {
     *core = Core::new();
     ResetResponse::ok(id)
 }
 
 /// Reset core and emit the response to stdout.
-pub fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
+pub fn handle_reset<R: PlushieRenderer>(core: &mut Core<R>, id: String) -> io::Result<()> {
     emit_wire(&build_reset_response(core, id))
 }
 
 /// Build a TreeHashResponse without writing it anywhere.
-pub fn build_tree_hash_response(core: &Core, id: String, name: String) -> TreeHashResponse {
+pub fn build_tree_hash_response(
+    core: &Core<impl PlushieRenderer>,
+    id: String,
+    name: String,
+) -> TreeHashResponse {
     use sha2::{Digest, Sha256};
 
     let tree_json = match core.tree.root() {
@@ -771,7 +781,11 @@ pub fn build_tree_hash_response(core: &Core, id: String, name: String) -> TreeHa
 }
 
 /// Build and emit a TreeHashResponse to stdout.
-pub fn handle_tree_hash(core: &Core, id: String, name: String) -> io::Result<()> {
+pub fn handle_tree_hash(
+    core: &Core<impl PlushieRenderer>,
+    id: String,
+    name: String,
+) -> io::Result<()> {
     emit_wire(&build_tree_hash_response(core, id, name))
 }
 
@@ -927,13 +941,13 @@ mod tests {
 
     #[test]
     fn find_node_by_id_empty_tree() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert_eq!(find_node_by_id(&core, "anything"), Value::Null);
     }
 
     #[test]
     fn find_node_by_text_empty_tree() {
-        let core = Core::new();
+        let core: Core = Core::new();
         assert_eq!(find_node_by_text(&core, "anything"), Value::Null);
     }
 
@@ -946,7 +960,7 @@ mod tests {
     // to work with.
 
     fn core_with_tree() -> Core {
-        let mut core = Core::new();
+        let mut core: Core = Core::new();
         let mut root = make_node("root", "column");
         root.children.push(make_text_node("btn1", "Click me"));
         root.children.push({

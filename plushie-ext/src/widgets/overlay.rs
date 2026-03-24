@@ -4,6 +4,7 @@
 //! Modelled after iced's tooltip widget but without hover delay or container
 //! styling -- the overlay is always visible and the caller controls content.
 
+use crate::PlushieRenderer;
 use crate::message::Message;
 
 use iced::advanced::Shell;
@@ -52,9 +53,9 @@ pub(crate) enum Align {
 /// interception, so modal overlays rely on the host SDK to manage
 /// focus boundaries -- typically by intercepting focus_next/focus_previous
 /// events and redirecting focus back into the overlay.
-pub(crate) struct OverlayWrapper<'a> {
-    anchor: Element<'a, Message>,
-    content: Element<'a, Message>,
+pub(crate) struct OverlayWrapper<'a, R: PlushieRenderer = iced::Renderer> {
+    anchor: Element<'a, Message, iced::Theme, R>,
+    content: Element<'a, Message, iced::Theme, R>,
     position: Position,
     gap: f32,
     offset_x: f32,
@@ -66,11 +67,11 @@ pub(crate) struct OverlayWrapper<'a> {
     align: Align,
 }
 
-impl<'a> OverlayWrapper<'a> {
+impl<'a, R: PlushieRenderer> OverlayWrapper<'a, R> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        anchor: Element<'a, Message>,
-        content: Element<'a, Message>,
+        anchor: Element<'a, Message, iced::Theme, R>,
+        content: Element<'a, Message, iced::Theme, R>,
         position: Position,
         gap: f32,
         offset_x: f32,
@@ -91,7 +92,7 @@ impl<'a> OverlayWrapper<'a> {
     }
 }
 
-impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
+impl<R: PlushieRenderer> Widget<Message, iced::Theme, R> for OverlayWrapper<'_, R> {
     fn children(&self) -> Vec<widget::Tree> {
         vec![
             widget::Tree::new(&self.anchor),
@@ -114,7 +115,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
-        renderer: &iced::Renderer,
+        renderer: &R,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.anchor
@@ -125,7 +126,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
     fn draw(
         &self,
         tree: &widget::Tree,
-        renderer: &mut iced::Renderer,
+        renderer: &mut R,
         theme: &iced::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
@@ -149,7 +150,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         event: &Event,
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
-        renderer: &iced::Renderer,
+        renderer: &R,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -170,7 +171,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &iced::Renderer,
+        renderer: &R,
     ) -> iced::mouse::Interaction {
         self.anchor.as_widget().mouse_interaction(
             &tree.children[0],
@@ -185,10 +186,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         &'b mut self,
         tree: &'b mut widget::Tree,
         layout: Layout<'b>,
-        renderer: &iced::Renderer,
+        renderer: &R,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, R>> {
         let mut children = tree.children.iter_mut();
         let anchor_tree = children
             .next()
@@ -235,7 +236,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         &mut self,
         tree: &mut widget::Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &R,
         operation: &mut dyn widget::Operation,
     ) {
         // Forward to the anchor child (the widget the overlay is attached to).
@@ -255,8 +256,8 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
     }
 }
 
-impl<'a> From<OverlayWrapper<'a>> for Element<'a, Message> {
-    fn from(wrapper: OverlayWrapper<'a>) -> Self {
+impl<'a, R: PlushieRenderer> From<OverlayWrapper<'a, R>> for Element<'a, Message, iced::Theme, R> {
+    fn from(wrapper: OverlayWrapper<'a, R>) -> Self {
         Element::new(wrapper)
     }
 }
@@ -267,8 +268,8 @@ impl<'a> From<OverlayWrapper<'a>> for Element<'a, Message> {
 
 /// The floating overlay piece. Positioned relative to the anchor bounds
 /// and clamped to the viewport edges.
-struct OverlayContent<'a, 'b> {
-    content: &'b mut Element<'a, Message>,
+struct OverlayContent<'a, 'b, R: PlushieRenderer = iced::Renderer> {
+    content: &'b mut Element<'a, Message, iced::Theme, R>,
     tree: &'b mut widget::Tree,
     position: Position,
     gap: f32,
@@ -288,8 +289,8 @@ fn content_layout<'a>(layout: Layout<'a>) -> Layout<'a> {
         .expect("overlay content must have a child layout")
 }
 
-impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'_, '_> {
-    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
+impl<R: PlushieRenderer> overlay::Overlay<Message, iced::Theme, R> for OverlayContent<'_, '_, R> {
+    fn layout(&mut self, renderer: &R, bounds: Size) -> layout::Node {
         let limits = layout::Limits::new(Size::ZERO, bounds);
         let content_layout = self
             .content
@@ -395,7 +396,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
 
     fn draw(
         &self,
-        renderer: &mut iced::Renderer,
+        renderer: &mut R,
         theme: &iced::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
@@ -418,7 +419,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         event: &Event,
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
-        renderer: &iced::Renderer,
+        renderer: &R,
         shell: &mut Shell<'_, Message>,
     ) {
         let content_layout = content_layout(layout);
@@ -437,7 +438,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         &self,
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
-        renderer: &iced::Renderer,
+        renderer: &R,
     ) -> iced::mouse::Interaction {
         let viewport = Rectangle::with_size(Size::INFINITE);
         let content_layout = content_layout(layout);
@@ -450,12 +451,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         )
     }
 
-    fn operate(
-        &mut self,
-        layout: Layout<'_>,
-        renderer: &iced::Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
+    fn operate(&mut self, layout: Layout<'_>, renderer: &R, operation: &mut dyn widget::Operation) {
         let content_layout = content_layout(layout);
         self.content
             .as_widget_mut()
@@ -465,8 +461,8 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
     fn overlay<'c>(
         &'c mut self,
         layout: Layout<'c>,
-        renderer: &iced::Renderer,
-    ) -> Option<overlay::Element<'c, Message, iced::Theme, iced::Renderer>> {
+        renderer: &R,
+    ) -> Option<overlay::Element<'c, Message, iced::Theme, R>> {
         let content_layout = content_layout(layout);
         self.content.as_widget_mut().overlay(
             self.tree,

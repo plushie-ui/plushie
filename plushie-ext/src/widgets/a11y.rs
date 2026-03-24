@@ -8,6 +8,7 @@
 //!
 //! [`operate`]: iced::advanced::widget::Widget::operate
 
+use crate::PlushieRenderer;
 use crate::message::Message;
 
 use iced::advanced::Shell;
@@ -465,19 +466,22 @@ fn parse_has_popup(s: &str) -> Option<accessible::HasPopup> {
 /// All methods except [`operate`] delegate directly to the child.
 ///
 /// [`operate`]: Widget::operate
-pub(crate) struct A11yOverride<'a> {
-    child: Element<'a, Message>,
+pub(crate) struct A11yOverride<'a, R: PlushieRenderer = iced::Renderer> {
+    child: Element<'a, Message, iced::Theme, R>,
     overrides: A11yOverrides,
 }
 
-impl<'a> A11yOverride<'a> {
+impl<'a, R: PlushieRenderer> A11yOverride<'a, R> {
     /// Wrap `child` with the given accessibility overrides.
-    pub(crate) fn wrap(child: Element<'a, Message>, overrides: A11yOverrides) -> Self {
+    pub(crate) fn wrap(
+        child: Element<'a, Message, iced::Theme, R>,
+        overrides: A11yOverrides,
+    ) -> Self {
         Self { child, overrides }
     }
 }
 
-impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
+impl<R: PlushieRenderer> Widget<Message, iced::Theme, R> for A11yOverride<'_, R> {
     fn children(&self) -> Vec<widget::Tree> {
         vec![widget::Tree::new(&self.child)]
     }
@@ -497,7 +501,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
-        renderer: &iced::Renderer,
+        renderer: &R,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.child
@@ -508,7 +512,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
     fn draw(
         &self,
         tree: &widget::Tree,
-        renderer: &mut iced::Renderer,
+        renderer: &mut R,
         theme: &iced::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
@@ -532,7 +536,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
         event: &Event,
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
-        renderer: &iced::Renderer,
+        renderer: &R,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -553,7 +557,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &iced::Renderer,
+        renderer: &R,
     ) -> iced::mouse::Interaction {
         self.child.as_widget().mouse_interaction(
             &tree.children[0],
@@ -568,10 +572,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
         &'b mut self,
         tree: &'b mut widget::Tree,
         layout: Layout<'b>,
-        renderer: &iced::Renderer,
+        renderer: &R,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, R>> {
         self.child.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
@@ -585,7 +589,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
         &mut self,
         tree: &mut widget::Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &R,
         operation: &mut dyn widget::Operation,
     ) {
         let mut interceptor = A11yInterceptor {
@@ -601,8 +605,8 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
     }
 }
 
-impl<'a> From<A11yOverride<'a>> for Element<'a, Message> {
-    fn from(wrapper: A11yOverride<'a>) -> Self {
+impl<'a, R: PlushieRenderer> From<A11yOverride<'a, R>> for Element<'a, Message, iced::Theme, R> {
+    fn from(wrapper: A11yOverride<'a, R>) -> Self {
         Element::new(wrapper)
     }
 }

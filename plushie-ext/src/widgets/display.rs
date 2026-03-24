@@ -15,11 +15,14 @@ use std::hash::{Hash, Hasher};
 
 use iced::widget::text::LineHeight;
 use iced::widget::{Space, canvas, container, markdown, progress_bar, rich_text, rule, span, text};
-use iced::{Color, Element, Font, Length, Padding, Pixels, Point, Radians, Rotation, Size, mouse};
+use iced::{
+    Color, Element, Font, Length, Padding, Pixels, Point, Radians, Rotation, Size, Theme, mouse,
+};
 use serde_json::Value;
 
 use super::caches::{WidgetCaches, hash_str};
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
@@ -29,7 +32,10 @@ use crate::theming::parse_hex_color;
 // Text
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_text<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let content = prop_str(props, "content").unwrap_or_default();
     let size = prop_f32(props, "size").or(ctx.default_text_size);
@@ -118,7 +124,10 @@ pub(crate) fn render_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element
 /// node. Link spans are rendered with iced's native link support, which
 /// provides basic AT announcements but does not expose a separate
 /// focusable link role per span.
-pub(crate) fn render_rich_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_rich_text<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
@@ -227,7 +236,10 @@ pub(crate) fn render_rich_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // Image
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_image<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_image<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     use iced::widget::Image;
     use iced::widget::image::FilterMethod;
 
@@ -330,7 +342,10 @@ pub(crate) fn render_image<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 /// macOS, DirectWrite on Windows). For deterministic headless screenshots,
 /// ensure SVG text uses fonts available on the CI platform or embed fonts
 /// in the SVG.
-pub(crate) fn render_svg<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_svg<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    _ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     use iced::widget::Svg;
 
     let props = node.props.as_object();
@@ -374,7 +389,10 @@ pub(crate) fn render_svg<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element
 // Markdown
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_markdown<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_markdown<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let items = match ctx.caches.markdown_items.get(&node.id) {
         Some((_hash, items)) => items.as_slice(),
@@ -410,7 +428,8 @@ pub(crate) fn render_markdown<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
         settings.style.link_color = lc;
     }
 
-    let mut md: Element<'a, Message> = markdown::view(items, settings).map(Message::MarkdownUrl);
+    let mut md: Element<'a, Message, Theme, R> =
+        markdown::view(items, settings).map(Message::MarkdownUrl);
 
     // Wrap in container if width is specified
     if let Some(w) = value_to_length_opt(props.and_then(|p| p.get("width"))) {
@@ -424,10 +443,10 @@ pub(crate) fn render_markdown<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
 // Progress Bar
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_progress_bar<'a>(
+pub(crate) fn render_progress_bar<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let range = prop_range_f32(props);
     let value = prop_f32(props, "value")
@@ -487,7 +506,10 @@ pub(crate) fn render_progress_bar<'a>(
 // Rule (horizontal/vertical divider)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_rule<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_rule<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let direction = prop_str(props, "direction").unwrap_or_default();
 
@@ -540,7 +562,10 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element
 // Space
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_space<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_space<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    _ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
@@ -551,26 +576,26 @@ pub(crate) fn render_space<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
 // QR Code
 // ---------------------------------------------------------------------------
 
-struct QrCodeProgram<'a> {
+struct QrCodeProgram<'a, R: PlushieRenderer = iced::Renderer> {
     modules: Vec<Vec<bool>>,
     cell_size: f32,
     cell_color: Color,
     background_color: Color,
-    cache: Option<&'a (u64, canvas::Cache)>,
+    cache: Option<&'a (u64, canvas::Cache<R>)>,
 }
 
-impl canvas::Program<Message> for QrCodeProgram<'_> {
+impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for QrCodeProgram<'_, R> {
     type State = ();
 
     fn draw(
         &self,
         _state: &Self::State,
-        renderer: &iced::Renderer,
+        renderer: &R,
         _theme: &iced::Theme,
         bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let draw_fn = |frame: &mut canvas::Frame| {
+    ) -> Vec<canvas::Geometry<R>> {
+        let draw_fn = |frame: &mut canvas::Frame<R>| {
             // Fill background
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), self.background_color);
             // Draw each dark module as a filled square
@@ -599,7 +624,10 @@ impl canvas::Program<Message> for QrCodeProgram<'_> {
     }
 }
 
-pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_qr_code<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let data = prop_str(props, "data").unwrap_or_default();
     let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0).clamp(1.0, 50.0);
@@ -639,7 +667,7 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 
     let cache_entry = ctx.caches.qr_code_caches.get(&node.id);
 
-    let mut qr_canvas = canvas(QrCodeProgram {
+    let mut qr_canvas = iced::widget::Canvas::<_, Message, iced::Theme, R>::new(QrCodeProgram {
         modules,
         cell_size,
         cell_color,
@@ -667,7 +695,10 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 /// is truncated with a warning.
 const MAX_MARKDOWN_CONTENT: usize = 1_048_576; // 1 MB
 
-pub(crate) fn ensure_markdown_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_markdown_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     let mut content_str = prop_str(props, "content").unwrap_or_default();
     if content_str.len() > MAX_MARKDOWN_CONTENT {
@@ -712,7 +743,10 @@ pub(crate) fn ensure_markdown_cache(node: &TreeNode, caches: &mut WidgetCaches) 
     }
 }
 
-pub(crate) fn ensure_qr_code_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_qr_code_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     let data = prop_str(props, "data").unwrap_or_default();
     let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0);

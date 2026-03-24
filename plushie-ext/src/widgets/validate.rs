@@ -505,6 +505,8 @@ pub fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("description", Str),
             ("role", Str),
             ("arrow_mode", Any),
+            ("event_rate", Number),
+            ("a11y", Any),
         ],
         "qr_code" => &[
             ("data", Str),

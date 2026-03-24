@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use iced::{Element, Theme};
 use serde_json::Value;
 
+use crate::PlushieRenderer;
 use crate::image_registry::ImageRegistry;
 use crate::message::Message;
 use crate::protocol::{OutgoingEvent, TreeNode};
@@ -178,7 +179,7 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 ///
 /// struct GreetingExtension;
 ///
-/// impl WidgetExtension for GreetingExtension {
+/// impl<R: PlushieRenderer> WidgetExtension<R> for GreetingExtension {
 ///     fn type_names(&self) -> &[&str] {
 ///         &["greeting"]
 ///     }
@@ -187,7 +188,7 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 ///         "greeting"
 ///     }
 ///
-///     fn render<'a>(&self, node: &'a TreeNode, _env: &WidgetEnv<'a>) -> Element<'a, Message> {
+///     fn render<'a>(&self, node: &'a TreeNode, _env: &WidgetEnv<'a, R>) -> Element<'a, Message, Theme, R> {
 ///         use plushie_ext::iced::widget::text;
 ///         let name = node.props.get("name")
 ///             .and_then(|v| v.as_str())
@@ -196,7 +197,7 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 ///     }
 /// }
 /// ```
-pub trait WidgetExtension: Send + Sync + 'static {
+pub trait WidgetExtension<R: PlushieRenderer = iced::Renderer>: Send + Sync + 'static {
     /// Node type names this extension handles (e.g. ["sparkline", "heatmap"]).
     fn type_names(&self) -> &[&str];
 
@@ -227,7 +228,11 @@ pub trait WidgetExtension: Send + Sync + 'static {
     fn prepare(&mut self, _node: &TreeNode, _caches: &mut ExtensionCaches, _theme: &Theme) {}
 
     /// Build an iced Element for a node. Called in the immutable phase (view).
-    fn render<'a>(&self, node: &'a TreeNode, env: &WidgetEnv<'a>) -> Element<'a, Message>;
+    fn render<'a>(
+        &self,
+        node: &'a TreeNode,
+        env: &WidgetEnv<'a, R>,
+    ) -> Element<'a, Message, Theme, R>;
 
     /// Handle an event emitted by this extension's widgets. Called before
     /// the event reaches the wire.
@@ -277,7 +282,7 @@ pub trait WidgetExtension: Send + Sync + 'static {
     ///
     /// The default implementation panics. Extensions that support
     /// multiplexed sessions must override this.
-    fn new_instance(&self) -> Box<dyn WidgetExtension> {
+    fn new_instance(&self) -> Box<dyn WidgetExtension<R>> {
         unimplemented!(
             "extension `{}` does not support multiplexed sessions; \
              implement new_instance() to enable --max-sessions > 1",
@@ -472,12 +477,12 @@ impl Default for ExtensionCaches {
 ///   defaults, and child rendering. Convenience methods below
 ///   delegate to it: `images()`, `theme()`, `default_text_size()`,
 ///   `default_font()`, `render_child()`.
-pub struct WidgetEnv<'a> {
+pub struct WidgetEnv<'a, R: PlushieRenderer = iced::Renderer> {
     pub caches: &'a ExtensionCaches,
-    pub ctx: RenderCtx<'a>,
+    pub ctx: RenderCtx<'a, R>,
 }
 
-impl std::fmt::Debug for WidgetEnv<'_> {
+impl<R: PlushieRenderer> std::fmt::Debug for WidgetEnv<'_, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WidgetEnv")
             .field("caches", self.caches)
@@ -486,7 +491,7 @@ impl std::fmt::Debug for WidgetEnv<'_> {
     }
 }
 
-impl<'a> WidgetEnv<'a> {
+impl<'a, R: PlushieRenderer> WidgetEnv<'a, R> {
     pub fn images(&self) -> &'a ImageRegistry {
         self.ctx.images
     }
@@ -499,7 +504,7 @@ impl<'a> WidgetEnv<'a> {
     pub fn default_font(&self) -> Option<iced::Font> {
         self.ctx.default_font
     }
-    pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message> {
+    pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message, Theme, R> {
         self.ctx.render_child(node)
     }
     /// The plushie window ID this render is for, or `""` in headless/test.
@@ -536,12 +541,14 @@ pub struct InitCtx<'a> {
 /// Extensions receive this via [`WidgetEnv`] in their `render()` method.
 /// It carries everything needed for rendering: the widget tree state,
 /// image handles, theme, text defaults, and per-window context.
-#[derive(Clone, Copy)]
-pub struct RenderCtx<'a> {
-    pub caches: &'a WidgetCaches,
+///
+/// The `R` parameter selects the renderer backend: `iced::Renderer` for
+/// headless/windowed modes, `()` (null renderer) for mock mode.
+pub struct RenderCtx<'a, R: PlushieRenderer = iced::Renderer> {
+    pub caches: &'a WidgetCaches<R>,
     pub images: &'a ImageRegistry,
     pub theme: &'a Theme,
-    pub extensions: &'a ExtensionDispatcher,
+    pub extensions: &'a ExtensionDispatcher<R>,
     pub default_text_size: Option<f32>,
     pub default_font: Option<iced::Font>,
     /// The plushie window ID this render is for, or `""` in headless/test.
@@ -551,7 +558,14 @@ pub struct RenderCtx<'a> {
     pub scale_factor: f32,
 }
 
-impl std::fmt::Debug for RenderCtx<'_> {
+impl<R: PlushieRenderer> Clone for RenderCtx<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<R: PlushieRenderer> Copy for RenderCtx<'_, R> {}
+
+impl<R: PlushieRenderer> std::fmt::Debug for RenderCtx<'_, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RenderCtx")
             .field("window_id", &self.window_id)
@@ -562,9 +576,9 @@ impl std::fmt::Debug for RenderCtx<'_> {
     }
 }
 
-impl<'a> RenderCtx<'a> {
+impl<'a, R: PlushieRenderer> RenderCtx<'a, R> {
     /// Render a child node through the main dispatch.
-    pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message> {
+    pub fn render_child(&self, node: &'a TreeNode) -> Element<'a, Message, Theme, R> {
         crate::widgets::render(node, *self)
     }
 
@@ -574,7 +588,7 @@ impl<'a> RenderCtx<'a> {
     }
 
     /// Render all children of a node through the main dispatch.
-    pub fn render_children(&self, node: &'a TreeNode) -> Vec<Element<'a, Message>> {
+    pub fn render_children(&self, node: &'a TreeNode) -> Vec<Element<'a, Message, Theme, R>> {
         node.children.iter().map(|c| self.render_child(c)).collect()
     }
 }
@@ -592,8 +606,8 @@ const RENDER_PANIC_THRESHOLD: u32 = 3;
 /// map for event/command routing, and per-extension poison state for
 /// panic isolation. Created via
 /// [`PlushieAppBuilder::build_dispatcher`](crate::app::PlushieAppBuilder::build_dispatcher).
-pub struct ExtensionDispatcher {
-    extensions: Vec<Box<dyn WidgetExtension>>,
+pub struct ExtensionDispatcher<R: PlushieRenderer = iced::Renderer> {
+    extensions: Vec<Box<dyn WidgetExtension<R>>>,
     type_name_index: HashMap<String, usize>,
     node_extension_map: HashMap<String, usize>,
     poisoned: Vec<bool>,
@@ -603,7 +617,7 @@ pub struct ExtensionDispatcher {
     render_panic_counts: Vec<AtomicU32>,
 }
 
-impl std::fmt::Debug for ExtensionDispatcher {
+impl<R: PlushieRenderer> std::fmt::Debug for ExtensionDispatcher<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let type_names: Vec<_> = self.type_name_index.keys().collect();
         f.debug_struct("ExtensionDispatcher")
@@ -614,8 +628,8 @@ impl std::fmt::Debug for ExtensionDispatcher {
     }
 }
 
-impl ExtensionDispatcher {
-    pub fn new(extensions: Vec<Box<dyn WidgetExtension>>) -> Self {
+impl<R: PlushieRenderer> ExtensionDispatcher<R> {
+    pub fn new(extensions: Vec<Box<dyn WidgetExtension<R>>>) -> Self {
         let n = extensions.len();
 
         // Validate extension metadata before building the index.
@@ -696,7 +710,7 @@ impl ExtensionDispatcher {
     /// overridden). The caller should log the error and reject the
     /// session rather than crashing the reader thread.
     pub fn clone_for_session(&self) -> Result<Self, String> {
-        let mut extensions: Vec<Box<dyn WidgetExtension>> =
+        let mut extensions: Vec<Box<dyn WidgetExtension<R>>> =
             Vec::with_capacity(self.extensions.len());
         for ext in &self.extensions {
             let key = ext.config_key().to_string();
@@ -984,8 +998,8 @@ impl ExtensionDispatcher {
     pub fn render<'a>(
         &'a self,
         node: &'a TreeNode,
-        env: &WidgetEnv<'a>,
-    ) -> Option<Element<'a, Message>> {
+        env: &WidgetEnv<'a, R>,
+    ) -> Option<Element<'a, Message, Theme, R>> {
         let &idx = self.type_name_index.get(node.type_name.as_str())?;
         if self.poisoned[idx] {
             return Some(render_poisoned_placeholder(node));
@@ -1079,7 +1093,7 @@ impl ExtensionDispatcher {
     }
 }
 
-impl Default for ExtensionDispatcher {
+impl<R: PlushieRenderer> Default for ExtensionDispatcher<R> {
     fn default() -> Self {
         Self::new(vec![])
     }
@@ -1159,7 +1173,9 @@ impl Default for GenerationCounter {
 /// so the developer can identify which extension failed. The panic details
 /// (which method, the panic message) are logged at error level -- check
 /// stderr or RUST_LOG output for the full diagnostic.
-fn render_poisoned_placeholder<'a>(node: &TreeNode) -> Element<'a, Message> {
+fn render_poisoned_placeholder<'a, R: PlushieRenderer>(
+    node: &TreeNode,
+) -> Element<'a, Message, Theme, R> {
     use iced::Color;
     use iced::widget::text;
     text(format!(
@@ -1269,7 +1285,7 @@ mod tests {
 
     #[test]
     fn empty_dispatcher_handles_nothing() {
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         assert!(dispatcher.is_empty());
         assert!(!dispatcher.handles_type("anything"));
     }
@@ -1479,7 +1495,7 @@ mod tests {
 
     #[test]
     fn record_render_panic_unknown_type_returns_false() {
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         assert!(!dispatcher.record_render_panic("nonexistent"));
     }
 

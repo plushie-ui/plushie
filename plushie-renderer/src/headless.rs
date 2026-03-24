@@ -3,14 +3,15 @@
 //! `--headless`: real rendering via tiny-skia with persistent widget
 //! state. Accurate screenshots after interactions.
 //!
-//! `--mock`: protocol-only, no rendering. Stub screenshots. Fast
+//! `--mock`: protocol-only via the null renderer `()`. Full iced widget
+//! pipeline (event injection, focus tracking) but stub screenshots. Fast
 //! protocol-level testing from any language.
 //!
 //! Both modes read framed messages from stdin, process them through
 //! [`Core`](plushie_ext::engine::Core), and write responses to stdout.
-//! No iced daemon, no windows, no GPU. The difference is whether a
-//! persistent iced renderer and UI cache are maintained for real
-//! screenshot capture (`--headless`) or omitted for speed (`--mock`).
+//! No iced daemon, no windows, no GPU. Both modes maintain a persistent
+//! renderer and UI cache -- headless uses `iced::Renderer` (tiny-skia)
+//! for real screenshots, mock uses the null renderer `()` for speed.
 //!
 //! # Session multiplexing
 //!
@@ -25,11 +26,11 @@ use std::io::{self, BufRead, BufReader, Read};
 use std::sync::mpsc;
 use std::thread;
 
-use iced::advanced::renderer::Headless as HeadlessTrait;
 use iced::mouse;
 use iced::{Event, Size, Theme};
 use serde::Serialize;
 
+use plushie_ext::PlushieRenderer;
 use plushie_ext::codec::Codec;
 use plushie_ext::engine::Core;
 use plushie_ext::extensions::{ExtensionDispatcher, RenderCtx};
@@ -37,7 +38,10 @@ use plushie_ext::image_registry::ImageRegistry;
 use plushie_ext::message::Message;
 use plushie_ext::protocol::{IncomingMessage, OutgoingEvent, SessionMessage};
 
-use plushie_renderer_lib::scripting::{interaction_to_iced_events, resolve_widget_id};
+use iced::keyboard::{self, Key};
+use plushie_renderer_lib::scripting::{
+    interaction_to_iced_events, make_key_pressed, make_key_released, resolve_widget_id,
+};
 
 /// Default screenshot width when not specified by the caller.
 const DEFAULT_SCREENSHOT_WIDTH: u32 = 1024;
@@ -126,10 +130,11 @@ impl WireWriter {
 
 type UiCache = iced_test::runtime::user_interface::Cache;
 
-/// Persistent iced renderer and UI cache. Present in `--headless`
-/// mode, absent in `--mock` mode.
-struct UiState {
-    renderer: iced::Renderer,
+/// Persistent iced renderer and UI cache. Both modes maintain one:
+/// headless uses `iced::Renderer` (tiny-skia), mock uses the null
+/// renderer `()`.
+struct UiState<R: PlushieRenderer> {
+    renderer: R,
     ui_cache: UiCache,
     viewport_size: Size,
     cursor: mouse::Cursor,
@@ -137,43 +142,39 @@ struct UiState {
 
 /// All mutable state for a headless/mock session.
 ///
-/// When `ui` is `Some`, the session maintains a persistent iced
-/// renderer and UI cache for real screenshot capture and widget state
-/// tracking. When `None` (mock mode), rendering is skipped entirely.
-struct Session {
-    core: Core,
+/// Both modes maintain a persistent renderer and UI cache for full
+/// iced widget pipeline support (event injection, focus tracking).
+/// The `R` parameter selects the renderer: `iced::Renderer` for
+/// headless (real screenshots), `()` for mock (stub screenshots).
+struct Session<R: PlushieRenderer> {
+    core: Core<R>,
     theme: Theme,
-    dispatcher: ExtensionDispatcher,
+    dispatcher: ExtensionDispatcher<R>,
     images: ImageRegistry,
     writer: WireWriter,
     /// Slider value tracking for SlideRelease (mirrors App.last_slide_values).
     last_slide_values: HashMap<String, f64>,
-    /// None in --mock mode (no rendering).
-    ui: Option<UiState>,
+    ui: UiState<R>,
+    mode: Mode,
 }
 
-impl Session {
-    fn new(dispatcher: ExtensionDispatcher, mode: Mode, writer: WireWriter) -> Self {
-        let ui = if matches!(mode, Mode::Headless) {
-            let renderer_settings = iced::advanced::renderer::Settings {
-                default_font: iced::Font::DEFAULT,
-                default_text_size: iced::Pixels(16.0),
-            };
-            let renderer =
-                iced::futures::executor::block_on(iced::Renderer::new(renderer_settings, None))
-                    .expect("headless renderer must be available (tiny-skia backend)");
+impl<R: PlushieRenderer> Session<R> {
+    fn new(dispatcher: ExtensionDispatcher<R>, mode: Mode, writer: WireWriter) -> Self {
+        let renderer_settings = iced::advanced::renderer::Settings {
+            default_font: iced::Font::DEFAULT,
+            default_text_size: iced::Pixels(16.0),
+        };
+        let renderer = iced::futures::executor::block_on(R::new(renderer_settings, None))
+            .expect("renderer must be available");
 
-            Some(UiState {
-                renderer,
-                ui_cache: UiCache::default(),
-                viewport_size: Size::new(
-                    DEFAULT_SCREENSHOT_WIDTH as f32,
-                    DEFAULT_SCREENSHOT_HEIGHT as f32,
-                ),
-                cursor: mouse::Cursor::Unavailable,
-            })
-        } else {
-            None
+        let ui = UiState {
+            renderer,
+            ui_cache: UiCache::default(),
+            viewport_size: Size::new(
+                DEFAULT_SCREENSHOT_WIDTH as f32,
+                DEFAULT_SCREENSHOT_HEIGHT as f32,
+            ),
+            cursor: mouse::Cursor::Unavailable,
         };
 
         Self {
@@ -184,42 +185,34 @@ impl Session {
             writer,
             last_slide_values: HashMap::new(),
             ui,
+            mode,
         }
     }
 
     /// Rebuild the renderer when default font/text size changes.
     fn rebuild_renderer(&mut self) {
-        let Some(ui_state) = &mut self.ui else {
-            return;
-        };
         let renderer_settings = iced::advanced::renderer::Settings {
             default_font: self.core.default_font.unwrap_or(iced::Font::DEFAULT),
             default_text_size: iced::Pixels(self.core.default_text_size.unwrap_or(16.0)),
         };
-        if let Some(r) =
-            iced::futures::executor::block_on(iced::Renderer::new(renderer_settings, None))
-        {
-            ui_state.renderer = r;
-            ui_state.ui_cache = UiCache::default();
+        if let Some(r) = iced::futures::executor::block_on(R::new(renderer_settings, None)) {
+            self.ui.renderer = r;
+            self.ui.ui_cache = UiCache::default();
         }
     }
 
     /// Build a temporary UserInterface from the current tree, run a
     /// closure against it, then store the resulting cache back.
-    fn with_ui<R>(
+    ///
+    /// Returns `None` if no tree root exists yet (no snapshot received).
+    fn with_ui<Ret>(
         &mut self,
         f: impl FnOnce(
-            &mut iced_test::runtime::UserInterface<
-                '_,
-                plushie_ext::message::Message,
-                Theme,
-                iced::Renderer,
-            >,
-            &mut iced::Renderer,
+            &mut iced_test::runtime::UserInterface<'_, plushie_ext::message::Message, Theme, R>,
+            &mut R,
             mouse::Cursor,
-        ) -> R,
-    ) -> Option<R> {
-        let ui_state = self.ui.as_mut()?;
+        ) -> Ret,
+    ) -> Option<Ret> {
         let root = self.core.tree.root()?;
 
         plushie_ext::widgets::ensure_caches(root, &mut self.core.caches);
@@ -235,31 +228,29 @@ impl Session {
         };
         let element = plushie_ext::widgets::render(root, ctx);
 
-        let cache = std::mem::take(&mut ui_state.ui_cache);
+        let cache = std::mem::take(&mut self.ui.ui_cache);
         let mut ui = iced_test::runtime::UserInterface::build(
             element,
-            ui_state.viewport_size,
+            self.ui.viewport_size,
             cache,
-            &mut ui_state.renderer,
+            &mut self.ui.renderer,
         );
 
-        let result = f(&mut ui, &mut ui_state.renderer, ui_state.cursor);
+        let result = f(&mut ui, &mut self.ui.renderer, self.ui.cursor);
 
-        ui_state.ui_cache = ui.into_cache();
+        self.ui.ui_cache = ui.into_cache();
         Some(result)
     }
 
     /// Process a RedrawRequested event through the UI after a tree change.
     fn settle_ui(&mut self) {
-        if self.ui.is_some() {
-            self.with_ui(|ui, renderer, cursor| {
-                let mut messages = Vec::new();
-                let redraw = Event::Window(iced::window::Event::RedrawRequested(
-                    iced_test::core::time::Instant::now(),
-                ));
-                let _status = ui.update(&[redraw], cursor, renderer, &mut messages);
-            });
-        }
+        self.with_ui(|ui, renderer, cursor| {
+            let mut messages = Vec::new();
+            let redraw = Event::Window(iced::window::Event::RedrawRequested(
+                iced_test::core::time::Instant::now(),
+            ));
+            let _status = ui.update(&[redraw], cursor, renderer, &mut messages);
+        });
     }
 
     /// Inject iced events one at a time, capturing the Messages that
@@ -282,7 +273,6 @@ impl Session {
     ///
     /// Returns `true` if any events were captured and emitted via
     /// interact_step, `false` if no widget Messages were produced.
-    /// Only available in headless mode (returns false in mock mode).
     fn inject_and_capture(
         &mut self,
         session_id: &str,
@@ -290,7 +280,7 @@ impl Session {
         events: &[Event],
         read_next: &mut dyn FnMut() -> Option<IncomingMessage>,
     ) -> bool {
-        if self.ui.is_none() || events.is_empty() {
+        if events.is_empty() {
             return false;
         }
 
@@ -298,10 +288,8 @@ impl Session {
 
         for event in events {
             // Update cursor from CursorMoved events before injection.
-            if let Event::Mouse(mouse::Event::CursorMoved { position }) = event
-                && let Some(ui_state) = &mut self.ui
-            {
-                ui_state.cursor = mouse::Cursor::Available(*position);
+            if let Event::Mouse(mouse::Event::CursorMoved { position }) = event {
+                self.ui.cursor = mouse::Cursor::Available(*position);
             }
 
             // Inject ONE event and capture the Messages iced produces.
@@ -455,8 +443,8 @@ impl Session {
 /// event injections. In single-session mode, it reads from stdin.
 /// In multiplexed mode, it reads from the session's mpsc channel.
 /// Returns `None` if the source is closed.
-fn handle_message(
-    s: &mut Session,
+fn handle_message<R: PlushieRenderer>(
+    s: &mut Session<R>,
     session_id: &str,
     msg: IncomingMessage,
     read_next: &mut dyn FnMut() -> Option<IncomingMessage>,
@@ -504,7 +492,10 @@ fn handle_message(
                         payload,
                     } => {
                         if crate::effects::is_async_effect(&kind) {
-                            let mode = if s.ui.is_some() { "headless" } else { "mock" };
+                            let mode = match s.mode {
+                                Mode::Headless => "headless",
+                                Mode::Mock => "mock",
+                            };
                             log::debug!("{mode}: async effect {kind} unsupported (no display)");
                             s.writer.emit(
                                 &plushie_ext::protocol::EffectResponse::unsupported(request_id)
@@ -547,7 +538,10 @@ fn handle_message(
                         width,
                         height,
                     } => {
-                        let mode = if s.ui.is_some() { "headless" } else { "mock" };
+                        let mode = match s.mode {
+                            Mode::Headless => "headless",
+                            Mode::Mock => "mock",
+                        };
                         if let Err(e) = s.images.apply_op(&op, &handle, data, pixels, width, height)
                         {
                             log::warn!("{mode}: image_op {op} failed: {e}");
@@ -648,30 +642,95 @@ fn handle_message(
             payload,
         } => {
             let widget_id = resolve_widget_id(&s.core, &selector);
-            let cursor =
-                s.ui.as_ref()
-                    .map(|u| u.cursor)
-                    .unwrap_or(mouse::Cursor::Unavailable);
-            let iced_events =
-                interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor);
 
-            let events = if s.ui.is_some() && !iced_events.is_empty() {
-                // Headless mode: inject real iced events one at a time
-                // with host round-trips between events that produce
-                // widget Messages. Events are delivered to the host
-                // via interact_step messages during injection.
+            // Mock mode: use focus+Space for click/toggle actions to avoid
+            // depending on cursor position (which requires accurate layout).
+            // The null renderer gives approximate layout that's not reliable
+            // enough for cursor-based hit testing. Focus operations work by
+            // widget ID (position-independent), and Space activates the
+            // focused widget through the existing keyboard handling in
+            // buttons, checkboxes, and togglers.
+            // In mock mode, actions that would normally inject mouse events
+            // at cursor positions use alternative paths because the null
+            // renderer's approximate layout isn't reliable for hit testing.
+            //
+            // - click/toggle: focus by ID + Space key (position-independent)
+            // - select: synthetic event (pick_list selection can't be done
+            //   via focus+Space since it requires opening a dropdown and
+            //   choosing a specific option)
+            let use_focus_activate = matches!(s.mode, Mode::Mock)
+                && matches!(action.as_str(), "click" | "toggle")
+                && widget_id.is_some();
+            let use_synthetic = matches!(s.mode, Mode::Mock) && matches!(action.as_str(), "select");
+
+            let iced_events = if use_focus_activate || use_synthetic {
+                // Handled via alternative paths below.
+                vec![]
+            } else {
+                let cursor = s.ui.cursor;
+                interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor)
+            };
+
+            let events = if use_synthetic {
+                // Synthetic event path for actions that can't be done
+                // position-independently (e.g. pick_list select).
+                plushie_renderer_lib::scripting::build_interact_response(
+                    &s.core,
+                    id.clone(),
+                    action,
+                    selector,
+                    payload,
+                )
+                .events
+            } else if use_focus_activate {
+                let wid = widget_id.as_ref().unwrap();
+
+                // Step 1: Focus the target widget by ID.
+                s.with_ui(|ui, renderer, _cursor| {
+                    let mut op = iced_test::core::widget::operation::focusable::focus::<()>(
+                        iced::widget::Id::from(wid.clone()),
+                    );
+                    ui.operate(renderer, &mut op);
+                });
+
+                // Step 2: Inject Space key press/release. The focused
+                // widget (button/checkbox/toggler) handles Space as
+                // activation, producing the appropriate message.
+                let space_events = vec![
+                    make_key_pressed(
+                        Key::Named(keyboard::key::Named::Space),
+                        keyboard::Modifiers::empty(),
+                        None,
+                    ),
+                    make_key_released(
+                        Key::Named(keyboard::key::Named::Space),
+                        keyboard::Modifiers::empty(),
+                    ),
+                ];
+
+                let had_steps = s.inject_and_capture(session_id, &id, &space_events, read_next);
+
+                if had_steps {
+                    vec![]
+                } else {
+                    plushie_renderer_lib::scripting::build_interact_response(
+                        &s.core,
+                        id.clone(),
+                        action,
+                        selector,
+                        payload,
+                    )
+                    .events
+                }
+            } else if !iced_events.is_empty() {
+                // Headless mode or keyboard actions: inject real iced
+                // events with host round-trips between events that
+                // produce widget Messages.
                 let had_steps = s.inject_and_capture(session_id, &id, &iced_events, read_next);
 
                 if had_steps {
-                    // Events were already delivered via interact_step.
-                    // Final response is a completion signal with no
-                    // events to avoid double-dispatch.
                     vec![]
                 } else {
-                    // No events captured -- action has no iced
-                    // equivalent (paste, sort, canvas, slide, etc.).
-                    // Fall back to synthetic events in the final
-                    // response (no steps were emitted).
                     plushie_renderer_lib::scripting::build_interact_response(
                         &s.core,
                         id.clone(),
@@ -682,8 +741,8 @@ fn handle_message(
                     .events
                 }
             } else {
-                // Mock mode (no UI) or action with no iced events:
-                // use synthetic event construction.
+                // Action with no iced events: use synthetic event
+                // construction.
                 plushie_renderer_lib::scripting::build_interact_response(
                     &s.core,
                     id.clone(),
@@ -722,10 +781,8 @@ fn handle_message(
             s.images = ImageRegistry::new();
             s.theme = Theme::Dark;
             s.last_slide_values.clear();
-            if let Some(ui_state) = &mut s.ui {
-                ui_state.ui_cache = UiCache::default();
-                ui_state.cursor = mouse::Cursor::Unavailable;
-            }
+            s.ui.ui_cache = UiCache::default();
+            s.ui.cursor = mouse::Cursor::Unavailable;
             s.rebuild_renderer();
             let resp = plushie_renderer_lib::scripting::build_reset_response(&mut s.core, id)
                 .with_session(session_id);
@@ -780,28 +837,29 @@ fn handle_message(
 // Screenshot capture
 // ---------------------------------------------------------------------------
 
-fn handle_screenshot(
-    s: &mut Session,
+fn handle_screenshot<R: PlushieRenderer>(
+    s: &mut Session<R>,
     session_id: &str,
     id: String,
     name: String,
     width: u32,
     height: u32,
 ) -> io::Result<()> {
-    let emit_stub = |s: &Session| {
+    let emit_stub = |s: &Session<R>| {
         let map = screenshot_map(session_id, &id, &name, "", 0, 0);
         s.writer.emit_binary(map, None)
     };
 
-    if s.ui.is_none() {
+    // Mock mode: return stub screenshots for compatibility with
+    // existing tests that check for empty RGBA data.
+    if matches!(s.mode, Mode::Mock) {
         return emit_stub(s);
     }
 
     use iced_test::core::theme::Base;
     use sha2::{Digest, Sha256};
 
-    let ui_state = s.ui.as_mut().unwrap();
-    ui_state.viewport_size = Size::new(width as f32, height as f32);
+    s.ui.viewport_size = Size::new(width as f32, height as f32);
 
     let root = match s.core.tree.root() {
         Some(r) => r,
@@ -819,42 +877,42 @@ fn handle_screenshot(
         window_id: "",
         scale_factor: 1.0,
     };
-    let element: iced::Element<'_, plushie_ext::message::Message> =
+    let element: iced::Element<'_, plushie_ext::message::Message, Theme, R> =
         plushie_ext::widgets::render(root, ctx);
 
-    let cache = std::mem::take(&mut ui_state.ui_cache);
+    let cache = std::mem::take(&mut s.ui.ui_cache);
     let mut ui = iced_test::runtime::UserInterface::build(
         element,
-        ui_state.viewport_size,
+        s.ui.viewport_size,
         cache,
-        &mut ui_state.renderer,
+        &mut s.ui.renderer,
     );
 
     {
-        let cursor = ui_state.cursor;
+        let cursor = s.ui.cursor;
         let mut messages = Vec::new();
         let redraw = Event::Window(iced::window::Event::RedrawRequested(
             iced_test::core::time::Instant::now(),
         ));
-        let _status = ui.update(&[redraw], cursor, &mut ui_state.renderer, &mut messages);
+        let _status = ui.update(&[redraw], cursor, &mut s.ui.renderer, &mut messages);
     }
 
     let base = s.theme.base();
     ui.draw(
-        &mut ui_state.renderer,
+        &mut s.ui.renderer,
         &s.theme,
         &iced_test::core::renderer::Style {
             text_color: base.text_color,
         },
-        ui_state.cursor,
+        s.ui.cursor,
     );
 
-    ui_state.ui_cache = ui.into_cache();
+    s.ui.ui_cache = ui.into_cache();
 
     let phys_size = iced::Size::new(width, height);
-    let rgba = ui_state
-        .renderer
-        .screenshot(phys_size, 1.0, base.background_color);
+    let rgba =
+        s.ui.renderer
+            .screenshot(phys_size, 1.0, base.background_color);
 
     let hash = {
         let mut hasher = Sha256::new();
@@ -920,7 +978,7 @@ pub(crate) fn run(
 
     let (mode_str, backend) = match mode {
         Mode::Headless => ("headless", "tiny-skia"),
-        Mode::Mock => ("mock", "none"),
+        Mode::Mock => ("mock", "null"),
     };
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
     if let Err(e) =
@@ -936,10 +994,33 @@ pub(crate) fn run(
     let initial = crate::startup::read_required_settings(&codec, &mut reader);
     crate::startup::validate_settings(&initial.settings, expected_token, &codec);
 
-    if max_sessions <= 1 {
-        run_single(codec, dispatcher, mode, &mut reader, initial);
-    } else {
-        run_multiplexed(codec, dispatcher, mode, max_sessions, &mut reader, initial);
+    // Branch on mode once at the top. Headless uses iced::Renderer
+    // (tiny-skia) for real screenshots. Mock uses the null renderer ()
+    // for speed, with an empty dispatcher (extensions don't render in
+    // mock mode -- synthetic events handle all interactions).
+    match mode {
+        Mode::Headless => {
+            if max_sessions <= 1 {
+                run_single(codec, dispatcher, mode, &mut reader, initial);
+            } else {
+                run_multiplexed(codec, dispatcher, mode, max_sessions, &mut reader, initial);
+            }
+        }
+        Mode::Mock => {
+            let mock_dispatcher = ExtensionDispatcher::<()>::new(vec![]);
+            if max_sessions <= 1 {
+                run_single(codec, mock_dispatcher, mode, &mut reader, initial);
+            } else {
+                run_multiplexed(
+                    codec,
+                    mock_dispatcher,
+                    mode,
+                    max_sessions,
+                    &mut reader,
+                    initial,
+                );
+            }
+        }
     }
 
     log::info!("stdin closed, exiting");
@@ -1064,9 +1145,9 @@ fn read_message(codec: Codec, reader: &mut impl BufRead) -> Option<SessionMessag
 
 /// Single-session event loop (max_sessions=1). Behaves like the
 /// original design: one session, direct stdout writes.
-fn run_single(
+fn run_single<R: PlushieRenderer>(
     codec: Codec,
-    dispatcher: ExtensionDispatcher,
+    dispatcher: ExtensionDispatcher<R>,
     mode: Mode,
     reader: &mut impl BufRead,
     initial: crate::startup::InitialSettings,
@@ -1099,9 +1180,9 @@ fn run_single(
 
 /// Multiplexed event loop (max_sessions > 1). Reader thread dispatches
 /// to per-session threads. Writer thread serializes output to stdout.
-fn run_multiplexed(
+fn run_multiplexed<R: PlushieRenderer>(
     codec: Codec,
-    template: ExtensionDispatcher,
+    template: ExtensionDispatcher<R>,
     mode: Mode,
     max_sessions: usize,
     reader: &mut impl BufRead,

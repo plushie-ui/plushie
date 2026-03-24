@@ -12,10 +12,11 @@
 use std::time::Duration;
 
 use iced::widget::{Space, button, container, mouse_area, sensor, text, tooltip};
-use iced::{Element, Fill, Length, mouse, widget};
+use iced::{Element, Fill, Length, Theme, mouse, widget};
 
 use super::caches::WidgetCaches;
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
@@ -24,12 +25,15 @@ use crate::protocol::TreeNode;
 // Button
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_button<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_button<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let id = node.id.clone();
 
     // Button can have either a text label or child content
-    let child: Element<'a, Message> = if !node.children.is_empty() {
+    let child: Element<'a, Message, Theme, R> = if !node.children.is_empty() {
         node.children
             .first()
             .map(|c| ctx.render_child(c))
@@ -131,12 +135,12 @@ pub(crate) fn render_button<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // MouseArea
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_mouse_area<'a>(
+pub(crate) fn render_mouse_area<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -206,8 +210,11 @@ pub(crate) fn render_mouse_area<'a>(
 // Sensor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_sensor<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
-    let child: Element<'a, Message> = node
+pub(crate) fn render_sensor<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -255,7 +262,10 @@ pub(crate) fn render_sensor<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 /// same content. iced's tooltip widget itself does not currently emit
 /// an accessible `Tooltip` role -- the visual popup appears/disappears
 /// without AT notification.
-pub(crate) fn render_tooltip<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_tooltip<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let tip = prop_str(props, "tip").unwrap_or_default();
     let gap = prop_f32(props, "gap");
@@ -269,7 +279,7 @@ pub(crate) fn render_tooltip<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
         })
         .unwrap_or(tooltip::Position::Top);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -327,7 +337,10 @@ pub(crate) fn render_tooltip<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 // Themer (applies a sub-theme to child content)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_themer<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_themer<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     // The resolved theme lives in ctx.caches.themer_themes (populated by
     // ensure_caches) so we can borrow it with lifetime 'a for child rendering.
     let cached_theme = ctx.caches.themer_themes.get(&node.id);
@@ -337,7 +350,7 @@ pub(crate) fn render_themer<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     // against the overridden theme.
     let child_ctx = ctx.with_theme(child_theme);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| child_ctx.render_child(c))
@@ -352,13 +365,16 @@ pub(crate) fn render_themer<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // Window (top-level container)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_window<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_window<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let padding = parse_padding_value(props);
     let width = prop_length(props, "width", Fill);
     let height = prop_length(props, "height", Fill);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -377,7 +393,10 @@ pub(crate) fn render_window<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // Overlay
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_overlay<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     use super::overlay;
 
     let props = node.props.as_object();
@@ -414,7 +433,10 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 // Cache ensure function
 // ---------------------------------------------------------------------------
 
-pub(crate) fn ensure_themer_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_themer_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     if let Some(resolved) = props
         .and_then(|p| p.get("theme"))

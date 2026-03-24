@@ -12,6 +12,9 @@
 //! direct `iced` dependency. This avoids version conflicts when
 //! plushie-core bumps its iced version.
 
+// -- Renderer trait alias --
+pub use crate::PlushieRenderer;
+
 // -- Extension trait and lifecycle types --
 pub use crate::extensions::{
     EventResult, ExtensionCaches, GenerationCounter, InitCtx, RenderCtx, WidgetEnv, WidgetExtension,

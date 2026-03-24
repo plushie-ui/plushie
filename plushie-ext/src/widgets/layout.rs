@@ -20,10 +20,11 @@ use iced::widget::scrollable::Anchor;
 use iced::widget::{
     Space, Stack, column, container, grid, keyed, pane_grid, pin, row, scrollable, sensor, text,
 };
-use iced::{Element, Fill, Length, Point, Vector, widget};
+use iced::{Element, Fill, Length, Point, Theme, Vector, widget};
 
 use super::caches::WidgetCaches;
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::{Message, ScrollViewport};
 use crate::protocol::TreeNode;
@@ -32,7 +33,10 @@ use crate::protocol::TreeNode;
 // Column
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_column<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_column<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let spacing = prop_f32(props, "spacing");
     let padding = parse_padding_value(props);
@@ -60,7 +64,7 @@ pub(crate) fn render_column<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         col = col.max_width(mw);
     }
 
-    let elem: Element<'a, Message> = if prop_bool_default(props, "wrap", false) {
+    let elem: Element<'a, Message, Theme, R> = if prop_bool_default(props, "wrap", false) {
         col.wrap().into()
     } else {
         col.into()
@@ -73,7 +77,10 @@ pub(crate) fn render_column<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // Row
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_row<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_row<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let spacing = prop_f32(props, "spacing");
     let padding = parse_padding_value(props);
@@ -99,7 +106,7 @@ pub(crate) fn render_row<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<
 
     let max_width = prop_f32(props, "max_width");
 
-    let elem: Element<'a, Message> = if prop_bool_default(props, "wrap", false) {
+    let elem: Element<'a, Message, Theme, R> = if prop_bool_default(props, "wrap", false) {
         r.wrap().into()
     } else {
         r.into()
@@ -121,7 +128,10 @@ pub(crate) fn render_row<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<
 // Container
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_container<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_container<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let padding = parse_padding_value(props);
     let width = prop_length(props, "width", Length::Shrink);
@@ -129,7 +139,7 @@ pub(crate) fn render_container<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
     let center = prop_bool_default(props, "center", false);
     let clip = prop_bool_default(props, "clip", false);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -258,7 +268,10 @@ pub(crate) fn render_container<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // Stack
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_stack<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_stack<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
@@ -277,7 +290,10 @@ pub(crate) fn render_stack<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // Grid
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_grid<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let cols = props
         .and_then(|p| p.get("columns"))
@@ -328,14 +344,17 @@ pub(crate) fn render_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element
 // Pin (absolute positioning)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_pin<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_pin<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let x = prop_f32(props, "x").unwrap_or(0.0);
     let y = prop_f32(props, "y").unwrap_or(0.0);
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -352,17 +371,17 @@ pub(crate) fn render_pin<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<
 // Keyed Column
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_keyed_column<'a>(
+pub(crate) fn render_keyed_column<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let spacing = prop_f32(props, "spacing");
     let padding = parse_padding_value(props);
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
 
-    let keyed_children: Vec<(u64, Element<'a, Message>)> = node
+    let keyed_children: Vec<(u64, Element<'a, Message, Theme, R>)> = node
         .children
         .iter()
         .map(|c| {
@@ -395,10 +414,13 @@ pub(crate) fn render_keyed_column<'a>(
 // Float (floating overlay with scale/translate)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_float<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_float<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -421,10 +443,10 @@ pub(crate) fn render_float<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // Responsive (container that reports its size)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_responsive<'a>(
+pub(crate) fn render_responsive<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     // iced's Responsive widget takes a closure that receives Size and returns
     // an Element. Since we can't call back to the host within a single frame,
     // we render the children as-is and wrap in a sensor so the host receives
@@ -433,7 +455,7 @@ pub(crate) fn render_responsive<'a>(
     let width = prop_length(props, "width", Length::Fill);
     let height = prop_length(props, "height", Length::Fill);
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -451,16 +473,16 @@ pub(crate) fn render_responsive<'a>(
 // Scrollable
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_scrollable<'a>(
+pub(crate) fn render_scrollable<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    ctx: RenderCtx<'a>,
-) -> Element<'a, Message> {
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
     let spacing = prop_f32(props, "spacing");
 
-    let child: Element<'a, Message> = node
+    let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
         .map(|c| ctx.render_child(c))
@@ -576,7 +598,10 @@ pub(crate) fn render_scrollable<'a>(
 /// node to give it a meaningful name (e.g. "Editor", "Preview"). The
 /// pane_grid node itself can use `a11y.role = "group"` with
 /// `a11y.label` to describe the overall layout (e.g. "Split editor").
-pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_pane_grid<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let spacing = prop_f32(props, "spacing").unwrap_or(2.0);
     let width = prop_length(props, "width", Length::Fill);
@@ -589,7 +614,7 @@ pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 
     // Pre-render children into a map keyed by plushie ID. Also extract
     // title props from child nodes before the closure consumes the elements.
-    let mut child_map: HashMap<String, Element<'a, Message>> = HashMap::new();
+    let mut child_map: HashMap<String, Element<'a, Message, Theme, R>> = HashMap::new();
     let mut title_map: HashMap<String, String> = HashMap::new();
     for c in &node.children {
         child_map.insert(c.id.clone(), ctx.render_child(c));
@@ -608,7 +633,7 @@ pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
     let node_id4 = node.id.clone();
 
     let mut pg = pane_grid::PaneGrid::new(state, |_pane, pane_id, _is_maximized| {
-        let child_element: Element<'a, Message> = child_map
+        let child_element: Element<'a, Message, Theme, R> = child_map
             .borrow_mut()
             .remove(pane_id)
             .unwrap_or_else(|| text(format!("(pane: {})", pane_id)).into());
@@ -659,7 +684,10 @@ pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // Cache ensure functions
 // ---------------------------------------------------------------------------
 
-pub(crate) fn ensure_pane_grid_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+pub(crate) fn ensure_pane_grid_cache<R: PlushieRenderer>(
+    node: &TreeNode,
+    caches: &mut WidgetCaches<R>,
+) {
     let props = node.props.as_object();
     let axis = match prop_str(props, "split_axis").as_deref() {
         Some("horizontal") => pane_grid::Axis::Horizontal,

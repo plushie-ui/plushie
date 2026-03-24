@@ -8,17 +8,21 @@
 
 use iced::advanced::widget::operation::accessible;
 use iced::widget::{button, column, container, row, rule, scrollable, text};
-use iced::{Element, Fill, Length, alignment};
+use iced::{Element, Fill, Length, Theme, alignment};
 use serde_json::Value;
 
 use super::a11y::{A11yOverride, A11yOverrides};
 use super::helpers::*;
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
 
 /// Wrap an element with an accessibility role override.
-fn with_role<'a>(element: Element<'a, Message>, role: accessible::Role) -> Element<'a, Message> {
+fn with_role<'a, R: PlushieRenderer>(
+    element: Element<'a, Message, Theme, R>,
+    role: accessible::Role,
+) -> Element<'a, Message, Theme, R> {
     A11yOverride::wrap(
         element,
         A11yOverrides {
@@ -77,7 +81,10 @@ fn parse_table_columns(props: Props<'_>) -> Vec<TableColumn> {
         .unwrap_or_default()
 }
 
-pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_table<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    _ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Fill);
     let show_header = prop_bool_default(props, "header", true);
@@ -108,11 +115,11 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
         return text("(empty table)").into();
     }
 
-    let mut table_rows: Vec<Element<'a, Message>> = Vec::new();
+    let mut table_rows: Vec<Element<'a, Message, Theme, R>> = Vec::new();
 
     // Header row (conditional)
     if show_header {
-        let header_cells: Vec<Element<'a, Message>> = columns
+        let header_cells: Vec<Element<'a, Message, Theme, R>> = columns
             .iter()
             .map(|col| {
                 // Build sort indicator if this column is currently sorted.
@@ -128,7 +135,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
 
                 let label_text = format!("{}{}", col.label, sort_indicator);
 
-                let cell_elem: Element<'a, Message> = if col.sortable {
+                let cell_elem: Element<'a, Message, Theme, R> = if col.sortable {
                     let click_id = table_id.clone();
                     let click_key = col.key.clone();
                     let mut label = text(label_text);
@@ -166,7 +173,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
         // Separator
         let show_separator = prop_bool_default(props, "separator", true);
         if show_separator {
-            let sep: Element<'a, Message> = if let Some(sep_col) = separator_color {
+            let sep: Element<'a, Message, Theme, R> = if let Some(sep_col) = separator_color {
                 rule::horizontal(separator_thickness)
                     .style(move |_theme: &iced::Theme| rule::Style {
                         color: sep_col,
@@ -184,7 +191,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
 
     // Data rows
     for data_row in &rows {
-        let cells: Vec<Element<'a, Message>> = columns
+        let cells: Vec<Element<'a, Message, Theme, R>> = columns
             .iter()
             .map(|col| {
                 let cell_text = data_row
@@ -198,7 +205,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
                 if let Some(sz) = row_text_size {
                     cell = cell.size(sz);
                 }
-                let cell_elem: Element<'a, Message> =
+                let cell_elem: Element<'a, Message, Theme, R> =
                     container(cell).width(col.width).align_x(col.align).into();
                 with_role(cell_elem, accessible::Role::Cell)
             })

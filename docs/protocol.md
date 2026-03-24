@@ -1971,6 +1971,7 @@ Interactive elements emit the following event families. The top-level
 | `canvas_element_enter` | `element_id`, `x`, `y` | No | Cursor entered hit region |
 | `canvas_element_leave` | `element_id` | No | Cursor left hit region |
 | `canvas_element_click` | `element_id`, `x`, `y`, `button` | No | Activated (click or keyboard). `button`: `"left"`, `"right"`, `"keyboard"` |
+| `canvas_element_key_press` | `element_id`, `key`, `modifiers` | No | Navigation key on focused element when `arrow_mode` is `"none"`. Keys: arrows, Home, End, PageUp, PageDown. `modifiers`: `{shift, ctrl, alt, logo, command}` |
 | `canvas_element_drag` | `element_id`, `x`, `y`, `delta_x`, `delta_y` | Replace | Drag movement |
 | `canvas_element_drag_end` | `element_id`, `x`, `y` | No | Drag released |
 | `canvas_element_focused` | `element_id` | No | Element gained keyboard focus |
@@ -2015,7 +2016,7 @@ internal keyboard navigation uses the roving tabindex pattern.
 | `wrap` (default) | Wraps last->first and first->last. Always captures. |
 | `clamp` | Stops at first/last. Captures. |
 | `linear` | Propagates at boundaries (e.g. scrollable parent handles it). |
-| `none` | Arrows not handled. Tab-only navigation. |
+| `none` | Navigation keys (arrows, Home, End, PageUp, PageDown) emit `canvas_element_key_press` to the host instead of navigating elements. Tab-only navigation for focus. Use for custom value adjustment on focused elements. |
 
 **Focusable groups** (`focusable: true` on a group): Tab moves between
 top-level entries (standalone elements + focusable groups). When Tab

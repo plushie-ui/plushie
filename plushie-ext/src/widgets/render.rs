@@ -8,11 +8,12 @@
 use std::cell::Cell;
 
 use iced::widget::{Space, container, text};
-use iced::{Color, Element};
+use iced::{Color, Element, Theme};
 
 use super::caches::MAX_TREE_DEPTH;
 use super::helpers::*;
 use super::{canvas, display, input, interactive, layout, table, validate};
+use crate::PlushieRenderer;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
@@ -28,7 +29,10 @@ use crate::protocol::TreeNode;
 /// Cache, etc.) must be pre-populated by [`super::ensure_caches`] before calling
 /// this function. `render` works exclusively with shared (`&`) references
 /// to caches, so it can run inside iced's `view()` which only has `&self`.
-pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub fn render<'a, R: PlushieRenderer>(
+    node: &'a TreeNode,
+    ctx: RenderCtx<'a, R>,
+) -> Element<'a, Message, Theme, R> {
     // Track recursion depth via thread-local counter. Each call increments
     // on entry; the DepthGuard decrements on drop (including early returns).
     thread_local! {
@@ -260,10 +264,10 @@ mod tests {
     #[test]
     fn render_smoke_text() {
         let node = smoke_node("t", "text", serde_json::json!({"content": "hello"}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -271,10 +275,10 @@ mod tests {
     #[test]
     fn render_smoke_column_empty() {
         let node = smoke_node("c", "column", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -282,10 +286,10 @@ mod tests {
     #[test]
     fn render_smoke_row_empty() {
         let node = smoke_node("r", "row", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -298,10 +302,10 @@ mod tests {
             serde_json::json!({}),
             vec![smoke_text_child()],
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -314,10 +318,10 @@ mod tests {
             serde_json::json!({}),
             vec![smoke_text_child()],
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -329,10 +333,10 @@ mod tests {
             "checkbox",
             serde_json::json!({"label": "Accept", "checked": true}),
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -340,10 +344,10 @@ mod tests {
     #[test]
     fn render_smoke_space() {
         let node = smoke_node("sp", "space", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -351,10 +355,10 @@ mod tests {
     #[test]
     fn render_smoke_rule() {
         let node = smoke_node("rl", "rule", serde_json::json!({"direction": "horizontal"}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -366,10 +370,10 @@ mod tests {
             "progress_bar",
             serde_json::json!({"value": 50.0, "min": 0.0, "max": 100.0}),
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -381,10 +385,10 @@ mod tests {
             "slider",
             serde_json::json!({"min": 0.0, "max": 100.0, "value": 50.0}),
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -396,10 +400,10 @@ mod tests {
             "text_input",
             serde_json::json!({"placeholder": "Type here", "value": ""}),
         );
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -407,10 +411,10 @@ mod tests {
     #[test]
     fn render_smoke_toggler() {
         let node = smoke_node("tg", "toggler", serde_json::json!({"is_toggled": false}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -418,10 +422,10 @@ mod tests {
     #[test]
     fn render_smoke_stack_empty() {
         let node = smoke_node("st", "stack", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
@@ -433,10 +437,10 @@ mod tests {
     #[test]
     fn render_unknown_type_returns_element_without_panic() {
         let node = smoke_node("unk", "definitely_not_a_widget", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         // Should produce the empty container fallback, not panic.
         let _elem = render(&node, ctx);
@@ -445,10 +449,10 @@ mod tests {
     #[test]
     fn render_text_input_missing_props_does_not_panic() {
         let node = smoke_node("ti_empty", "text_input", serde_json::json!({}));
-        let caches = WidgetCaches::new();
+        let caches: WidgetCaches = WidgetCaches::new();
         let images = ImageRegistry::new();
         let theme = iced::Theme::Dark;
-        let dispatcher = ExtensionDispatcher::default();
+        let dispatcher: ExtensionDispatcher = ExtensionDispatcher::default();
         let ctx = smoke_ctx(&caches, &images, &theme, &dispatcher);
         let _elem = render(&node, ctx);
     }
