@@ -22,6 +22,7 @@ mod effects;
 mod headless;
 mod output;
 mod renderer;
+mod startup;
 pub(crate) mod transport;
 
 /// Entry point for the plushie renderer.

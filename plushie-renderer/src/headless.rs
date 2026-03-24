@@ -901,26 +901,12 @@ pub(crate) fn run(
     ext_keys: &[String],
     transport_name: &str,
     mut reader: BufReader<Box<dyn Read + Send>>,
-    _expected_token: Option<&str>,
+    expected_token: Option<&str>,
 ) {
-    let codec = match forced_codec {
-        Some(c) => c,
-        None => {
-            let buf = match reader.fill_buf() {
-                Ok(b) => b,
-                Err(e) => {
-                    log::error!("failed to read stdin: {e}");
-                    return;
-                }
-            };
-            if buf.is_empty() {
-                log::error!("stdin closed before first message");
-                return;
-            }
-            Codec::detect_from_first_byte(buf[0])
-        }
-    };
-    log::info!("wire codec: {codec}");
+    // Startup handshake: detect codec, send Hello, then read Settings.
+    // This sequence is consistent across all native backends (windowed,
+    // headless, mock).
+    let codec = crate::startup::detect_codec(forced_codec, &mut reader);
     Codec::set_global(codec);
 
     let (mode_str, backend) = match mode {
@@ -935,10 +921,16 @@ pub(crate) fn run(
         return;
     }
 
+    // Settings gate: require Settings as the first message from the host.
+    // Fonts are loaded later when handle_message processes the forwarded
+    // Settings through the session (via load_fonts_from_settings).
+    let initial = crate::startup::read_required_settings(&codec, &mut reader);
+    crate::startup::validate_settings(&initial.settings, expected_token, &codec);
+
     if max_sessions <= 1 {
-        run_single(codec, dispatcher, mode, &mut reader);
+        run_single(codec, dispatcher, mode, &mut reader, initial);
     } else {
-        run_multiplexed(codec, dispatcher, mode, max_sessions, &mut reader);
+        run_multiplexed(codec, dispatcher, mode, max_sessions, &mut reader, initial);
     }
 
     log::info!("stdin closed, exiting");
@@ -1068,8 +1060,20 @@ fn run_single(
     dispatcher: ExtensionDispatcher,
     mode: Mode,
     reader: &mut impl BufRead,
+    initial: crate::startup::InitialSettings,
 ) {
     let mut session = Session::new(dispatcher, mode, WireWriter::stdout());
+
+    // Process the initial Settings through the session so Core.apply()
+    // picks up default_event_rate, default_text_size, extensions, etc.
+    {
+        let (session_id, msg) = initial.into_parts();
+        let mut read_next = || read_message(codec, reader).map(|sm| sm.message);
+        if let Err(e) = handle_message(&mut session, &session_id, msg, &mut read_next) {
+            log::error!("write error processing initial settings: {e}");
+            return;
+        }
+    }
 
     while let Some(sm) = read_message(codec, reader) {
         // Provide a callback that reads the next message from stdin.
@@ -1092,6 +1096,7 @@ fn run_multiplexed(
     mode: Mode,
     max_sessions: usize,
     reader: &mut impl BufRead,
+    initial: crate::startup::InitialSettings,
 ) {
     use std::collections::HashMap;
 
@@ -1110,6 +1115,10 @@ fn run_multiplexed(
     // Session dispatch table: session_id -> sender to that session's thread.
     let mut sessions: HashMap<String, mpsc::SyncSender<IncomingMessage>> = HashMap::new();
     let mut session_handles: Vec<thread::JoinHandle<()>> = Vec::new();
+
+    // The initial Settings was already validated by the startup gate.
+    // Feed it as the first message so the first session gets Core.apply().
+    let mut pending_initial_settings = Some(initial.into_incoming_message());
 
     loop {
         match codec.read_message(reader) {
@@ -1223,6 +1232,15 @@ fn run_multiplexed(
                         session_id,
                         sessions.len()
                     );
+
+                    // Send the initial Settings to the first session so
+                    // Core.apply() processes it (default_event_rate, etc.).
+                    if let Some(settings_msg) = pending_initial_settings.take()
+                        && tx.send(settings_msg).is_err()
+                    {
+                        log::error!("session '{session_id}': failed to send initial settings");
+                    }
+
                     tx
                 };
 

@@ -12,7 +12,7 @@ use plushie_ext::protocol::IncomingMessage;
 use plushie_renderer_lib::App;
 use plushie_renderer_lib::emitters::emit_hello;
 
-use super::stdin::{STDIN_RX, read_initial_settings, spawn_stdin_reader};
+use super::stdin::{STDIN_RX, spawn_stdin_reader};
 
 pub(crate) fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result {
     let args: Vec<String> = std::env::args().collect();
@@ -137,17 +137,23 @@ pub(crate) fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result 
         return Ok(());
     }
 
-    // Read the first message synchronously to get iced settings and font
-    // data before the daemon starts.
-    let (initial_settings, iced_settings, font_bytes, reader) =
-        read_initial_settings(forced_codec, reader, expected_token.as_deref());
+    // Startup handshake: detect codec, send Hello, then read Settings.
+    // This sequence is consistent across all native backends (windowed,
+    // headless, mock).
+    let mut reader = reader;
+    let codec = crate::startup::detect_codec(forced_codec, &mut reader);
+    Codec::set_global(codec);
 
-    // Send the hello handshake before any other output.
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
     if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs, transport_name) {
         log::error!("failed to emit hello: {e}");
         return Ok(());
     }
+
+    let initial = crate::startup::read_required_settings(&codec, &mut reader);
+    crate::startup::validate_settings(&initial.settings, expected_token.as_deref(), &codec);
+    let iced_settings = plushie_renderer_lib::settings::parse_iced_settings(&initial.settings);
+    let font_bytes = crate::startup::collect_font_bytes(&initial.settings);
 
     // Spawn stdin reader thread with tokio channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<StdinEvent>(64);
@@ -155,7 +161,7 @@ pub(crate) fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result 
     *STDIN_RX.lock().expect("STDIN_RX lock poisoned") = Some(rx);
 
     let settings_slot: Mutex<Option<(serde_json::Value, Vec<Vec<u8>>)>> =
-        Mutex::new(Some((initial_settings, font_bytes)));
+        Mutex::new(Some((initial.settings, font_bytes)));
     let builder_slot: Mutex<Option<plushie_ext::app::PlushieAppBuilder>> =
         Mutex::new(Some(builder));
 
