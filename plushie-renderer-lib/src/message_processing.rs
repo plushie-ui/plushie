@@ -63,6 +63,7 @@ pub fn process_widget_message<R: PlushieRenderer>(
         | Message::CanvasElementEnter { .. }
         | Message::CanvasElementLeave { .. }
         | Message::CanvasElementClick { .. }
+        | Message::CanvasElementKeyPress { .. }
         | Message::CanvasElementDrag { .. }
         | Message::CanvasElementDragEnd { .. }
         | Message::CanvasElementFocused { .. }

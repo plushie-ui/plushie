@@ -588,24 +588,42 @@ impl OutgoingEvent {
 
     // -----------------------------------------------------------------------
     // Canvas element events (interactive group interactions)
+    //
+    // All canvas element events use scoped IDs: the wire `id` field is
+    // `"{canvas_id}/{element_id}"` so the SDK's scoped ID system splits
+    // it into `id: element_id, scope: [canvas_id, ...]` automatically.
+    // This makes canvas elements look like regular widgets inside a
+    // container from the SDK's perspective.
+    //
+    // `canvas_element_click` uses the standard "click" family because
+    // clicking a canvas element is semantically identical to clicking
+    // any widget. Other canvas element events keep their specific
+    // families because they have no standard widget equivalent.
     // -----------------------------------------------------------------------
+
+    /// Scoped ID helper: `"{canvas_id}/{element_id}"`.
+    fn scoped_element_id(canvas_id: &str, element_id: &str) -> String {
+        format!("{canvas_id}/{element_id}")
+    }
 
     pub fn canvas_element_enter(canvas_id: String, element_id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
-            ..Self::bare("canvas_element_enter", canvas_id)
+            ..Self::bare(
+                "canvas_element_enter",
+                Self::scoped_element_id(&canvas_id, &element_id),
+            )
         }
     }
 
     pub fn canvas_element_leave(canvas_id: String, element_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"element_id": element_id})),
-            ..Self::bare("canvas_element_leave", canvas_id)
-        }
+        Self::bare(
+            "canvas_element_leave",
+            Self::scoped_element_id(&canvas_id, &element_id),
+        )
     }
 
     pub fn canvas_element_key_press(
@@ -616,14 +634,18 @@ impl OutgoingEvent {
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "element_id": element_id,
                 "key": key,
                 "modifiers": modifiers,
             })),
-            ..Self::bare("canvas_element_key_press", canvas_id)
+            ..Self::bare(
+                "canvas_element_key_press",
+                Self::scoped_element_id(&canvas_id, &element_id),
+            )
         }
     }
 
+    /// Canvas element activation. Uses standard "click" family so
+    /// canvas elements produce the same events as regular widgets.
     pub fn canvas_element_click(
         canvas_id: String,
         element_id: String,
@@ -633,12 +655,11 @@ impl OutgoingEvent {
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
                 "button": button,
             })),
-            ..Self::bare("canvas_element_click", canvas_id)
+            ..Self::bare("click", Self::scoped_element_id(&canvas_id, &element_id))
         }
     }
 
@@ -652,41 +673,44 @@ impl OutgoingEvent {
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
                 "delta_x": sanitize_f32(dx),
                 "delta_y": sanitize_f32(dy),
             })),
             coalesce: Some(CoalesceHint::Replace),
-            ..Self::bare("canvas_element_drag", canvas_id)
+            ..Self::bare(
+                "canvas_element_drag",
+                Self::scoped_element_id(&canvas_id, &element_id),
+            )
         }
     }
 
     pub fn canvas_element_drag_end(canvas_id: String, element_id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
-            ..Self::bare("canvas_element_drag_end", canvas_id)
+            ..Self::bare(
+                "canvas_element_drag_end",
+                Self::scoped_element_id(&canvas_id, &element_id),
+            )
         }
     }
 
     pub fn canvas_element_focused(canvas_id: String, element_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"element_id": element_id})),
-            ..Self::bare("canvas_element_focused", canvas_id)
-        }
+        Self::bare(
+            "canvas_element_focused",
+            Self::scoped_element_id(&canvas_id, &element_id),
+        )
     }
 
-    /// An interactive element lost keyboard focus.
     pub fn canvas_element_blurred(canvas_id: String, element_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"element_id": element_id})),
-            ..Self::bare("canvas_element_blurred", canvas_id)
-        }
+        Self::bare(
+            "canvas_element_blurred",
+            Self::scoped_element_id(&canvas_id, &element_id),
+        )
     }
 
     /// The canvas widget itself gained iced-level focus.
@@ -699,20 +723,20 @@ impl OutgoingEvent {
         Self::bare("canvas_blurred", canvas_id)
     }
 
-    /// A focusable group gained group-level focus (two-level navigation).
+    /// A focusable group gained group-level focus. Uses scoped ID.
     pub fn canvas_group_focused(canvas_id: String, group_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"group_id": group_id})),
-            ..Self::bare("canvas_group_focused", canvas_id)
-        }
+        Self::bare(
+            "canvas_group_focused",
+            Self::scoped_element_id(&canvas_id, &group_id),
+        )
     }
 
-    /// A focusable group lost group-level focus.
+    /// A focusable group lost group-level focus. Uses scoped ID.
     pub fn canvas_group_blurred(canvas_id: String, group_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"group_id": group_id})),
-            ..Self::bare("canvas_group_blurred", canvas_id)
-        }
+        Self::bare(
+            "canvas_group_blurred",
+            Self::scoped_element_id(&canvas_id, &group_id),
+        )
     }
 
     /// Renderer-side validation diagnostic.

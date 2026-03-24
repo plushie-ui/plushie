@@ -5,7 +5,7 @@
 
 pub(crate) mod a11y;
 mod caches;
-mod canvas;
+pub mod canvas;
 mod display;
 mod helpers;
 mod input;

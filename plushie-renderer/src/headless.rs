@@ -243,14 +243,24 @@ impl<R: PlushieRenderer> Session<R> {
     }
 
     /// Process a RedrawRequested event through the UI after a tree change.
-    fn settle_ui(&mut self) {
-        self.with_ui(|ui, renderer, cursor| {
-            let mut messages = Vec::new();
-            let redraw = Event::Window(iced::window::Event::RedrawRequested(
-                iced_test::core::time::Instant::now(),
-            ));
-            let _status = ui.update(&[redraw], cursor, renderer, &mut messages);
-        });
+    /// Also processes any messages produced (e.g. pending focus notifications
+    /// from Tab navigation that were queued by operate()).
+    fn settle_ui(&mut self, session_id: &str) -> Vec<OutgoingEvent> {
+        let messages = self
+            .with_ui(|ui, renderer, cursor| {
+                let mut messages = Vec::new();
+                let redraw = Event::Window(iced::window::Event::RedrawRequested(
+                    iced_test::core::time::Instant::now(),
+                ));
+                let _status = ui.update(&[redraw], cursor, renderer, &mut messages);
+                messages
+            })
+            .unwrap_or_default();
+
+        self.process_captured_messages(messages)
+            .into_iter()
+            .map(|e| e.with_session(session_id))
+            .collect()
     }
 
     /// Inject iced events one at a time, capturing the Messages that
@@ -403,8 +413,23 @@ impl<R: PlushieRenderer> Session<R> {
             }
 
             // Settle the UI so widget state updates before the
-            // next event is processed.
-            self.settle_ui();
+            // next event is processed. This also drains pending focus
+            // notifications from Tab navigation.
+            let settle_events = self.settle_ui(session_id);
+            if !settle_events.is_empty() {
+                emitted_steps = true;
+                let step = plushie_ext::protocol::InteractResponse {
+                    message_type: "interact_step",
+                    session: session_id.to_string(),
+                    id: interact_id.to_string(),
+                    events: settle_events,
+                };
+                self.writer.emit(&step).ok();
+
+                if let Some(msg) = read_next() {
+                    let _ = self.core.apply(msg);
+                }
+            }
         }
 
         emitted_steps
@@ -620,7 +645,10 @@ fn handle_message<R: PlushieRenderer>(
                     s.dispatcher
                         .prepare_all(root, &mut s.core.caches.extension, &s.theme);
                 }
-                s.settle_ui();
+                let settle_events = s.settle_ui(session_id);
+                for event in settle_events {
+                    s.writer.emit(&event).ok();
+                }
             }
         }
 
@@ -661,7 +689,15 @@ fn handle_message<R: PlushieRenderer>(
             let use_focus_activate = matches!(s.mode, Mode::Mock)
                 && matches!(action.as_str(), "click" | "toggle")
                 && widget_id.is_some();
-            let use_synthetic = matches!(s.mode, Mode::Mock) && matches!(action.as_str(), "select");
+            // Canvas actions always use synthetic event construction
+            // because canvas_press/release/move coordinates are canvas-
+            // relative. Injecting them as iced mouse events would require
+            // knowing the canvas widget's window-absolute position. The
+            // synthetic path does hit testing directly from the tree.
+            let use_synthetic = matches!(
+                action.as_str(),
+                "select" | "canvas_press" | "canvas_release" | "canvas_move"
+            ) && (matches!(s.mode, Mode::Mock) || widget_id.is_some());
 
             let iced_events = if use_focus_activate || use_synthetic {
                 // Handled via alternative paths below.

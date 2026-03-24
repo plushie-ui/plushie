@@ -701,31 +701,72 @@ pub fn build_interact_response(
             vec![OutgoingEvent::generic("pane_focus_cycle", wid, None)]
         }
         ("canvas_press", Some(wid)) => {
-            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![OutgoingEvent::generic(
-                "canvas_press",
-                wid,
-                Some(serde_json::json!({"x": x, "y": y})),
-            )]
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let button = payload
+                .get("button")
+                .and_then(|v| v.as_str())
+                .unwrap_or("left")
+                .to_string();
+
+            // Hit test against the canvas tree to determine if an
+            // interactive element was clicked. Coordinates are canvas-
+            // relative, matching the canvas widget's coordinate space.
+            if let Some(node) = core.tree.find_by_id(&wid) {
+                if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
+                {
+                    vec![OutgoingEvent::canvas_element_click(
+                        wid, element_id, x, y, button,
+                    )]
+                } else if plushie_ext::widgets::canvas::canvas_has_on_press(node) {
+                    vec![OutgoingEvent::canvas_press(wid, x, y, button)]
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
         }
         ("canvas_release", Some(wid)) => {
-            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![OutgoingEvent::generic(
-                "canvas_release",
-                wid,
-                Some(serde_json::json!({"x": x, "y": y})),
-            )]
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let button = payload
+                .get("button")
+                .and_then(|v| v.as_str())
+                .unwrap_or("left")
+                .to_string();
+
+            if let Some(node) = core.tree.find_by_id(&wid) {
+                if plushie_ext::widgets::canvas::canvas_has_on_press(node) {
+                    vec![OutgoingEvent::canvas_release(wid, x, y, button)]
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
         }
         ("canvas_move", Some(wid)) => {
-            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![OutgoingEvent::generic(
-                "canvas_move",
-                wid,
-                Some(serde_json::json!({"x": x, "y": y})),
-            )]
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+
+            if let Some(node) = core.tree.find_by_id(&wid) {
+                // Check for element enter/leave + raw move event
+                let mut events = Vec::new();
+                if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
+                {
+                    events.push(OutgoingEvent::canvas_element_enter(
+                        wid.clone(),
+                        element_id,
+                        x,
+                        y,
+                    ));
+                }
+                events.push(OutgoingEvent::canvas_move(wid, x, y));
+                events
+            } else {
+                vec![]
+            }
         }
         _ => {
             log::warn!("unknown action '{action}' or widget not found");

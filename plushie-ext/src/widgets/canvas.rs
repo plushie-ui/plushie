@@ -3088,11 +3088,12 @@ fn resolve_color(value: &Value, theme: &iced::Theme) -> Option<Color> {
 ///
 /// `focusable_parent` is the ID of the nearest ancestor focusable group.
 ///
-/// **Limitation**: Nested focusable groups (focusable inside focusable)
-/// are not fully supported. The inner group appears as a child of the
-/// outer group in arrow navigation, but there is no keyboard mechanism
-/// to "drill into" the inner group. This is an uncommon edge case --
-/// most canvases have at most one level of focusable groups.
+/// `id_prefix` is the hierarchical path of ancestor interactive groups.
+/// When a group "inner" is nested inside group "outer", its element_id
+/// becomes "outer/inner". This produces scoped wire IDs like
+/// "canvas/outer/inner" so the SDK's scope chain dispatch can walk
+/// through nested canvas_widgets.
+///
 /// Children of a focusable group get `parent_group = Some(group_id)`,
 /// which controls two-level keyboard navigation: Tab moves between
 /// top-level entries, arrows navigate within a focused group's children.
@@ -3105,6 +3106,7 @@ fn collect_interactive_elements(
     parent_transform: TransformMatrix,
     parent_clip: Option<(f32, f32, f32, f32)>,
     focusable_parent: Option<&str>,
+    id_prefix: &str,
     out: &mut Vec<InteractiveElement>,
 ) {
     for shape in shapes {
@@ -3160,7 +3162,15 @@ fn collect_interactive_elements(
         let mut child_focusable_parent = focusable_parent;
         let mut focusable_group_id: Option<String> = None;
 
+        // Build hierarchical ID: prefix/local_id for nested groups.
+        let mut child_id_prefix = id_prefix.to_string();
+
         if let Some(mut element) = parse_interactive_element(shape, layer_name) {
+            // Apply hierarchical ID prefix for nested groups.
+            if !id_prefix.is_empty() {
+                element.id = format!("{}/{}", id_prefix, element.id);
+            }
+
             element.transform = group_matrix;
             element.inverse_transform = group_matrix.inverse();
             element.clip_rect = group_clip;
@@ -3169,6 +3179,9 @@ fn collect_interactive_elements(
             if element.focusable {
                 focusable_group_id = Some(element.id.clone());
             }
+
+            // Children of this group use its hierarchical ID as prefix.
+            child_id_prefix = element.id.clone();
 
             out.push(element);
         }
@@ -3186,6 +3199,7 @@ fn collect_interactive_elements(
                 group_matrix,
                 group_clip,
                 child_focusable_parent,
+                &child_id_prefix,
                 out,
             );
         }
@@ -3305,6 +3319,7 @@ pub(crate) fn ensure_canvas_cache<R: PlushieRenderer>(
                 TransformMatrix::identity(),
                 None,
                 None,
+                "",
                 &mut interactive_elements,
             );
         }
@@ -3339,6 +3354,46 @@ pub(crate) fn ensure_canvas_cache<R: PlushieRenderer>(
 
     // Remove stale layers that are no longer in the tree.
     node_caches.retain(|name, _| layer_map.contains_key(name));
+}
+
+/// Hit-test a canvas node at a canvas-relative point.
+///
+/// Parses interactive elements from the canvas node's layers, then
+/// checks if the given point hits any interactive element. Returns
+/// the element ID if a hit is found.
+///
+/// Used by the headless interact handler for `canvas_press` actions
+/// where coordinates are canvas-relative and we need to determine
+/// which element (if any) was clicked without going through iced's
+/// mouse event system.
+pub fn canvas_hit_test(node: &crate::protocol::TreeNode, x: f32, y: f32) -> Option<String> {
+    let props = node.props.as_object();
+    let layer_map = canvas_layer_map(props);
+
+    let mut interactive_elements = Vec::new();
+    for (layer_name, shapes_val) in &layer_map {
+        if let Some(shapes_arr) = shapes_val.as_array() {
+            collect_interactive_elements(
+                shapes_arr,
+                layer_name,
+                TransformMatrix::identity(),
+                None,
+                None,
+                "",
+                &mut interactive_elements,
+            );
+        }
+    }
+
+    find_hit_element(Point::new(x, y), &interactive_elements).map(|e| e.id.clone())
+}
+
+/// Check whether a canvas node has `on_press` enabled.
+pub fn canvas_has_on_press(node: &crate::protocol::TreeNode) -> bool {
+    node.props
+        .get("on_press")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -3981,14 +4036,15 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut result,
         );
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
         // Non-group "top-rect" is NOT collected.
         assert!(!ids.contains(&"top-rect"));
-        // Both groups are collected.
+        // Both groups are collected. Nested groups get hierarchical IDs.
         assert!(ids.contains(&"grp"));
-        assert!(ids.contains(&"nested-grp"));
+        assert!(ids.contains(&"grp/nested-grp"));
     }
 
     #[test]
@@ -4157,6 +4213,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 1);
@@ -4188,6 +4245,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
 
@@ -4223,6 +4281,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
 
@@ -4275,6 +4334,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 1);
@@ -4374,6 +4434,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 1);
@@ -4406,6 +4467,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 1);
@@ -4431,6 +4493,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert!(elements[0].clip_rect.is_none());
@@ -4837,6 +4900,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 1);
@@ -4905,6 +4969,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         let clip = elements[0].clip_rect.unwrap();
@@ -5051,6 +5116,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         // Should collect: toolbar, btn-a, btn-b
@@ -5058,9 +5124,9 @@ mod tests {
         assert_eq!(elements[0].id, "toolbar");
         assert!(elements[0].focusable);
         assert_eq!(elements[0].parent_group, None); // top-level
-        assert_eq!(elements[1].id, "btn-a");
+        assert_eq!(elements[1].id, "toolbar/btn-a");
         assert_eq!(elements[1].parent_group, Some("toolbar".to_string()));
-        assert_eq!(elements[2].id, "btn-b");
+        assert_eq!(elements[2].id, "toolbar/btn-b");
         assert_eq!(elements[2].parent_group, Some("toolbar".to_string()));
     }
 
@@ -5087,6 +5153,7 @@ mod tests {
             TransformMatrix::identity(),
             None,
             None,
+            "",
             &mut elements,
         );
         assert_eq!(elements.len(), 2);
