@@ -269,6 +269,17 @@ pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             canvas_id.clone(),
             element_id.clone(),
         )),
+        Message::CanvasElementKeyPress {
+            canvas_id,
+            element_id,
+            key,
+            modifiers,
+        } => Some(OutgoingEvent::canvas_element_key_press(
+            canvas_id.clone(),
+            element_id.clone(),
+            key.clone(),
+            modifiers.clone(),
+        )),
         Message::CanvasElementClick {
             canvas_id,
             element_id,

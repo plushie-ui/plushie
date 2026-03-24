@@ -191,6 +191,17 @@ pub enum Message {
         x: f32,
         y: f32,
     },
+    /// A focused interactive element received a key that the canvas did not
+    /// consume for navigation. Emitted when `arrow_mode` is `"none"` and the
+    /// key is one the canvas would normally handle (arrows, Home, End,
+    /// PageUp, PageDown). Lets the host implement custom value adjustment
+    /// on focused canvas elements (e.g. slider-like controls).
+    CanvasElementKeyPress {
+        canvas_id: String,
+        element_id: String,
+        key: String,
+        modifiers: KeyModifiers,
+    },
     /// An interactive element gained keyboard focus.
     CanvasElementFocused {
         canvas_id: String,

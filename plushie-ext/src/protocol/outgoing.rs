@@ -608,6 +608,22 @@ impl OutgoingEvent {
         }
     }
 
+    pub fn canvas_element_key_press(
+        canvas_id: String,
+        element_id: String,
+        key: String,
+        modifiers: KeyModifiers,
+    ) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "element_id": element_id,
+                "key": key,
+                "modifiers": modifiers,
+            })),
+            ..Self::bare("canvas_element_key_press", canvas_id)
+        }
+    }
+
     pub fn canvas_element_click(
         canvas_id: String,
         element_id: String,
