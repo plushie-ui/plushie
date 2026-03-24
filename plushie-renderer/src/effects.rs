@@ -557,8 +557,7 @@ mod tests {
     #[test]
     fn unknown_effect_returns_unsupported() {
         let resp = handle_effect("eff-1".to_string(), "teleport_sandwich", &json!({}));
-        assert_eq!(resp.status, "error");
-        assert_eq!(resp.error.as_deref(), Some("unsupported"));
+        assert_eq!(resp.status, "unsupported");
         assert_eq!(resp.id, "eff-1");
     }
 
@@ -640,8 +639,7 @@ mod tests {
             let id = format!("unk-{i}");
             let resp = handle_effect(id.clone(), &format!("bogus_{i}"), &json!(null));
             assert_eq!(resp.id, id);
-            assert_eq!(resp.status, "error");
-            assert_eq!(resp.error.as_deref(), Some("unsupported"));
+            assert_eq!(resp.status, "unsupported");
         }
     }
 

@@ -91,6 +91,14 @@ impl App {
                     self.pending_tasks.push(task);
                 }
                 CoreEffect::EmitEvent(event) => emit_event(event)?,
+                CoreEffect::EmitEffectResponse(response) => {
+                    emit_effect_response(response)?;
+                }
+                CoreEffect::EmitStubAck(ack) => {
+                    let codec = plushie_ext::codec::Codec::get_global();
+                    let bytes = codec.encode(&ack).map_err(io::Error::other)?;
+                    crate::emitters::write_output(&bytes)?;
+                }
                 CoreEffect::HandleEffect {
                     request_id,
                     kind,

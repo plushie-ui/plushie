@@ -108,6 +108,16 @@ pub enum IncomingMessage {
     /// Advance the animation clock by one frame (headless/test mode).
     /// Emits an `animation_frame` event if `on_animation_frame` is subscribed.
     AdvanceFrame { timestamp: u64 },
+    /// Register a stub response for an effect kind. When an effect of
+    /// this kind is requested, the renderer returns the stubbed response
+    /// immediately without executing the real effect.
+    ///
+    /// Used for testing (controlled responses) and scripting (no user
+    /// interaction). The response value is returned as-is in an
+    /// `effect_response` with status "ok".
+    RegisterEffectStub { kind: String, response: Value },
+    /// Remove a previously registered effect stub.
+    UnregisterEffectStub { kind: String },
 }
 
 /// A single item within an `ExtensionCommands` batch.

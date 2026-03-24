@@ -374,6 +374,10 @@ impl Session {
                             IncomingMessage::ExtensionCommand { .. } => "extension_command",
                             IncomingMessage::ExtensionCommands { .. } => "extension_commands",
                             IncomingMessage::AdvanceFrame { .. } => "advance_frame",
+                            IncomingMessage::RegisterEffectStub { .. } => "register_effect_stub",
+                            IncomingMessage::UnregisterEffectStub { .. } => {
+                                "unregister_effect_stub"
+                            }
                         };
                         log::warn!(
                             "interact_step: expected snapshot or patch from host, \
@@ -477,7 +481,9 @@ fn handle_message(
         | IncomingMessage::Unsubscribe { .. }
         | IncomingMessage::WindowOp { .. }
         | IncomingMessage::Settings { .. }
-        | IncomingMessage::ImageOp { .. } => {
+        | IncomingMessage::ImageOp { .. }
+        | IncomingMessage::RegisterEffectStub { .. }
+        | IncomingMessage::UnregisterEffectStub { .. } => {
             let effects = s.core.apply(msg);
 
             for effect in effects {
@@ -486,6 +492,12 @@ fn handle_message(
                     CoreEffect::EmitEvent(event) => {
                         s.writer.emit(&event.with_session(session_id))?;
                     }
+                    CoreEffect::EmitEffectResponse(response) => {
+                        s.writer.emit(&response.with_session(session_id))?;
+                    }
+                    CoreEffect::EmitStubAck(ack) => {
+                        s.writer.emit(&ack.with_session(session_id))?;
+                    }
                     CoreEffect::HandleEffect {
                         request_id,
                         kind,
@@ -493,12 +505,9 @@ fn handle_message(
                     } => {
                         if crate::effects::is_async_effect(&kind) {
                             let mode = if s.ui.is_some() { "headless" } else { "mock" };
-                            log::debug!(
-                                "{mode}: async effect {kind} returning cancelled \
-                                 (no display)"
-                            );
+                            log::debug!("{mode}: async effect {kind} unsupported (no display)");
                             s.writer.emit(
-                                &plushie_ext::protocol::EffectResponse::cancelled(request_id)
+                                &plushie_ext::protocol::EffectResponse::unsupported(request_id)
                                     .with_session(session_id),
                             )?;
                         } else {

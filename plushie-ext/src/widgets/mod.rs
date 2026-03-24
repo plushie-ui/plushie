@@ -14,7 +14,7 @@ mod layout;
 pub(crate) mod overlay;
 mod render;
 mod table;
-mod validate;
+pub mod validate;
 
 // --- Public re-exports -----------------------------------------------------
 

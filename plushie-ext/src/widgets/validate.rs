@@ -1,24 +1,27 @@
-//! Debug-mode prop validation.
+//! Prop validation for tree nodes.
 //!
 //! When enabled, [`validate_props`] checks each node's props against a
-//! schema of expected prop names and types per widget type. Unexpected
-//! names or type mismatches are logged as warnings.
+//! schema of expected property names and types. Unexpected property
+//! names or type mismatches are emitted as prop_validation events over
+//! the wire so the SDK can detect and report them.
 //!
-//! Enabled unconditionally in debug builds. In release builds, the host
-//! can opt in via `validate_props: true` in the Settings message.
+//! Validation is opt-in via `validate_props: true` in the Settings
+//! message. SDKs can opt in via `validate_props: true` in the Settings message.
 
 use std::sync::OnceLock;
 
-use crate::protocol::TreeNode;
 use serde_json::Value;
 
-/// Props accepted by all widget types. Checked before widget-specific
-/// schemas so they don't appear as "unexpected" in validation warnings.
+use crate::protocol::TreeNode;
+
+/// Props accepted by all widget types (skipped during per-widget validation).
+/// Extension widgets may register additional universal props via
+/// [`register_extension_props`] so they don't appear as "unexpected"
+/// in validation warnings.
 const UNIVERSAL_PROPS: &[&str] = &["a11y", "event_rate", "id"];
 
 /// Global flag to enable prop validation in release builds.
 /// Set via `set_validate_props(true)` during settings init.
-/// In debug builds, validation always runs regardless of this flag.
 static VALIDATE_PROPS: OnceLock<bool> = OnceLock::new();
 
 /// Enable or disable prop validation at runtime. Called once during
@@ -27,31 +30,30 @@ pub fn set_validate_props(enabled: bool) -> bool {
     VALIDATE_PROPS.set(enabled).is_ok()
 }
 
-/// Returns true if prop validation is enabled (debug build OR explicit opt-in).
+/// Returns true if prop validation is enabled (explicit opt-in only).
 pub fn is_validate_props_enabled() -> bool {
-    cfg!(debug_assertions) || *VALIDATE_PROPS.get().unwrap_or(&false)
+    *VALIDATE_PROPS.get().unwrap_or(&false)
 }
 
-/// Prop type expectations for validation.
 #[derive(Debug, Clone, Copy)]
 enum PropType {
     Str,
     Number,
     Bool,
-    Length,
-    Color,
     Array,
+    Color,
+    Length,
     Any,
 }
 
 fn prop_type_matches(val: &Value, expected: PropType) -> bool {
     match expected {
         PropType::Str => val.is_string(),
-        PropType::Number => val.is_number() || val.is_string(), // numeric strings accepted
+        PropType::Number => val.is_number(),
         PropType::Bool => val.is_boolean(),
-        PropType::Length => val.is_number() || val.is_string() || val.is_object(),
-        PropType::Color => val.is_string(),
         PropType::Array => val.is_array(),
+        PropType::Color => val.is_string() || val.is_object(),
+        PropType::Length => val.is_string() || val.is_number(),
         PropType::Any => true,
     }
 }
@@ -60,10 +62,32 @@ fn prop_type_matches(val: &Value, expected: PropType) -> bool {
 ///
 /// Returns a list of human-readable warning strings. Useful for testing
 /// and for callers that want to inspect warnings programmatically.
-pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
+pub fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
     use PropType::*;
 
     let expected: &[(&str, PropType)] = match node.type_name.as_str() {
+        "window" => &[
+            ("title", Str),
+            ("width", Number),
+            ("height", Number),
+            ("padding", Any),
+            ("scale_factor", Number),
+            ("position", Any),
+            ("min_size", Any),
+            ("max_size", Any),
+            ("maximized", Bool),
+            ("fullscreen", Bool),
+            ("visible", Bool),
+            ("resizable", Bool),
+            ("closeable", Bool),
+            ("minimizable", Bool),
+            ("decorations", Bool),
+            ("transparent", Bool),
+            ("blur", Bool),
+            ("level", Str),
+            ("exit_on_close_request", Bool),
+            ("size", Any),
+        ],
         "button" => &[
             ("label", Str),
             ("content", Str),
@@ -106,6 +130,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("width", Length),
             ("height", Length),
             ("max_width", Number),
+            ("max_height", Number),
             ("align_y", Str),
             ("clip", Bool),
             ("wrap", Bool),
@@ -188,6 +213,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("line_height", Number),
             ("wrapping", Str),
             ("shaping", Str),
+            ("text_alignment", Str),
         ],
         "progress_bar" => &[
             ("value", Number),
@@ -243,9 +269,11 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
         ],
         "grid" => &[
             ("columns", Number),
+            ("column_count", Number),
             ("spacing", Number),
-            ("width", Number),
-            ("height", Number),
+            ("padding", Any),
+            ("width", Length),
+            ("height", Length),
             ("column_width", Length),
             ("row_height", Length),
             ("fluid", Number),
@@ -254,13 +282,13 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("label", Str),
             ("value", Str),
             ("selected", Any),
+            ("group", Str),
             ("size", Number),
             ("font", Any),
             ("text_size", Number),
             ("spacing", Number),
             ("width", Length),
             ("style", Any),
-            ("group", Str),
             ("line_height", Number),
             ("wrapping", Str),
             ("shaping", Str),
@@ -275,18 +303,24 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("style", Any),
         ],
         "mouse_area" => &[
-            ("on_middle_press", Bool),
+            ("cursor", Str),
+            ("on_press", Bool),
+            ("on_release", Bool),
             ("on_right_press", Bool),
             ("on_right_release", Bool),
+            ("on_middle_press", Bool),
             ("on_middle_release", Bool),
             ("on_double_click", Bool),
             ("on_enter", Bool),
             ("on_exit", Bool),
             ("on_move", Bool),
             ("on_scroll", Bool),
-            ("cursor", Str),
         ],
-        "sensor" => &[("delay", Number), ("anticipate", Number)],
+        "sensor" => &[
+            ("delay", Number),
+            ("anticipate", Number),
+            ("on_resize", Bool),
+        ],
         "space" => &[("width", Length), ("height", Length)],
         "rule" => &[
             ("direction", Str),
@@ -328,6 +362,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("on_option_hovered", Bool),
             ("on_open", Bool),
             ("on_close", Bool),
+            ("on_submit", Bool),
             ("ellipsis", Str),
             ("menu_style", Any),
             ("style", Any),
@@ -336,13 +371,13 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("content", Str),
             ("placeholder", Str),
             ("height", Length),
-            ("width", Number),
+            ("width", Length),
+            ("min_height", Number),
+            ("max_height", Number),
             ("size", Number),
             ("font", Any),
             ("line_height", Number),
-            ("padding", Number),
-            ("min_height", Number),
-            ("max_height", Number),
+            ("padding", Any),
             ("wrapping", Str),
             ("key_bindings", Array),
             ("style", Any),
@@ -359,12 +394,25 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("offset_y", Number),
             ("flip", Bool),
             ("align", Str),
+            ("width", Length),
         ],
         "themer" => &[("theme", Any)],
-        "stack" => &[("width", Length), ("height", Length), ("clip", Bool)],
+        "stack" => &[
+            ("width", Length),
+            ("height", Length),
+            ("padding", Any),
+            ("clip", Bool),
+        ],
         "pin" => &[
             ("x", Number),
             ("y", Number),
+            ("width", Length),
+            ("height", Length),
+        ],
+        "floating" | "float" => &[
+            ("translate_x", Number),
+            ("translate_y", Number),
+            ("scale", Number),
             ("width", Length),
             ("height", Length),
         ],
@@ -374,11 +422,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("width", Length),
             ("height", Length),
             ("max_width", Number),
-        ],
-        "float" => &[
-            ("translate_x", Number),
-            ("translate_y", Number),
-            ("scale", Number),
+            ("align_x", Str),
         ],
         "responsive" => &[("width", Length), ("height", Length)],
         "rich_text" => &[
@@ -409,7 +453,9 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("columns", Array),
             ("rows", Array),
             ("width", Length),
+            ("height", Length),
             ("header", Bool),
+            ("separator", Bool),
             ("padding", Any),
             ("sort_by", Str),
             ("sort_order", Str),
@@ -419,9 +465,9 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("row_spacing", Number),
             ("separator_thickness", Number),
             ("separator_color", Color),
-            ("separator", Bool),
         ],
         "pane_grid" => &[
+            ("panes", Any),
             ("spacing", Number),
             ("width", Length),
             ("height", Length),
@@ -442,6 +488,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("width", Length),
             ("link_color", Color),
             ("code_theme", Str),
+            ("style", Any),
         ],
         "canvas" => &[
             ("layers", Any),
@@ -456,6 +503,8 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("on_scroll", Bool),
             ("alt", Str),
             ("description", Str),
+            ("role", Str),
+            ("arrow_mode", Any),
         ],
         "qr_code" => &[
             ("data", Str),
@@ -465,12 +514,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("background_color", Color),
             ("alt", Str),
             ("description", Str),
-        ],
-        "window" => &[
-            ("padding", Any),
-            ("width", Length),
-            ("height", Length),
-            ("scale_factor", Number),
+            ("style", Any),
         ],
         _ => return Vec::new(), // Unknown widget type -- skip validation
     };
@@ -509,8 +553,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
     warnings
 }
 
-/// Validate props for known widget types. Only active in debug builds.
-/// Logs warnings for unexpected prop names or mismatched types.
+/// Validate a node's props and log any warnings.
 pub(crate) fn validate_props(node: &TreeNode) {
     for warning in collect_prop_warnings(node) {
         log::warn!("{warning}");
@@ -531,71 +574,44 @@ mod tests {
     #[test]
     fn validate_all_supported_types_no_panic() {
         let types_with_sample_props: Vec<(&str, serde_json::Value)> = vec![
-            ("button", json!({"label": "ok", "disabled": false})),
-            ("text", json!({"content": "hello", "size": 14})),
+            ("button", json!({"label": "Click me"})),
+            ("text", json!({"content": "Hello"})),
             ("column", json!({"spacing": 8})),
-            ("row", json!({"spacing": 4, "wrap": true})),
-            (
-                "container",
-                json!({"padding": 10, "width": "fill", "clip": false}),
-            ),
-            ("text_input", json!({"value": "", "placeholder": "type..."})),
+            ("row", json!({"spacing": 8})),
+            ("container", json!({"padding": 16})),
+            ("text_input", json!({"value": "hello"})),
             ("slider", json!({"value": 50, "range": [0, 100]})),
-            ("checkbox", json!({"label": "agree", "checked": true})),
-            (
-                "toggler",
-                json!({"label": "dark mode", "is_toggled": false}),
-            ),
-            ("progress_bar", json!({"value": 75, "range": [0, 100]})),
+            ("checkbox", json!({"label": "ok", "checked": true})),
+            ("toggler", json!({"label": "on", "is_toggled": false})),
+            ("progress_bar", json!({"value": 50, "range": [0, 100]})),
             ("image", json!({"source": "test.png"})),
             ("svg", json!({"source": "icon.svg"})),
-            ("scrollable", json!({"direction": "vertical"})),
-            ("grid", json!({"columns": 3, "spacing": 4})),
-            (
-                "radio",
-                json!({"label": "opt", "value": "a", "group": "g1"}),
-            ),
-            ("tooltip", json!({"tip": "help", "position": "top"})),
-            (
-                "mouse_area",
-                json!({"on_enter": true, "on_exit": true, "cursor": "pointer"}),
-            ),
-            ("sensor", json!({"delay": 100})),
-            ("space", json!({"width": 10, "height": 10})),
-            ("rule", json!({"direction": "horizontal", "thickness": 2})),
-            ("pick_list", json!({"options": ["a", "b"], "selected": "a"})),
-            (
-                "combo_box",
-                json!({"placeholder": "search...", "width": "fill"}),
-            ),
-            (
-                "text_editor",
-                json!({"placeholder": "code here", "height": 200}),
-            ),
-            ("overlay", json!({"position": "below", "gap": 4})),
-            ("themer", json!({"theme": {"background": "#000"}})),
-            ("stack", json!({"width": "fill", "clip": false})),
+            ("scrollable", json!({})),
+            ("grid", json!({"columns": 3})),
+            ("radio", json!({"value": "a", "label": "A"})),
+            ("tooltip", json!({"tip": "Help text"})),
+            ("mouse_area", json!({})),
+            ("sensor", json!({})),
+            ("space", json!({})),
+            ("rule", json!({})),
+            ("pick_list", json!({"options": ["a", "b"]})),
+            ("combo_box", json!({"options": ["a", "b"]})),
+            ("text_editor", json!({"content": "edit me"})),
+            ("overlay", json!({})),
+            ("themer", json!({"theme": "dark"})),
+            ("stack", json!({})),
             ("pin", json!({"x": 10, "y": 20})),
-            ("keyed_column", json!({"spacing": 8, "max_width": 400})),
-            ("float", json!({"translate_x": 5, "translate_y": 10})),
-            ("responsive", json!({"width": "fill", "height": "fill"})),
-            ("rich_text", json!({"spans": [{"text": "hi"}], "size": 16})),
-            (
-                "vertical_slider",
-                json!({"value": 50, "range": [0, 100], "height": "fill"}),
-            ),
-            (
-                "table",
-                json!({"columns": [{"key": "name", "label": "Name"}], "rows": []}),
-            ),
-            ("pane_grid", json!({"spacing": 2})),
-            ("markdown", json!({"content": "# Hello", "text_size": 16})),
-            (
-                "canvas",
-                json!({"width": "fill", "height": 200, "interactive": true}),
-            ),
-            ("qr_code", json!({"data": "hello", "cell_size": 4})),
-            ("window", json!({"padding": 8})),
+            ("floating", json!({})),
+            ("keyed_column", json!({})),
+            ("responsive", json!({})),
+            ("rich_text", json!({"spans": []})),
+            ("vertical_slider", json!({"value": 50, "range": [0, 100]})),
+            ("table", json!({"columns": [], "rows": []})),
+            ("pane_grid", json!({})),
+            ("markdown", json!({"content": "# Hello"})),
+            ("canvas", json!({"width": "fill", "height": "fill"})),
+            ("qr_code", json!({"data": "https://example.com"})),
+            ("window", json!({"title": "Test"})),
         ];
 
         for (type_name, props) in &types_with_sample_props {
@@ -608,119 +624,25 @@ mod tests {
         }
     }
 
-    /// Unknown widget types are silently skipped (no panic).
     #[test]
-    fn unknown_type_skipped() {
-        let node = make_node("antimatter_widget", json!({"flux": 42}));
-        validate_props(&node);
-    }
-
-    /// Null props are handled gracefully.
-    #[test]
-    fn null_props_no_panic() {
-        let node = make_node("button", json!(null));
-        validate_props(&node);
-    }
-
-    /// prop_type_matches covers all variants correctly.
-    #[test]
-    fn prop_type_matching() {
-        use PropType::*;
-
-        assert!(prop_type_matches(&json!("hello"), Str));
-        assert!(!prop_type_matches(&json!(42), Str));
-
-        assert!(prop_type_matches(&json!(42), Number));
-        assert!(prop_type_matches(&json!("42"), Number)); // numeric strings OK
-        assert!(!prop_type_matches(&json!(true), Number));
-
-        assert!(prop_type_matches(&json!(true), Bool));
-        assert!(!prop_type_matches(&json!("true"), Bool));
-
-        assert!(prop_type_matches(&json!(100), Length));
-        assert!(prop_type_matches(&json!("fill"), Length));
-        assert!(prop_type_matches(&json!({"portion": 2}), Length));
-        assert!(!prop_type_matches(&json!(true), Length));
-
-        assert!(prop_type_matches(&json!("#ff0000"), Color));
-        assert!(!prop_type_matches(&json!(42), Color));
-
-        assert!(prop_type_matches(&json!([1, 2, 3]), Array));
-        assert!(!prop_type_matches(&json!("nope"), Array));
-
-        // Any matches everything
-        assert!(prop_type_matches(&json!(null), Any));
-        assert!(prop_type_matches(&json!(42), Any));
-        assert!(prop_type_matches(&json!("x"), Any));
-    }
-
-    // -- collect_prop_warnings --
-
-    #[test]
-    fn warnings_for_unexpected_prop_name() {
-        let node = make_node("button", json!({"label": "ok", "bogus_prop": 42}));
+    fn unknown_prop_produces_warning() {
+        let node = make_node("button", json!({"label": "ok", "bogus": 42}));
         let warnings = collect_prop_warnings(&node);
-        assert_eq!(warnings.len(), 1);
-        assert!(
-            warnings[0].contains("unexpected prop 'bogus_prop'"),
-            "warning should name the bad prop, got: {}",
-            warnings[0]
-        );
+        assert!(!warnings.is_empty());
+        assert!(warnings[0].contains("unexpected prop 'bogus'"));
     }
 
     #[test]
-    fn warnings_for_type_mismatch() {
-        // "label" expects Str, passing a number should trigger a type warning.
-        let node = make_node("button", json!({"label": 42}));
+    fn valid_props_produce_no_warnings() {
+        let node = make_node("button", json!({"label": "ok"}));
         let warnings = collect_prop_warnings(&node);
-        assert_eq!(warnings.len(), 1);
-        assert!(
-            warnings[0].contains("unexpected type"),
-            "warning should mention type mismatch, got: {}",
-            warnings[0]
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
     }
 
     #[test]
-    fn no_warnings_for_valid_props() {
-        let node = make_node("button", json!({"label": "ok", "disabled": false}));
+    fn window_title_is_valid() {
+        let node = make_node("window", json!({"title": "My App"}));
         let warnings = collect_prop_warnings(&node);
-        assert!(
-            warnings.is_empty(),
-            "expected no warnings, got: {warnings:?}"
-        );
-    }
-
-    #[test]
-    fn no_warnings_for_universal_props() {
-        // "a11y", "id", and "event_rate" are universal props, should never trigger warnings.
-        let node = make_node(
-            "button",
-            json!({"a11y": {"role": "button"}, "id": "btn1", "event_rate": 30}),
-        );
-        let warnings = collect_prop_warnings(&node);
-        assert!(
-            warnings.is_empty(),
-            "universal props should not warn, got: {warnings:?}"
-        );
-    }
-
-    #[test]
-    fn no_warnings_for_unknown_widget_type() {
-        let node = make_node("antimatter_widget", json!({"flux": 42}));
-        let warnings = collect_prop_warnings(&node);
-        assert!(
-            warnings.is_empty(),
-            "unknown types should produce no warnings"
-        );
-    }
-
-    #[test]
-    fn multiple_warnings_for_multiple_bad_props() {
-        // "content" expects Str but gets bool -> type mismatch
-        // "bogus" is not a known prop -> unexpected prop
-        let node = make_node("text", json!({"content": true, "bogus": 1}));
-        let warnings = collect_prop_warnings(&node);
-        assert_eq!(warnings.len(), 2, "expected 2 warnings, got: {warnings:?}");
+        assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
     }
 }

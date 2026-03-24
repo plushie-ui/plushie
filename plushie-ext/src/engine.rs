@@ -37,12 +37,19 @@ pub enum CoreEffect {
     /// Emit a protocol event to the host process.
     EmitEvent(OutgoingEvent),
 
+    /// Emit a pre-built effect response (used for stub responses).
+    /// The host should encode and write this directly.
+    EmitEffectResponse(crate::protocol::EffectResponse),
+
+    /// Emit an effect stub acknowledgement.
+    EmitStubAck(crate::protocol::EffectStubAck),
+
     /// Handle a platform effect (file dialog, clipboard, notification).
     ///
     /// Core does not execute effects -- it passes the raw request through
     /// for the host to dispatch. The host decides whether to run the
     /// effect synchronously, asynchronously (via Task::perform), or
-    /// return a cancellation (e.g. in headless mode where file dialogs
+    /// return unsupported (e.g. in headless mode where file dialogs
     /// are unavailable).
     ///
     /// # Known effect kinds
@@ -152,6 +159,11 @@ pub struct Core {
     /// True after the first Settings message has been applied. Used to
     /// suppress warnings about startup-only fields on the initial Settings.
     settings_applied: bool,
+    /// Registered effect stubs: kind -> response value. When an effect
+    /// request matches a stub, the renderer returns the stubbed response
+    /// immediately without executing the real effect. Used for testing
+    /// and scripting.
+    pub effect_stubs: HashMap<String, Value>,
 }
 
 impl Default for Core {
@@ -173,6 +185,7 @@ impl Core {
             cached_theme: None,
             cached_theme_hash: None,
             settings_applied: false,
+            effect_stubs: HashMap::new(),
         }
     }
 
@@ -255,6 +268,9 @@ impl Core {
                 self.caches.clear_builtin();
                 if let Some(root) = self.tree.root() {
                     widgets::ensure_caches(root, &mut self.caches);
+                    if widgets::validate::is_validate_props_enabled() {
+                        Self::emit_prop_validation_warnings(root, &mut effects);
+                    }
                 }
                 effects.push(CoreEffect::SyncWindows);
             }
@@ -270,16 +286,26 @@ impl Core {
                 }
                 if let Some(root) = self.tree.root() {
                     widgets::ensure_caches(root, &mut self.caches);
+                    if widgets::validate::is_validate_props_enabled() {
+                        Self::emit_prop_validation_warnings(root, &mut effects);
+                    }
                 }
                 effects.push(CoreEffect::SyncWindows);
             }
             IncomingMessage::Effect { id, kind, payload } => {
                 log::debug!("effect request: {kind} ({id})");
-                effects.push(CoreEffect::HandleEffect {
-                    request_id: id,
-                    kind,
-                    payload,
-                });
+                if let Some(stub_response) = self.effect_stubs.get(&kind) {
+                    log::debug!("effect stub hit: {kind} ({id})");
+                    effects.push(CoreEffect::EmitEffectResponse(
+                        crate::protocol::EffectResponse::ok(id, stub_response.clone()),
+                    ));
+                } else {
+                    effects.push(CoreEffect::HandleEffect {
+                        request_id: id,
+                        kind,
+                        payload,
+                    });
+                }
             }
             IncomingMessage::WidgetOp { op, payload } => {
                 log::debug!("widget_op: {op}");
@@ -433,9 +459,50 @@ impl Core {
             IncomingMessage::ExtensionCommands { .. } => {
                 log::debug!("ExtensionCommands message ignored by Core (handled by renderer App)");
             }
+            IncomingMessage::RegisterEffectStub { kind, response } => {
+                log::info!("effect stub registered: {kind}");
+                self.effect_stubs.insert(kind.clone(), response);
+                effects.push(CoreEffect::EmitStubAck(
+                    crate::protocol::EffectStubAck::registered(kind),
+                ));
+            }
+            IncomingMessage::UnregisterEffectStub { kind } => {
+                log::info!("effect stub unregistered: {kind}");
+                self.effect_stubs.remove(&kind);
+                effects.push(CoreEffect::EmitStubAck(
+                    crate::protocol::EffectStubAck::unregistered(kind),
+                ));
+            }
         }
 
         effects
+    }
+
+    /// Walk the tree and emit prop validation warnings as wire events.
+    /// Called after Snapshot and Patch when validate_props is enabled.
+    fn emit_prop_validation_warnings(
+        root: &crate::protocol::TreeNode,
+        effects: &mut Vec<CoreEffect>,
+    ) {
+        Self::validate_node_recursive(root, effects);
+    }
+
+    fn validate_node_recursive(node: &crate::protocol::TreeNode, effects: &mut Vec<CoreEffect>) {
+        let warnings = widgets::validate::collect_prop_warnings(node);
+        if !warnings.is_empty() {
+            effects.push(CoreEffect::EmitEvent(OutgoingEvent::generic(
+                "prop_validation",
+                node.id.clone(),
+                Some(serde_json::json!({
+                    "node_id": node.id,
+                    "node_type": node.type_name,
+                    "warnings": warnings,
+                })),
+            )));
+        }
+        for child in &node.children {
+            Self::validate_node_recursive(child, effects);
+        }
     }
 }
 

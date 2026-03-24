@@ -287,5 +287,7 @@ fn message_variant_name(msg: &IncomingMessage) -> &'static str {
         IncomingMessage::ExtensionCommand { .. } => "extension_command",
         IncomingMessage::ExtensionCommands { .. } => "extension_commands",
         IncomingMessage::AdvanceFrame { .. } => "advance_frame",
+        IncomingMessage::RegisterEffectStub { .. } => "register_effect_stub",
+        IncomingMessage::UnregisterEffectStub { .. } => "unregister_effect_stub",
     }
 }

@@ -1290,33 +1290,33 @@ impl CanvasProgram<'_> {
         // on focused canvas elements (e.g. slider-like controls).
         // Tab/Shift+Tab and Escape are always handled by the canvas for
         // focus management regardless of arrow_mode.
-        if self.arrow_mode == ArrowMode::None {
-            if let Some(idx) = current_idx {
-                let is_nav_key = matches!(
-                    key,
-                    keyboard::Key::Named(
-                        Named::ArrowUp
-                            | Named::ArrowDown
-                            | Named::ArrowLeft
-                            | Named::ArrowRight
-                            | Named::Home
-                            | Named::End
-                            | Named::PageUp
-                            | Named::PageDown
-                    )
+        if self.arrow_mode == ArrowMode::None
+            && let Some(idx) = current_idx
+        {
+            let is_nav_key = matches!(
+                key,
+                keyboard::Key::Named(
+                    Named::ArrowUp
+                        | Named::ArrowDown
+                        | Named::ArrowLeft
+                        | Named::ArrowRight
+                        | Named::Home
+                        | Named::End
+                        | Named::PageUp
+                        | Named::PageDown
+                )
+            );
+            if is_nav_key {
+                let element = &self.interactive_elements[idx];
+                return Some(
+                    iced::widget::Action::publish(Message::CanvasElementKeyPress {
+                        canvas_id: self.id.clone(),
+                        element_id: element.id.clone(),
+                        key: crate::message::serialize_key(key),
+                        modifiers: crate::message::serialize_modifiers(modifiers),
+                    })
+                    .and_capture(),
                 );
-                if is_nav_key {
-                    let element = &self.interactive_elements[idx];
-                    return Some(
-                        iced::widget::Action::publish(Message::CanvasElementKeyPress {
-                            canvas_id: self.id.clone(),
-                            element_id: element.id.clone(),
-                            key: crate::message::serialize_key(key),
-                            modifiers: crate::message::serialize_modifiers(modifiers),
-                        })
-                        .and_capture(),
-                    );
-                }
             }
         }
 

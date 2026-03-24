@@ -1011,9 +1011,20 @@ impl EffectResponse {
         }
     }
 
-    /// The requested effect kind is not supported.
+    /// The requested effect kind is not supported by this backend.
+    /// Distinct from `error` -- unsupported means the renderer can't
+    /// handle this effect at all (e.g. file dialogs in headless mode),
+    /// not that it tried and failed. The SDK uses this to trigger
+    /// registered effect stubs or propagate to the app.
     pub fn unsupported(id: String) -> Self {
-        Self::error(id, "unsupported".to_string())
+        Self {
+            message_type: "effect_response",
+            session: String::new(),
+            id,
+            status: "unsupported",
+            result: None,
+            error: None,
+        }
     }
 
     /// The user cancelled the operation (e.g. closed a file dialog).
@@ -1031,6 +1042,40 @@ impl EffectResponse {
     }
 
     /// Set the session ID for this response.
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = session.into();
+        self
+    }
+}
+
+/// Acknowledgement that an effect stub was registered or unregistered.
+/// Sent back to the SDK so it can wait for confirmation before
+/// proceeding (no timing assumptions about message ordering).
+#[derive(Debug, Serialize)]
+pub struct EffectStubAck {
+    #[serde(rename = "type")]
+    pub message_type: &'static str,
+    pub session: String,
+    pub kind: String,
+}
+
+impl EffectStubAck {
+    pub fn registered(kind: String) -> Self {
+        Self {
+            message_type: "effect_stub_registered",
+            session: String::new(),
+            kind,
+        }
+    }
+
+    pub fn unregistered(kind: String) -> Self {
+        Self {
+            message_type: "effect_stub_unregistered",
+            session: String::new(),
+            kind,
+        }
+    }
+
     pub fn with_session(mut self, session: impl Into<String>) -> Self {
         self.session = session.into();
         self
@@ -1956,8 +2001,7 @@ mod tests {
     fn effect_response_unsupported() {
         let resp = EffectResponse::unsupported("e3".to_string());
         let json = serde_json::to_value(&resp).unwrap();
-        assert_eq!(json["status"], "error");
-        assert_eq!(json["error"], "unsupported");
+        assert_eq!(json["status"], "unsupported");
     }
 
     #[test]
