@@ -280,6 +280,17 @@ pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             key.clone(),
             modifiers.clone(),
         )),
+        Message::CanvasElementKeyRelease {
+            canvas_id,
+            element_id,
+            key,
+            modifiers,
+        } => Some(OutgoingEvent::canvas_element_key_release(
+            canvas_id.clone(),
+            element_id.clone(),
+            key.clone(),
+            modifiers.clone(),
+        )),
         Message::CanvasElementClick {
             canvas_id,
             element_id,

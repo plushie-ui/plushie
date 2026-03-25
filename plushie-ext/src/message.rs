@@ -202,6 +202,15 @@ pub enum Message {
         key: String,
         modifiers: KeyModifiers,
     },
+    /// A focused canvas element received a key release. Mirrors
+    /// `CanvasElementKeyPress` for the release phase. Emitted when
+    /// `arrow_mode` is `"none"` and the released key is a navigation key.
+    CanvasElementKeyRelease {
+        canvas_id: String,
+        element_id: String,
+        key: String,
+        modifiers: KeyModifiers,
+    },
     /// An interactive element gained keyboard focus.
     CanvasElementFocused {
         canvas_id: String,

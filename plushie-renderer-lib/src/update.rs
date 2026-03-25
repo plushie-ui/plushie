@@ -44,6 +44,7 @@ impl App {
             | Message::CanvasElementLeave { .. }
             | Message::CanvasElementClick { .. }
             | Message::CanvasElementKeyPress { .. }
+            | Message::CanvasElementKeyRelease { .. }
             | Message::CanvasElementDrag { .. }
             | Message::CanvasElementDragEnd { .. }
             | Message::CanvasElementFocused { .. }

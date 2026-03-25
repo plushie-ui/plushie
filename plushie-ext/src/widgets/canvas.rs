@@ -1510,6 +1510,57 @@ impl<R: PlushieRenderer> CanvasProgram<'_, R> {
             _ => None,
         }
     }
+
+    /// Handle a key release event. Mirrors `handle_keyboard` but only
+    /// forwards nav keys as `CanvasElementKeyRelease` when `arrow_mode`
+    /// is `"none"`. Focus management (Tab, Escape) is handled on press
+    /// only -- release doesn't change focus.
+    fn handle_key_release(
+        &self,
+        state: &mut CanvasState,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+    ) -> Option<iced::widget::Action<Message>> {
+        use keyboard::key::Named;
+
+        if state.dragging.is_some() {
+            return Some(iced::widget::Action::capture());
+        }
+
+        let current_idx = self.resolve_focus_index(state);
+
+        if self.arrow_mode == ArrowMode::None
+            && let Some(idx) = current_idx
+        {
+            let is_nav_key = matches!(
+                key,
+                keyboard::Key::Named(
+                    Named::ArrowUp
+                        | Named::ArrowDown
+                        | Named::ArrowLeft
+                        | Named::ArrowRight
+                        | Named::Home
+                        | Named::End
+                        | Named::PageUp
+                        | Named::PageDown
+                )
+            );
+            if is_nav_key {
+                let element = &self.interactive_elements[idx];
+                return Some(
+                    iced::widget::Action::publish(Message::CanvasElementKeyRelease {
+                        canvas_id: self.id.clone(),
+                        element_id: element.id.clone(),
+                        key: crate::message::serialize_key(key),
+                        modifiers: crate::message::serialize_modifiers(modifiers),
+                    })
+                    .and_capture(),
+                );
+            }
+        }
+
+        None
+    }
 }
 
 /// Merge style overrides into a shape's JSON. The override object can
@@ -2339,11 +2390,17 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
         // Keyboard events don't depend on cursor position -- handle them
         // before the cursor check so they work when the mouse is outside.
         if matches!(event, iced::Event::Keyboard(..)) {
-            if !self.interactive_elements.is_empty()
-                && let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
+            if !self.interactive_elements.is_empty() {
+                if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
                     event
-            {
-                return self.handle_keyboard(state, key, *modifiers);
+                {
+                    return self.handle_keyboard(state, key, *modifiers);
+                }
+                if let iced::Event::Keyboard(keyboard::Event::KeyReleased { key, modifiers, .. }) =
+                    event
+                {
+                    return self.handle_key_release(state, key, *modifiers);
+                }
             }
             return None;
         }

@@ -644,6 +644,24 @@ impl OutgoingEvent {
         }
     }
 
+    pub fn canvas_element_key_release(
+        canvas_id: String,
+        element_id: String,
+        key: String,
+        modifiers: KeyModifiers,
+    ) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "key": key,
+                "modifiers": modifiers,
+            })),
+            ..Self::bare(
+                "canvas_element_key_release",
+                Self::scoped_element_id(&canvas_id, &element_id),
+            )
+        }
+    }
+
     /// Canvas element activation. Uses standard "click" family so
     /// canvas elements produce the same events as regular widgets.
     pub fn canvas_element_click(
