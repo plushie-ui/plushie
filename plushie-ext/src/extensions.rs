@@ -255,8 +255,9 @@ pub trait WidgetExtension<R: PlushieRenderer = iced::Renderer>: Send + Sync + 's
     /// logged and ignored (return an empty vec).
     ///
     /// Return a vec of `OutgoingEvent`s to emit back to the host. Errors
-    /// should be reported as events with family `"extension_error"` and
-    /// relevant details in the data payload, rather than panicking.
+    /// should be reported as built-in `"error"` events with
+    /// `id = "extension_command"` and relevant details in the data payload,
+    /// rather than panicking.
     fn handle_command(
         &mut self,
         _node_id: &str,
@@ -896,24 +897,22 @@ impl<R: PlushieRenderer> ExtensionDispatcher<R> {
             Some(&idx) => idx,
             None => {
                 log::warn!("extension command for unknown node `{node_id}`, ignoring");
-                return vec![OutgoingEvent::generic(
-                    "extension_error".to_string(),
-                    node_id.to_string(),
-                    Some(serde_json::json!({
-                        "error": format!("no extension handles node `{node_id}`"),
-                        "op": op,
-                    })),
+                return vec![extension_command_error(
+                    "unknown_node",
+                    node_id,
+                    op,
+                    None,
+                    format!("no extension handles node `{node_id}`"),
                 )];
             }
         };
         if self.poisoned[ext_idx] {
-            return vec![OutgoingEvent::generic(
-                "extension_error".to_string(),
-                node_id.to_string(),
-                Some(serde_json::json!({
-                    "error": "extension is disabled due to previous panics",
-                    "op": op,
-                })),
+            return vec![extension_command_error(
+                "poisoned",
+                node_id,
+                op,
+                Some(self.extensions[ext_idx].config_key()),
+                "extension is disabled due to previous panics",
             )];
         }
         if catch_unwind_enabled() {
@@ -928,15 +927,12 @@ impl<R: PlushieRenderer> ExtensionDispatcher<R> {
                         self.extensions[ext_idx].config_key()
                     );
                     self.poisoned[ext_idx] = true;
-                    // Report the panic back to the host so it can handle it.
-                    let error_data = serde_json::json!({
-                        "error": msg,
-                        "op": op,
-                    });
-                    vec![OutgoingEvent::generic(
-                        "extension_error",
-                        node_id.to_string(),
-                        Some(error_data),
+                    vec![extension_command_error(
+                        "panic",
+                        node_id,
+                        op,
+                        Some(self.extensions[ext_idx].config_key()),
+                        msg,
                     )]
                 }
             }
@@ -1091,6 +1087,29 @@ impl<R: PlushieRenderer> ExtensionDispatcher<R> {
     pub fn config_keys(&self) -> Vec<&str> {
         self.extensions.iter().map(|e| e.config_key()).collect()
     }
+}
+
+fn extension_command_error(
+    reason: &str,
+    node_id: &str,
+    op: &str,
+    extension: Option<&str>,
+    message: impl Into<String>,
+) -> OutgoingEvent {
+    let message = message.into();
+    let mut data = serde_json::json!({
+        "kind": "extension_command",
+        "reason": reason,
+        "node_id": node_id,
+        "op": op,
+        "message": message,
+    });
+
+    if let Some(extension) = extension {
+        data["extension"] = Value::String(extension.to_string());
+    }
+
+    OutgoingEvent::generic("error", "extension_command", Some(data))
 }
 
 impl<R: PlushieRenderer> Default for ExtensionDispatcher<R> {
@@ -1627,14 +1646,24 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        assert_eq!(event.family, "extension_error");
-        assert_eq!(event.id, "p1");
+        assert_eq!(event.family, "error");
+        assert_eq!(event.id, "extension_command");
         let data = event.data.as_ref().expect("should have data");
         assert_eq!(
-            data.get("error").and_then(|v| v.as_str()),
+            data.get("kind").and_then(|v| v.as_str()),
+            Some("extension_command")
+        );
+        assert_eq!(data.get("reason").and_then(|v| v.as_str()), Some("panic"));
+        assert_eq!(data.get("node_id").and_then(|v| v.as_str()), Some("p1"));
+        assert_eq!(data.get("op").and_then(|v| v.as_str()), Some("do_thing"));
+        assert_eq!(
+            data.get("extension").and_then(|v| v.as_str()),
+            Some("panicker")
+        );
+        assert_eq!(
+            data.get("message").and_then(|v| v.as_str()),
             Some("command went boom")
         );
-        assert_eq!(data.get("op").and_then(|v| v.as_str()), Some("do_thing"));
 
         // Extension should also be poisoned.
         assert!(dispatcher.is_poisoned(0));
@@ -1662,14 +1691,27 @@ mod tests {
         let events = dispatcher.handle_command("p1", "do_thing", &Value::Null, &mut caches);
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        assert_eq!(event.family, "extension_error");
-        assert_eq!(event.id, "p1");
+        assert_eq!(event.family, "error");
+        assert_eq!(event.id, "extension_command");
         let data = event.data.as_ref().expect("should have data");
         assert_eq!(
-            data.get("error").and_then(|v| v.as_str()),
+            data.get("kind").and_then(|v| v.as_str()),
+            Some("extension_command")
+        );
+        assert_eq!(
+            data.get("reason").and_then(|v| v.as_str()),
+            Some("poisoned")
+        );
+        assert_eq!(data.get("node_id").and_then(|v| v.as_str()), Some("p1"));
+        assert_eq!(data.get("op").and_then(|v| v.as_str()), Some("do_thing"));
+        assert_eq!(
+            data.get("extension").and_then(|v| v.as_str()),
+            Some("panicker")
+        );
+        assert_eq!(
+            data.get("message").and_then(|v| v.as_str()),
             Some("extension is disabled due to previous panics")
         );
-        assert_eq!(data.get("op").and_then(|v| v.as_str()), Some("do_thing"));
     }
 
     // -- cleanup_all ----------------------------------------------------------

@@ -1044,6 +1044,18 @@ Produced by widget interactions. The `id` field is the node ID.
 | `open` | id | PickList or ComboBox menu opened |
 | `close` | id | PickList or ComboBox menu closed |
 
+Renderer-side errors also use the normal `event` envelope:
+
+| Family | Fields | Description |
+|--------|--------|-------------|
+| `error` | id, data | Renderer or protocol error |
+
+Current renderer error payloads include:
+
+| `data.kind` | Other fields | Description |
+|-------------|--------------|-------------|
+| `extension_command` | `reason`, `node_id`, `op`, `message`, `extension` (optional) | Native extension command failed. `reason` is currently `"unknown_node"`, `"poisoned"`, or `"panic"`. |
+
 Mouse area events (from `mouse_area` widget):
 
 | Family | Description |

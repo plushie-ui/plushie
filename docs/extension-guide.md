@@ -112,6 +112,10 @@ The mutable/immutable split matches iced's `update()`/`view()`
 pattern. You can mutate state in `prepare()`, `handle_event()`,
 and `handle_command()`. In `render()`, you can only read.
 
+Command failures should be reported as built-in `error` events with
+`id = "extension_command"` and a structured data payload describing
+the failed op, node ID, and reason.
+
 ### Initialization
 
 If your extension needs startup configuration (API keys, feature
