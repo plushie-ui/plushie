@@ -398,6 +398,7 @@ fn parse_role(s: &str) -> Option<accessible::Role> {
         "progress_indicator" | "progress_bar" => accessible::Role::ProgressIndicator,
         // "radio" alias: universally understood short form.
         "radio_button" | "radio" => accessible::Role::RadioButton,
+        "radio_group" => accessible::Role::RadioGroup,
         "region" => accessible::Role::Region,
         "scroll_bar" => accessible::Role::ScrollBar,
         "scroll_view" => accessible::Role::ScrollView,
@@ -877,6 +878,7 @@ mod tests {
             ("navigation", accessible::Role::Navigation),
             ("progress_indicator", accessible::Role::ProgressIndicator),
             ("radio_button", accessible::Role::RadioButton),
+            ("radio_group", accessible::Role::RadioGroup),
             ("region", accessible::Role::Region),
             ("scroll_bar", accessible::Role::ScrollBar),
             ("scroll_view", accessible::Role::ScrollView),

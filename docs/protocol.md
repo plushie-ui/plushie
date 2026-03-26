@@ -1929,7 +1929,7 @@ no rendering overhead.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `role` | string | `"group"` if interactive elements exist, `"image"` otherwise | Accessible role for the canvas widget |
+| `role` | string | `"group"` if interactive elements exist, `"image"` otherwise | Accessible role for the canvas widget (for example `"group"`, `"toolbar"`, `"radio_group"`) |
 | `arrow_mode` | string | `"wrap"` | Arrow key behavior: `"wrap"`, `"clamp"`, `"linear"`, `"none"` |
 | `alt` | string | - | Accessible label |
 | `description` | string | - | Extended accessible description |
