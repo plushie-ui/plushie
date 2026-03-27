@@ -43,6 +43,12 @@ use plushie_renderer_lib::scripting::{
     interaction_to_iced_events, make_key_pressed, make_key_released, resolve_widget_id,
 };
 
+fn log_hello_error(err: &io::Error) {
+    if err.kind() != io::ErrorKind::BrokenPipe {
+        log::error!("failed to emit hello: {err}");
+    }
+}
+
 /// Default screenshot width when not specified by the caller.
 const DEFAULT_SCREENSHOT_WIDTH: u32 = 1024;
 /// Default screenshot height when not specified by the caller.
@@ -1026,7 +1032,7 @@ pub(crate) fn run(
     if let Err(e) =
         plushie_renderer_lib::emitters::emit_hello(mode_str, backend, &ext_key_refs, transport_name)
     {
-        log::error!("failed to emit hello: {e}");
+        log_hello_error(&e);
         return;
     }
 

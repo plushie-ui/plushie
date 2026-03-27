@@ -14,6 +14,12 @@ use plushie_renderer_lib::emitters::emit_hello;
 
 use super::stdin::{STDIN_RX, spawn_stdin_reader};
 
+fn log_hello_error(err: &std::io::Error) {
+    if err.kind() != std::io::ErrorKind::BrokenPipe {
+        log::error!("failed to emit hello: {err}");
+    }
+}
+
 pub(crate) fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result {
     let args: Vec<String> = std::env::args().collect();
 
@@ -146,7 +152,7 @@ pub(crate) fn run(builder: plushie_ext::app::PlushieAppBuilder) -> iced::Result 
 
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
     if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs, transport_name) {
-        log::error!("failed to emit hello: {e}");
+        log_hello_error(&e);
         return Ok(());
     }
 
