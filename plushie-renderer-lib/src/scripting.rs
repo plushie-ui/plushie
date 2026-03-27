@@ -652,6 +652,14 @@ pub fn build_interact_response(
 ) -> InteractResponse {
     let widget_target = resolve_widget_target(core, &selector);
 
+    // Resolve window context for input simulation actions that don't
+    // target a specific widget. Uses the selector's widget window if
+    // available, otherwise falls back to the first window in the tree.
+    let context_window_id = widget_target
+        .as_ref()
+        .map(|(wid, _)| wid.clone())
+        .or_else(|| find_first_window_id(core));
+
     let events: Vec<OutgoingEvent> = match (action.as_str(), widget_target) {
         ("click", Some((window_id, wid))) => {
             vec![OutgoingEvent::click(wid).with_window_id(window_id)]
@@ -682,25 +690,25 @@ pub fn build_interact_response(
         ("press", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
-            vec![OutgoingEvent::scripting_key_press(key, modifiers)]
+            with_context_window(vec![OutgoingEvent::scripting_key_press(key, modifiers)], &context_window_id)
         }
         ("release", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
-            vec![OutgoingEvent::scripting_key_release(key, modifiers)]
+            with_context_window(vec![OutgoingEvent::scripting_key_release(key, modifiers)], &context_window_id)
         }
         ("move_to", _) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![OutgoingEvent::scripting_cursor_moved(x, y)]
+            with_context_window(vec![OutgoingEvent::scripting_cursor_moved(x, y)], &context_window_id)
         }
         ("type_key", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
-            vec![
+            with_context_window(vec![
                 OutgoingEvent::scripting_key_press(key.clone(), modifiers.clone()),
                 OutgoingEvent::scripting_key_release(key, modifiers),
-            ]
+            ], &context_window_id)
         }
         ("paste", Some((window_id, wid))) => {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -715,7 +723,7 @@ pub fn build_interact_response(
                 .get("delta_y")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
-            vec![OutgoingEvent::scripting_scroll(delta_x, delta_y)]
+            with_context_window(vec![OutgoingEvent::scripting_scroll(delta_x, delta_y)], &context_window_id)
         }
         ("sort", Some((window_id, wid))) => {
             let column = payload.get("column").and_then(|v| v.as_str()).unwrap_or("");
@@ -826,6 +834,36 @@ fn resolve_widget_target(
         return None;
     }
     Some((window_id, widget_id))
+}
+
+/// Applies a context window ID to a list of events. Used by input
+/// simulation actions (press, scroll, etc.) that produce events
+/// without an inherent widget target.
+fn with_context_window(
+    events: Vec<OutgoingEvent>,
+    context_window_id: &Option<String>,
+) -> Vec<OutgoingEvent> {
+    match context_window_id {
+        Some(wid) => events
+            .into_iter()
+            .map(|e| e.with_window_id(wid.clone()))
+            .collect(),
+        None => events,
+    }
+}
+
+/// Returns the ID of the first window node in the tree, or None.
+/// Used as a fallback for input simulation actions when the selector
+/// doesn't resolve to a specific widget.
+fn find_first_window_id(core: &Core<impl PlushieRenderer>) -> Option<String> {
+    let root = core.tree.root()?;
+    if root.type_name == "window" {
+        return Some(root.id.clone());
+    }
+    root.children
+        .iter()
+        .find(|child| child.type_name == "window")
+        .map(|child| child.id.clone())
 }
 
 fn find_tree_node_by_id_with_window<'a>(
