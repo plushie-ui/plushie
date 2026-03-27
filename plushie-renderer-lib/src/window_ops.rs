@@ -649,7 +649,34 @@ impl App {
                     Task::none()
                 }
             }
-            // -- System queries: not window-specific, use tag from settings --
+            "set_resize_increments" => {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
+                    let w = settings
+                        .get("width")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let h = settings
+                        .get("height")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let increments = match (w, h) {
+                        (Some(w), Some(h)) => Some(Size::new(w, h)),
+                        _ => None,
+                    };
+                    window::set_resize_increments(iced_id, increments)
+                } else {
+                    Task::none()
+                }
+            }
+            other => {
+                log::warn!("unknown window_op: {other}");
+                Task::none()
+            }
+        }
+    }
+
+    pub fn handle_system_query(&mut self, op: &str, settings: &serde_json::Value) -> Task<Message> {
+        match op {
             "get_system_theme" => {
                 let tag = settings
                     .get("tag")
@@ -696,25 +723,15 @@ impl App {
                     Message::NoOp
                 })
             }
-            "set_resize_increments" => {
-                if let Some(&iced_id) = self.windows.get_iced(window_id) {
-                    let w = settings
-                        .get("width")
-                        .and_then(|v| v.as_f64())
-                        .map(|v| v as f32);
-                    let h = settings
-                        .get("height")
-                        .and_then(|v| v.as_f64())
-                        .map(|v| v as f32);
-                    let increments = match (w, h) {
-                        (Some(w), Some(h)) => Some(Size::new(w, h)),
-                        _ => None,
-                    };
-                    window::set_resize_increments(iced_id, increments)
-                } else {
-                    Task::none()
-                }
+            other => {
+                log::warn!("unknown system_query: {other}");
+                Task::none()
             }
+        }
+    }
+
+    pub fn handle_system_op(&mut self, op: &str, settings: &serde_json::Value) -> Task<Message> {
+        match op {
             "allow_automatic_tabbing" => {
                 let enabled = settings
                     .get("enabled")
@@ -723,7 +740,7 @@ impl App {
                 window::allow_automatic_tabbing(enabled)
             }
             other => {
-                log::warn!("unknown window_op: {other}");
+                log::warn!("unknown system_op: {other}");
                 Task::none()
             }
         }

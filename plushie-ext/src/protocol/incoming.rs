@@ -44,6 +44,18 @@ pub enum IncomingMessage {
         #[serde(default)]
         settings: Value,
     },
+    /// Perform a system-wide operation that does not target a specific window.
+    SystemOp {
+        op: String,
+        #[serde(default)]
+        settings: Value,
+    },
+    /// Run a system-wide query that does not target a specific window.
+    SystemQuery {
+        op: String,
+        #[serde(default)]
+        settings: Value,
+    },
     /// Apply or update renderer settings.
     Settings { settings: Value },
     /// Query the current tree or find a widget.

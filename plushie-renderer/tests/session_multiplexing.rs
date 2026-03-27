@@ -388,8 +388,10 @@ fn headless_interact_step_round_trip() {
             "session": "s1",
             "type": "snapshot",
             "tree": {
-                "id": "root", "type": "column", "props": {}, "children": [
-                    {"id": "btn1", "type": "button", "props": {"label": "Click me"}, "children": []}
+                "id": "main", "type": "window", "props": {}, "children": [
+                    {"id": "root", "type": "column", "props": {}, "children": [
+                        {"id": "btn1", "type": "button", "props": {"label": "Click me"}, "children": []}
+                    ]}
                 ]
             }
         }),
@@ -428,8 +430,10 @@ fn headless_interact_step_round_trip() {
             "session": "s1",
             "type": "snapshot",
             "tree": {
-                "id": "root", "type": "column", "props": {}, "children": [
-                    {"id": "btn1", "type": "button", "props": {"label": "Clicked!"}, "children": []}
+                "id": "main", "type": "window", "props": {}, "children": [
+                    {"id": "root", "type": "column", "props": {}, "children": [
+                        {"id": "btn1", "type": "button", "props": {"label": "Clicked!"}, "children": []}
+                    ]}
                 ]
             }
         }),
@@ -484,8 +488,10 @@ fn mock_text_input_emits_input_event() {
             "session": "s1",
             "type": "snapshot",
             "tree": {
-                "id": "root", "type": "column", "props": {}, "children": [
-                    {"id": "inp1", "type": "text_input", "props": {"value": "", "placeholder": "Type here"}, "children": []}
+                "id": "main", "type": "window", "props": {}, "children": [
+                    {"id": "root", "type": "column", "props": {}, "children": [
+                        {"id": "inp1", "type": "text_input", "props": {"value": "", "placeholder": "Type here"}, "children": []}
+                    ]}
                 ]
             }
         }),
@@ -549,8 +555,10 @@ fn mock_checkbox_emits_toggle_event() {
             "session": "s1",
             "type": "snapshot",
             "tree": {
-                "id": "root", "type": "column", "props": {}, "children": [
-                    {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": false}, "children": []}
+                "id": "main", "type": "window", "props": {}, "children": [
+                    {"id": "root", "type": "column", "props": {}, "children": [
+                        {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": false}, "children": []}
+                    ]}
                 ]
             }
         }),
@@ -589,8 +597,10 @@ fn mock_checkbox_emits_toggle_event() {
                     "session": "s1",
                     "type": "snapshot",
                     "tree": {
-                        "id": "root", "type": "column", "props": {}, "children": [
-                            {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": true}, "children": []}
+                        "id": "main", "type": "window", "props": {}, "children": [
+                            {"id": "root", "type": "column", "props": {}, "children": [
+                                {"id": "chk1", "type": "checkbox", "props": {"label": "Accept", "checked": true}, "children": []}
+                            ]}
                         ]
                     }
                 }),
@@ -646,8 +656,10 @@ fn mock_slider_emits_slide_event() {
             "session": "s1",
             "type": "snapshot",
             "tree": {
-                "id": "root", "type": "column", "props": {}, "children": [
-                    {"id": "sld1", "type": "slider", "props": {"value": 50, "range": [0, 100]}, "children": []}
+                "id": "main", "type": "window", "props": {}, "children": [
+                    {"id": "root", "type": "column", "props": {}, "children": [
+                        {"id": "sld1", "type": "slider", "props": {"value": 50, "range": [0, 100]}, "children": []}
+                    ]}
                 ]
             }
         }),

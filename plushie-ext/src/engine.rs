@@ -98,6 +98,20 @@ pub enum CoreEffect {
         settings: Value,
     },
 
+    /// Execute a system-wide operation.
+    ///
+    /// # Known ops
+    ///
+    /// `allow_automatic_tabbing`
+    SystemOp { op: String, settings: Value },
+
+    /// Run a system-wide query.
+    ///
+    /// # Known ops
+    ///
+    /// `get_system_theme`, `get_system_info`
+    SystemQuery { op: String, settings: Value },
+
     /// The global/root theme changed to an explicit value.
     ///
     /// The host should update its cached theme and set
@@ -359,6 +373,14 @@ impl<R: PlushieRenderer> Core<R> {
                     window_id,
                     settings,
                 });
+            }
+            IncomingMessage::SystemOp { op, settings } => {
+                log::debug!("system_op: {op}");
+                effects.push(CoreEffect::SystemOp { op, settings });
+            }
+            IncomingMessage::SystemQuery { op, settings } => {
+                log::debug!("system_query: {op}");
+                effects.push(CoreEffect::SystemQuery { op, settings });
             }
             IncomingMessage::Settings { settings } => {
                 log::debug!("settings received");

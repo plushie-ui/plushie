@@ -36,7 +36,10 @@ const MAX_SEARCH_DEPTH: usize = 256;
 
 #[derive(Debug)]
 pub enum Selector {
-    Id(String),
+    Id {
+        widget_id: String,
+        window_id: Option<String>,
+    },
     Text(String),
     Role(String),
     Label(String),
@@ -49,8 +52,15 @@ pub fn parse_selector(selector: &Value) -> Option<Selector> {
         "focused" => Some(Selector::Focused),
         _ => {
             let value = selector.get("value")?.as_str()?.to_string();
+            let window_id = selector
+                .get("window_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
             match by {
-                "id" => Some(Selector::Id(value)),
+                "id" => Some(Selector::Id {
+                    widget_id: value,
+                    window_id,
+                }),
                 "text" => Some(Selector::Text(value)),
                 "role" => Some(Selector::Role(value)),
                 "label" => Some(Selector::Label(value)),
@@ -498,10 +508,16 @@ fn is_focused(node: &TreeNode) -> bool {
 
 // -- Public API (node as Value) ---------------------------------------------
 
-pub fn find_node_by_id(core: &Core<impl PlushieRenderer>, widget_id: &str) -> Value {
+pub fn find_node_by_id(
+    core: &Core<impl PlushieRenderer>,
+    widget_id: &str,
+    window_id: Option<&str>,
+) -> Value {
     core.tree
         .root()
-        .and_then(|root| search_tree(root, 0, &|n| n.id == widget_id, &node_to_value))
+        .and_then(|root| {
+            find_tree_node_by_id_with_window(root, widget_id, window_id, None, 0).map(node_to_value)
+        })
         .unwrap_or(Value::Null)
 }
 
@@ -568,7 +584,10 @@ pub fn build_query_response(
             None => Value::Null,
         },
         "find" => match parse_selector(&selector) {
-            Some(Selector::Id(widget_id)) => find_node_by_id(core, &widget_id),
+            Some(Selector::Id {
+                widget_id,
+                window_id,
+            }) => find_node_by_id(core, &widget_id, window_id.as_deref()),
             Some(Selector::Text(text)) => find_node_by_text(core, &text),
             Some(Selector::Role(role)) => find_node_by_role(core, &role),
             Some(Selector::Label(label)) => find_node_by_label(core, &label),
@@ -597,7 +616,16 @@ pub fn handle_query(
 /// Resolve a selector to a widget ID without emitting anything.
 pub fn resolve_widget_id(core: &Core<impl PlushieRenderer>, selector: &Value) -> Option<String> {
     match parse_selector(selector)? {
-        Selector::Id(wid) => Some(wid),
+        Selector::Id {
+            widget_id,
+            window_id,
+        } => {
+            if let Some(expected_window) = window_id.as_deref() {
+                let root = core.tree.root()?;
+                find_tree_node_by_id_with_window(root, &widget_id, Some(expected_window), None, 0)?;
+            }
+            Some(widget_id)
+        }
         Selector::Text(text) => core
             .tree
             .root()
@@ -711,7 +739,9 @@ pub fn build_interact_response(
             // Hit test against the canvas tree to determine if an
             // interactive element was clicked. Coordinates are canvas-
             // relative, matching the canvas widget's coordinate space.
-            if let Some(node) = core.tree.find_by_id(&wid) {
+            if let Some(node) = core.tree.root().and_then(|root| {
+                find_tree_node_by_id_with_window(root, &wid, Some(&window_id), None, 0)
+            }) {
                 if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
                 {
                     vec![
@@ -736,7 +766,9 @@ pub fn build_interact_response(
                 .unwrap_or("left")
                 .to_string();
 
-            if let Some(node) = core.tree.find_by_id(&wid) {
+            if let Some(node) = core.tree.root().and_then(|root| {
+                find_tree_node_by_id_with_window(root, &wid, Some(&window_id), None, 0)
+            }) {
                 if plushie_ext::widgets::canvas::canvas_has_on_press(node) {
                     vec![OutgoingEvent::canvas_release(wid, x, y, button).with_window_id(window_id)]
                 } else {
@@ -750,7 +782,9 @@ pub fn build_interact_response(
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
 
-            if let Some(node) = core.tree.find_by_id(&wid) {
+            if let Some(node) = core.tree.root().and_then(|root| {
+                find_tree_node_by_id_with_window(root, &wid, Some(&window_id), None, 0)
+            }) {
                 // Check for element enter/leave + raw move event
                 let mut events = Vec::new();
                 if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
@@ -779,9 +813,53 @@ fn resolve_widget_target(
     core: &Core<impl PlushieRenderer>,
     selector: &Value,
 ) -> Option<(String, String)> {
+    let parsed = parse_selector(selector)?;
     let widget_id = resolve_widget_id(core, selector)?;
+    let requested_window = match parsed {
+        Selector::Id { window_id, .. } => window_id,
+        _ => None,
+    };
     let window_id = find_window_id_for_node(core.tree.root()?, &widget_id, None)?;
+    if let Some(expected) = requested_window
+        && expected != window_id
+    {
+        return None;
+    }
     Some((window_id, widget_id))
+}
+
+fn find_tree_node_by_id_with_window<'a>(
+    node: &'a plushie_ext::protocol::TreeNode,
+    target_id: &str,
+    target_window_id: Option<&str>,
+    current_window_id: Option<&'a str>,
+    depth: usize,
+) -> Option<&'a plushie_ext::protocol::TreeNode> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+
+    let current_window_id = if node.type_name == "window" {
+        Some(node.id.as_str())
+    } else {
+        current_window_id
+    };
+
+    if node.id == target_id
+        && target_window_id.is_none_or(|window_id| current_window_id == Some(window_id))
+    {
+        return Some(node);
+    }
+
+    node.children.iter().find_map(|child| {
+        find_tree_node_by_id_with_window(
+            child,
+            target_id,
+            target_window_id,
+            current_window_id,
+            depth + 1,
+        )
+    })
 }
 
 fn find_window_id_for_node(
@@ -878,7 +956,28 @@ mod tests {
     fn parse_selector_by_id() {
         let sel = json!({"by": "id", "value": "btn-1"});
         match parse_selector(&sel) {
-            Some(Selector::Id(id)) => assert_eq!(id, "btn-1"),
+            Some(Selector::Id {
+                widget_id,
+                window_id,
+            }) => {
+                assert_eq!(widget_id, "btn-1");
+                assert_eq!(window_id, None);
+            }
+            other => panic!("expected Id, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_by_id_with_window() {
+        let sel = json!({"by": "id", "value": "form/save", "window_id": "prefs"});
+        match parse_selector(&sel) {
+            Some(Selector::Id {
+                widget_id,
+                window_id,
+            }) => {
+                assert_eq!(widget_id, "form/save");
+                assert_eq!(window_id.as_deref(), Some("prefs"));
+            }
             other => panic!("expected Id, got {other:?}"),
         }
     }
@@ -1010,7 +1109,7 @@ mod tests {
     #[test]
     fn find_node_by_id_empty_tree() {
         let core: Core = Core::new();
-        assert_eq!(find_node_by_id(&core, "anything"), Value::Null);
+        assert_eq!(find_node_by_id(&core, "anything", None), Value::Null);
     }
 
     #[test]

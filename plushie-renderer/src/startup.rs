@@ -277,6 +277,8 @@ fn message_variant_name(msg: &IncomingMessage) -> &'static str {
         IncomingMessage::Subscribe { .. } => "subscribe",
         IncomingMessage::Unsubscribe { .. } => "unsubscribe",
         IncomingMessage::WindowOp { .. } => "window_op",
+        IncomingMessage::SystemOp { .. } => "system_op",
+        IncomingMessage::SystemQuery { .. } => "system_query",
         IncomingMessage::Settings { .. } => "settings",
         IncomingMessage::Query { .. } => "query",
         IncomingMessage::Interact { .. } => "interact",

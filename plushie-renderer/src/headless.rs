@@ -364,6 +364,8 @@ impl<R: PlushieRenderer> Session<R> {
                             IncomingMessage::Effect { .. } => "effect",
                             IncomingMessage::WidgetOp { .. } => "widget_op",
                             IncomingMessage::WindowOp { .. } => "window_op",
+                            IncomingMessage::SystemOp { .. } => "system_op",
+                            IncomingMessage::SystemQuery { .. } => "system_query",
                             IncomingMessage::ImageOp { .. } => "image_op",
                             IncomingMessage::Subscribe { .. } => "subscribe",
                             IncomingMessage::Unsubscribe { .. } => "unsubscribe",
@@ -493,6 +495,8 @@ fn handle_message<R: PlushieRenderer>(
         | IncomingMessage::Subscribe { .. }
         | IncomingMessage::Unsubscribe { .. }
         | IncomingMessage::WindowOp { .. }
+        | IncomingMessage::SystemOp { .. }
+        | IncomingMessage::SystemQuery { .. }
         | IncomingMessage::Settings { .. }
         | IncomingMessage::ImageOp { .. }
         | IncomingMessage::RegisterEffectStub { .. }
@@ -626,7 +630,9 @@ fn handle_message<R: PlushieRenderer>(
                         let _ = s.writer.emit(&resp);
                     }
                     CoreEffect::WidgetOp { .. } => {}
-                    CoreEffect::WindowOp { .. } => {}
+                    CoreEffect::WindowOp { .. }
+                    | CoreEffect::SystemOp { .. }
+                    | CoreEffect::SystemQuery { .. } => {}
                     CoreEffect::ThemeFollowsSystem => {}
                 }
             }

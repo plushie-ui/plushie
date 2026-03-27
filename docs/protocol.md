@@ -511,7 +511,6 @@ Manage windows directly (outside of tree-driven sync).
 | `set_max_size` | Set maximum size (width, height) |
 | `mouse_passthrough` | Enable/disable click-through (enabled: bool) |
 | `set_resize_increments` | Set resize step size (width, height) |
-| `allow_automatic_tabbing` | macOS automatic tab grouping (enabled: bool) |
 
 **Query operations** (response sent as `effect_response`):
 
@@ -531,16 +530,44 @@ Manage windows directly (outside of tree-driven sync).
 These accept an optional `request_id` field in settings, echoed
 back in the response for correlation.
 
-**System query operations** (response sent as `op_query_response`):
+### SystemOp
+
+Run a system-level operation that is not tied to a specific window.
+
+```json
+{
+  "type": "system_op",
+  "session": "s1",
+  "op": "allow_automatic_tabbing",
+  "settings": { "enabled": true }
+}
+```
+
+**Operations:**
+
+| Op | Description |
+|----|-------------|
+| `allow_automatic_tabbing` | macOS automatic tab grouping (enabled: bool) |
+
+### SystemQuery
+
+Query system-level state that is not tied to a specific window.
+
+```json
+{
+  "type": "system_query",
+  "session": "s1",
+  "op": "get_system_theme",
+  "settings": { "tag": "theme-check" }
+}
+```
+
+**Operations** (response sent as `op_query_response`):
 
 | Op | Response kind | Response data |
 |----|---------------|---------------|
 | `get_system_theme` | `system_theme` | `"light"` or `"dark"` |
 | `get_system_info` | `system_info` | CPU, memory, GPU info object |
-
-System queries use a `tag` field in the payload (like widget op
-queries) and produce `op_query_response` rather than
-`effect_response`.
 
 ### Effect
 
@@ -685,6 +712,9 @@ Inspect the tree or find widgets by selector.
 | `role` | Find by a11y role |
 | `label` | Find by a11y label |
 | `focused` | Find the focused widget (no value field needed) |
+
+When `by` is `"id"`, the selector may also include an optional
+`window_id` field to limit the lookup to one window.
 
 **Selector search semantics:**
 
@@ -982,12 +1012,12 @@ Every request message produces exactly one response. The `id` and
 | Effect | `effect_response` | |
 | WidgetOp (query ops) | `op_query_response` | tree_hash, find_focused, list_images |
 | WindowOp (query ops) | `effect_response` | get_size, get_position, get_mode, etc. |
-| WindowOp (system queries) | `op_query_response` | get_system_theme, get_system_info |
+| SystemQuery | `op_query_response` | get_system_theme, get_system_info |
 
 Messages without responses: Settings, Snapshot, Patch,
 Subscribe, Unsubscribe, WidgetOp
-(non-query), WindowOp (non-query), ImageOp, ExtensionCommand,
-ExtensionCommands, AdvanceFrame.
+(non-query), WindowOp (non-query), SystemOp, ImageOp,
+ExtensionCommand, ExtensionCommands, AdvanceFrame.
 
 ### event
 

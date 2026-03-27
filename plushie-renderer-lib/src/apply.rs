@@ -126,6 +126,14 @@ impl App {
                     let task = self.handle_window_op(&op, &window_id, &settings);
                     self.pending_tasks.push(task);
                 }
+                CoreEffect::SystemOp { op, settings } => {
+                    let task = self.handle_system_op(&op, &settings);
+                    self.pending_tasks.push(task);
+                }
+                CoreEffect::SystemQuery { op, settings } => {
+                    let task = self.handle_system_query(&op, &settings);
+                    self.pending_tasks.push(task);
+                }
                 CoreEffect::ThemeChanged(theme) => {
                     self.theme = theme;
                     self.theme_follows_system = false;
