@@ -31,6 +31,7 @@ pub(crate) fn render_button<'a, R: PlushieRenderer>(
 ) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let id = node.id.clone();
+    let window_id = ctx.window_id.to_string();
 
     // Button can have either a text label or child content
     let child: Element<'a, Message, Theme, R> = if !node.children.is_empty() {
@@ -59,7 +60,7 @@ pub(crate) fn render_button<'a, R: PlushieRenderer>(
     }
 
     if !disabled {
-        b = b.on_press(Message::Click(id));
+        b = b.on_press(Message::Click(window_id, id));
     }
 
     // Style: string name or style map object
@@ -148,52 +149,85 @@ pub(crate) fn render_mouse_area<'a, R: PlushieRenderer>(
 
     let id = node.id.clone();
     let release_id = format!("{}:release", node.id);
+    let window_id = ctx.window_id.to_string();
 
     let mut ma = mouse_area(child)
-        .on_press(Message::Click(id))
-        .on_release(Message::Click(release_id));
+        .on_press(Message::Click(window_id.clone(), id))
+        .on_release(Message::Click(window_id.clone(), release_id));
 
     // Conditional event handlers (opt-in via boolean props)
     if prop_bool_default(props, "on_middle_press", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_middle_press(Message::MouseAreaEvent(ev_id, "middle_press".into()));
+        ma = ma.on_middle_press(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "middle_press".into(),
+        ));
     }
     if prop_bool_default(props, "on_right_press", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_right_press(Message::MouseAreaEvent(ev_id, "right_press".into()));
+        ma = ma.on_right_press(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "right_press".into(),
+        ));
     }
     if prop_bool_default(props, "on_right_release", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_right_release(Message::MouseAreaEvent(ev_id, "right_release".into()));
+        ma = ma.on_right_release(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "right_release".into(),
+        ));
     }
     if prop_bool_default(props, "on_middle_release", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_middle_release(Message::MouseAreaEvent(ev_id, "middle_release".into()));
+        ma = ma.on_middle_release(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "middle_release".into(),
+        ));
     }
     if prop_bool_default(props, "on_double_click", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_double_click(Message::MouseAreaEvent(ev_id, "double_click".into()));
+        ma = ma.on_double_click(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "double_click".into(),
+        ));
     }
     if prop_bool_default(props, "on_enter", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_enter(Message::MouseAreaEvent(ev_id, "enter".into()));
+        ma = ma.on_enter(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "enter".into(),
+        ));
     }
     if prop_bool_default(props, "on_exit", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_exit(Message::MouseAreaEvent(ev_id, "exit".into()));
+        ma = ma.on_exit(Message::MouseAreaEvent(
+            window_id.clone(),
+            ev_id,
+            "exit".into(),
+        ));
     }
     if prop_bool_default(props, "on_move", false) {
         let ev_id = node.id.clone();
-        ma = ma.on_move(move |p| Message::MouseAreaMove(ev_id.clone(), p.x, p.y));
+        let move_window_id = window_id.clone();
+        ma = ma.on_move(move |p| {
+            Message::MouseAreaMove(move_window_id.clone(), ev_id.clone(), p.x, p.y)
+        });
     }
     if prop_bool_default(props, "on_scroll", false) {
         let ev_id = node.id.clone();
+        let scroll_window_id = window_id.clone();
         ma = ma.on_scroll(move |delta| {
             let (dx, dy) = match delta {
                 mouse::ScrollDelta::Lines { x, y } => (x, y),
                 mouse::ScrollDelta::Pixels { x, y } => (x, y),
             };
-            Message::MouseAreaScroll(ev_id.clone(), dx, dy)
+            Message::MouseAreaScroll(scroll_window_id.clone(), ev_id.clone(), dx, dy)
         });
     }
 
@@ -230,11 +264,29 @@ pub(crate) fn render_sensor<'a, R: PlushieRenderer>(
 
     let mut s = sensor(child)
         .key(id)
-        .on_show(move |size| {
-            Message::SensorResize(format!("{}:show", show_id), size.width, size.height)
+        .on_show({
+            let window_id = ctx.window_id.to_string();
+            move |size| {
+                Message::SensorResize(
+                    window_id.clone(),
+                    format!("{}:show", show_id),
+                    size.width,
+                    size.height,
+                )
+            }
         })
-        .on_resize(move |size| Message::SensorResize(resize_id.clone(), size.width, size.height))
-        .on_hide(Message::Click(hide_id));
+        .on_resize({
+            let window_id = ctx.window_id.to_string();
+            move |size| {
+                Message::SensorResize(
+                    window_id.clone(),
+                    resize_id.clone(),
+                    size.width,
+                    size.height,
+                )
+            }
+        })
+        .on_hide(Message::Click(ctx.window_id.to_string(), hide_id));
 
     if let Some(d) = prop_f64(props, "delay") {
         s = s.delay(Duration::from_millis(d as u64));
@@ -374,10 +426,12 @@ pub(crate) fn render_window<'a, R: PlushieRenderer>(
     let width = prop_length(props, "width", Fill);
     let height = prop_length(props, "height", Fill);
 
+    let child_ctx = ctx.with_window_id(&node.id);
+
     let child: Element<'a, Message, Theme, R> = node
         .children
         .first()
-        .map(|c| ctx.render_child(c))
+        .map(|c| child_ctx.render_child(c))
         .unwrap_or_else(|| Space::new().into());
 
     let mut c = container(child).width(width).height(height);

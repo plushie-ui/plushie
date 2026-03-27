@@ -63,21 +63,21 @@ pub struct KeyEventData {
 #[derive(Debug, Clone)]
 pub enum Message {
     /// A user clicked a button with the given node ID.
-    Click(String),
-    /// A text input value changed (id, new_value).
-    Input(String, String),
-    /// A text input was submitted (id, current_value).
-    Submit(String, String),
-    /// A checkbox or toggler was toggled (id, checked).
-    Toggle(String, bool),
-    /// A slider value changed (id, value).
-    Slide(String, f64),
-    /// A slider was released (id).
-    SlideRelease(String),
-    /// A pick_list/combo_box/radio selection (id, value).
-    Select(String, String),
-    /// A text editor action (id, action).
-    TextEditorAction(String, text_editor::Action),
+    Click(String, String),
+    /// A text input value changed (window_id, id, new_value).
+    Input(String, String, String),
+    /// A text input was submitted (window_id, id, current_value).
+    Submit(String, String, String),
+    /// A checkbox or toggler was toggled (window_id, id, checked).
+    Toggle(String, String, bool),
+    /// A slider value changed (window_id, id, value).
+    Slide(String, String, f64),
+    /// A slider was released (window_id, id).
+    SlideRelease(String, String),
+    /// A pick_list/combo_box/radio selection (window_id, id, value).
+    Select(String, String, String),
+    /// A text editor action (window_id, id, action).
+    TextEditorAction(String, String, text_editor::Action),
     /// A markdown link was clicked.
     MarkdownUrl(markdown::Uri),
     /// A message arrived from the stdin reader (or stdin closed).
@@ -135,10 +135,11 @@ pub enum Message {
     AnimationFrame(iced::time::Instant),
     /// System theme mode changed.
     ThemeChanged(iced::theme::Mode),
-    /// Sensor widget resize event (id, width, height).
-    SensorResize(String, f32, f32),
+    /// Sensor widget resize event (window_id, id, width, height).
+    SensorResize(String, String, f32, f32),
     /// Canvas interaction event (press, release, move).
     CanvasEvent {
+        window_id: String,
         id: String,
         kind: String,
         x: f32,
@@ -147,6 +148,7 @@ pub enum Message {
     },
     /// Canvas scroll event.
     CanvasScroll {
+        window_id: String,
         id: String,
         x: f32,
         y: f32,
@@ -156,6 +158,7 @@ pub enum Message {
     // -- Canvas element events (interactive group interactions) --
     /// Cursor entered an interactive element's hit region.
     CanvasElementEnter {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         x: f32,
@@ -163,12 +166,14 @@ pub enum Message {
     },
     /// Cursor left an interactive element's hit region.
     CanvasElementLeave {
+        window_id: String,
         canvas_id: String,
         element_id: String,
     },
     /// Interactive element activated (click or keyboard Enter/Space).
     /// `button` is `"left"`, `"right"`, `"keyboard"`, or `"test"`.
     CanvasElementClick {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         x: f32,
@@ -177,6 +182,7 @@ pub enum Message {
     },
     /// Continuous drag on a draggable element.
     CanvasElementDrag {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         x: f32,
@@ -186,6 +192,7 @@ pub enum Message {
     },
     /// Mouse released after a drag.
     CanvasElementDragEnd {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         x: f32,
@@ -197,6 +204,7 @@ pub enum Message {
     /// PageUp, PageDown). Lets the host implement custom value adjustment
     /// on focused canvas elements (e.g. slider-like controls).
     CanvasElementKeyPress {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         key: String,
@@ -206,6 +214,7 @@ pub enum Message {
     /// `CanvasElementKeyPress` for the release phase. Emitted when
     /// `arrow_mode` is `"none"` and the released key is a navigation key.
     CanvasElementKeyRelease {
+        window_id: String,
         canvas_id: String,
         element_id: String,
         key: String,
@@ -213,11 +222,13 @@ pub enum Message {
     },
     /// An interactive element gained keyboard focus.
     CanvasElementFocused {
+        window_id: String,
         canvas_id: String,
         element_id: String,
     },
     /// An interactive element lost keyboard focus.
     CanvasElementBlurred {
+        window_id: String,
         canvas_id: String,
         element_id: String,
     },
@@ -229,50 +240,67 @@ pub enum Message {
     /// When `old_element_id` is `None`, only focus is emitted (first focus).
     /// When `new_element_id` is `None`, only blur is emitted (focus cleared).
     CanvasElementFocusChanged {
+        window_id: String,
         canvas_id: String,
         old_element_id: Option<String>,
         new_element_id: Option<String>,
     },
     /// The canvas widget itself gained iced-level focus (Tab or click).
-    CanvasFocused { canvas_id: String },
+    CanvasFocused {
+        window_id: String,
+        canvas_id: String,
+    },
     /// The canvas widget itself lost iced-level focus.
-    CanvasBlurred { canvas_id: String },
+    CanvasBlurred {
+        window_id: String,
+        canvas_id: String,
+    },
     /// A focusable group gained group-level focus (two-level navigation).
-    CanvasGroupFocused { canvas_id: String, group_id: String },
+    CanvasGroupFocused {
+        window_id: String,
+        canvas_id: String,
+        group_id: String,
+    },
     /// A focusable group lost group-level focus.
-    CanvasGroupBlurred { canvas_id: String, group_id: String },
+    CanvasGroupBlurred {
+        window_id: String,
+        canvas_id: String,
+        group_id: String,
+    },
     /// Renderer-side validation diagnostic (a11y, hit regions, etc.).
     Diagnostic {
+        window_id: String,
         canvas_id: String,
         element_id: Option<String>,
         level: String,
         code: String,
         message: String,
     },
-    /// PaneGrid pane was resized (grid_id, resize_event).
-    PaneResized(String, iced::widget::pane_grid::ResizeEvent),
-    /// PaneGrid pane was dragged (grid_id, drag_event).
-    PaneDragged(String, iced::widget::pane_grid::DragEvent),
-    /// PaneGrid pane was clicked (grid_id, pane).
-    PaneClicked(String, iced::widget::pane_grid::Pane),
-    /// PaneGrid focus cycle via F6 (grid_id, target_pane).
-    PaneFocusCycle(String, iced::widget::pane_grid::Pane),
-    /// Scrollable viewport changed.
-    ScrollEvent(String, ScrollViewport),
+    /// PaneGrid pane was resized (window_id, grid_id, resize_event).
+    PaneResized(String, String, iced::widget::pane_grid::ResizeEvent),
+    /// PaneGrid pane was dragged (window_id, grid_id, drag_event).
+    PaneDragged(String, String, iced::widget::pane_grid::DragEvent),
+    /// PaneGrid pane was clicked (window_id, grid_id, pane).
+    PaneClicked(String, String, iced::widget::pane_grid::Pane),
+    /// PaneGrid focus cycle via F6 (window_id, grid_id, target_pane).
+    PaneFocusCycle(String, String, iced::widget::pane_grid::Pane),
+    /// Scrollable viewport changed (window_id, id, viewport).
+    ScrollEvent(String, String, ScrollViewport),
     /// Text was pasted into a text_input (id, pasted_text).
-    Paste(String, String),
-    /// ComboBox option was hovered (combo_id, option_value).
-    OptionHovered(String, String),
-    /// MouseArea simple event (id, kind). Kind is one of: right_press,
+    Paste(String, String, String),
+    /// ComboBox option was hovered (window_id, combo_id, option_value).
+    OptionHovered(String, String, String),
+    /// MouseArea simple event (window_id, id, kind). Kind is one of: right_press,
     /// right_release, middle_release, double_click, enter, exit.
-    MouseAreaEvent(String, String),
-    /// MouseArea cursor move event (id, x, y).
-    MouseAreaMove(String, f32, f32),
-    /// MouseArea scroll event (id, delta_x, delta_y).
-    MouseAreaScroll(String, f32, f32),
+    MouseAreaEvent(String, String, String),
+    /// MouseArea cursor move event (window_id, id, x, y).
+    MouseAreaMove(String, String, f32, f32),
+    /// MouseArea scroll event (window_id, id, delta_x, delta_y).
+    MouseAreaScroll(String, String, f32, f32),
     /// Generic widget event. Used for on_open, on_close, sort, and
     /// other events that carry a family string and optional data.
     Event {
+        window_id: String,
         id: String,
         data: Value,
         family: String,
@@ -291,8 +319,14 @@ impl Message {
     /// button("Click me")
     ///     .on_press(Message::widget_event(&node.id, "clicked", json!({})))
     /// ```
-    pub fn widget_event(id: impl Into<String>, family: impl Into<String>, data: Value) -> Self {
+    pub fn widget_event(
+        window_id: impl Into<String>,
+        id: impl Into<String>,
+        family: impl Into<String>,
+        data: Value,
+    ) -> Self {
         Message::Event {
+            window_id: window_id.into(),
             id: id.into(),
             family: family.into(),
             data,

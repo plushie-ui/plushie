@@ -975,6 +975,7 @@ struct CanvasProgram<'a, R: PlushieRenderer = iced::Renderer> {
     /// Per-layer caches from WidgetCaches.
     caches: Option<&'a HashMap<String, (u64, canvas::Cache<R>)>>,
     background: Option<Color>,
+    window_id: String,
     id: String,
     on_press: bool,
     on_release: bool,
@@ -1087,6 +1088,7 @@ impl<R: PlushieRenderer> CanvasProgram<'_, R> {
         // Only emit a message if something actually changed.
         if old_id.is_some() || new_id.is_some() {
             Some(Message::CanvasElementFocusChanged {
+                window_id: self.window_id.clone(),
                 canvas_id: self.id.clone(),
                 old_element_id: old_id,
                 new_element_id: new_id,
@@ -1311,6 +1313,7 @@ impl<R: PlushieRenderer> CanvasProgram<'_, R> {
                 let element = &self.interactive_elements[idx];
                 return Some(
                     iced::widget::Action::publish(Message::CanvasElementKeyPress {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: element.id.clone(),
                         key: crate::message::serialize_key(key),
@@ -1456,6 +1459,7 @@ impl<R: PlushieRenderer> CanvasProgram<'_, R> {
                         let center = hit_region_center(&element.hit_region);
                         Some(
                             iced::widget::Action::publish(Message::CanvasElementClick {
+                                window_id: self.window_id.clone(),
                                 canvas_id: self.id.clone(),
                                 element_id: element.id.clone(),
                                 x: center.x,
@@ -1549,6 +1553,7 @@ impl<R: PlushieRenderer> CanvasProgram<'_, R> {
                 let element = &self.interactive_elements[idx];
                 return Some(
                     iced::widget::Action::publish(Message::CanvasElementKeyRelease {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: element.id.clone(),
                         key: crate::message::serialize_key(key),
@@ -2391,13 +2396,15 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
         // before the cursor check so they work when the mouse is outside.
         if matches!(event, iced::Event::Keyboard(..)) {
             if !self.interactive_elements.is_empty() {
-                if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
-                    event
+                if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                    key, modifiers, ..
+                }) = event
                 {
                     return self.handle_keyboard(state, key, *modifiers);
                 }
-                if let iced::Event::Keyboard(keyboard::Event::KeyReleased { key, modifiers, .. }) =
-                    event
+                if let iced::Event::Keyboard(keyboard::Event::KeyReleased {
+                    key, modifiers, ..
+                }) = event
                 {
                     return self.handle_key_release(state, key, *modifiers);
                 }
@@ -2439,6 +2446,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 if let Some(drag) = state.dragging.take() {
                     let pos = state.cursor_position.unwrap_or(Point::ORIGIN);
                     let msg = Message::CanvasElementDragEnd {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: drag.element_id,
                         x: pos.x,
@@ -2448,6 +2456,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 }
                 if let Some(hovered_id) = state.hovered_element.take() {
                     let msg = Message::CanvasElementLeave {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: hovered_id,
                     };
@@ -2494,6 +2503,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                     // are consistent across frames.
                     drag.last = effective;
                     let msg = Message::CanvasElementDrag {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: drag.element_id.clone(),
                         x: effective.x,
@@ -2518,6 +2528,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                         // Leave -- Enter tells the host WHAT is hovered.
                         if let Some(ref old_id) = old_hovered {
                             let msg = Message::CanvasElementLeave {
+                                window_id: self.window_id.clone(),
                                 canvas_id: self.id.clone(),
                                 element_id: old_id.clone(),
                             };
@@ -2525,6 +2536,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                         }
                         if let Some(ref new_id) = new_hovered {
                             let msg = Message::CanvasElementEnter {
+                                window_id: self.window_id.clone(),
                                 canvas_id: self.id.clone(),
                                 element_id: new_id.clone(),
                                 x: position.x,
@@ -2541,6 +2553,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 // -- Raw canvas move event --
                 if self.on_move {
                     let msg = Message::CanvasEvent {
+                        window_id: self.window_id.clone(),
                         id: self.id.clone(),
                         kind: "move".to_string(),
                         x: position.x,
@@ -2599,6 +2612,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 // -- Raw canvas press event --
                 if self.on_press {
                     let msg = Message::CanvasEvent {
+                        window_id: self.window_id.clone(),
                         id: self.id.clone(),
                         kind: "press".to_string(),
                         x: position.x,
@@ -2619,6 +2633,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                     // -- Drag end --
                     if let Some(drag) = state.dragging.take() {
                         let msg = Message::CanvasElementDragEnd {
+                            window_id: self.window_id.clone(),
                             canvas_id: self.id.clone(),
                             element_id: drag.element_id,
                             x: position.x,
@@ -2636,6 +2651,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                             .unwrap_or(false);
                         if still_over {
                             let msg = Message::CanvasElementClick {
+                                window_id: self.window_id.clone(),
                                 canvas_id: self.id.clone(),
                                 element_id: pressed_id,
                                 x: position.x,
@@ -2650,6 +2666,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 // -- Raw canvas release event --
                 if self.on_release {
                     let msg = Message::CanvasEvent {
+                        window_id: self.window_id.clone(),
                         id: self.id.clone(),
                         kind: "release".to_string(),
                         x: position.x,
@@ -2668,6 +2685,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                     mouse::ScrollDelta::Pixels { x, y } => (*x, *y),
                 };
                 Some(iced::widget::Action::publish(Message::CanvasScroll {
+                    window_id: self.window_id.clone(),
                     id: self.id.clone(),
                     x: position.x,
                     y: position.y,
@@ -2803,6 +2821,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
         state.canvas_focused = true;
         state.focus_visible = focus_visible;
         let mut actions = vec![iced::widget::Action::publish(Message::CanvasFocused {
+            window_id: self.window_id.clone(),
             canvas_id: self.id.clone(),
         })];
         // If returning to a canvas that had internal focus, re-announce
@@ -2813,6 +2832,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
             if still_exists {
                 actions.push(iced::widget::Action::publish(
                     Message::CanvasElementFocused {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: id.clone(),
                     },
@@ -2822,6 +2842,7 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
                 // Emit blur for the stale element and clear.
                 actions.push(iced::widget::Action::publish(
                     Message::CanvasElementBlurred {
+                        window_id: self.window_id.clone(),
                         canvas_id: self.id.clone(),
                         element_id: id.clone(),
                     },
@@ -2842,12 +2863,14 @@ impl<R: PlushieRenderer> canvas::Program<Message, iced::Theme, R> for CanvasProg
         if let Some(ref id) = state.focused_id {
             actions.push(iced::widget::Action::publish(
                 Message::CanvasElementBlurred {
+                    window_id: self.window_id.clone(),
                     canvas_id: self.id.clone(),
                     element_id: id.clone(),
                 },
             ));
         }
         actions.push(iced::widget::Action::publish(Message::CanvasBlurred {
+            window_id: self.window_id.clone(),
             canvas_id: self.id.clone(),
         }));
         actions
@@ -3034,6 +3057,7 @@ pub(crate) fn render_canvas<'a, R: PlushieRenderer>(
         layers,
         caches: node_caches,
         background,
+        window_id: ctx.window_id.to_string(),
         id: node.id.clone(),
         on_press: on_press || interactive || has_interactive_elements,
         on_release: on_release || interactive || has_interactive_elements,
@@ -4566,6 +4590,7 @@ mod tests {
             layers: vec![],
             caches: None,
             background: None,
+            window_id: "test-window".to_string(),
             id: "test-canvas".to_string(),
             on_press: false,
             on_release: false,

@@ -552,7 +552,10 @@ pub struct RenderCtx<'a, R: PlushieRenderer = iced::Renderer> {
     pub extensions: &'a ExtensionDispatcher<R>,
     pub default_text_size: Option<f32>,
     pub default_font: Option<iced::Font>,
-    /// The plushie window ID this render is for, or `""` in headless/test.
+    /// The plushie window ID this render is for.
+    ///
+    /// Top-level helper contexts may start empty before a `window` node
+    /// sets the real id for its subtree.
     pub window_id: &'a str,
     /// The display scale factor for this window (1.0 = no scaling).
     /// Useful for DPI-aware canvas rendering.
@@ -586,6 +589,11 @@ impl<'a, R: PlushieRenderer> RenderCtx<'a, R> {
     /// Create a new RenderCtx with a different theme, preserving all other fields.
     pub fn with_theme(&self, theme: &'a Theme) -> Self {
         RenderCtx { theme, ..*self }
+    }
+
+    /// Create a new RenderCtx for a child window subtree.
+    pub fn with_window_id(&self, window_id: &'a str) -> Self {
+        RenderCtx { window_id, ..*self }
     }
 
     /// Render all children of a node through the main dispatch.

@@ -83,7 +83,7 @@ fn parse_table_columns(props: Props<'_>) -> Vec<TableColumn> {
 
 pub(crate) fn render_table<'a, R: PlushieRenderer>(
     node: &'a TreeNode,
-    _ctx: RenderCtx<'a, R>,
+    ctx: RenderCtx<'a, R>,
 ) -> Element<'a, Message, Theme, R> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Fill);
@@ -136,6 +136,7 @@ pub(crate) fn render_table<'a, R: PlushieRenderer>(
                 let label_text = format!("{}{}", col.label, sort_indicator);
 
                 let cell_elem: Element<'a, Message, Theme, R> = if col.sortable {
+                    let window_id = ctx.window_id.to_string();
                     let click_id = table_id.clone();
                     let click_key = col.key.clone();
                     let mut label = text(label_text);
@@ -145,6 +146,7 @@ pub(crate) fn render_table<'a, R: PlushieRenderer>(
                     container(
                         button(label)
                             .on_press(Message::Event {
+                                window_id,
                                 id: click_id,
                                 data: serde_json::json!({"column": click_key}),
                                 family: "sort".into(),

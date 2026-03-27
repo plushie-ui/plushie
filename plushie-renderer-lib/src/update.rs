@@ -26,7 +26,7 @@ impl App {
             // update() call regardless of the returned Task. Extensions
             // using canvas::Cache must clear caches themselves (see
             // GenerationCounter in extensions.rs).
-            msg @ (Message::Click(_)
+            msg @ (Message::Click(..)
             | Message::Input(..)
             | Message::Submit(..)
             | Message::Toggle(..)

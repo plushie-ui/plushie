@@ -227,7 +227,9 @@ pub(crate) fn render_rich_text<'a, R: PlushieRenderer>(
         rt = rt.ellipsis(e);
     }
 
-    rt = rt.on_link_click(move |link| Message::Click(format!("{}:{}", id, link)));
+    let window_id = ctx.window_id.to_string();
+    rt =
+        rt.on_link_click(move |link| Message::Click(window_id.clone(), format!("{}:{}", id, link)));
 
     rt.into()
 }

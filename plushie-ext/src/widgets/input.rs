@@ -43,8 +43,9 @@ pub(crate) fn render_text_input<'a, R: PlushieRenderer>(
     let id = node.id.clone();
     let has_on_submit = props.and_then(|p| p.get("on_submit")).is_some();
 
+    let window_id = ctx.window_id.to_string();
     let mut ti = text_input(&placeholder, &value)
-        .on_input(move |v| Message::Input(id.clone(), v))
+        .on_input(move |v| Message::Input(window_id.clone(), id.clone(), v))
         .width(width)
         .secure(secure);
 
@@ -89,14 +90,17 @@ pub(crate) fn render_text_input<'a, R: PlushieRenderer>(
     }
 
     if has_on_submit {
+        let submit_window_id = ctx.window_id.to_string();
         let submit_id = node.id.clone();
         let submit_value = value.clone();
-        ti = ti.on_submit(Message::Submit(submit_id, submit_value));
+        ti = ti.on_submit(Message::Submit(submit_window_id, submit_id, submit_value));
     }
 
     if prop_bool_default(props, "on_paste", false) {
+        let paste_window_id = ctx.window_id.to_string();
         let paste_id = node.id.clone();
-        ti = ti.on_paste(move |text| Message::Paste(paste_id.clone(), text));
+        ti = ti
+            .on_paste(move |text| Message::Paste(paste_window_id.clone(), paste_id.clone(), text));
     }
 
     if let Some(icon) = props
@@ -237,7 +241,7 @@ fn parse_motion(s: &str) -> Option<text_editor::Motion> {
 }
 
 /// Parse a JSON binding value into an iced Binding.
-fn parse_binding(val: &Value, id: &str) -> Option<text_editor::Binding<Message>> {
+fn parse_binding(val: &Value, id: &str, window_id: &str) -> Option<text_editor::Binding<Message>> {
     use text_editor::Binding;
     match val {
         Value::String(s) => match s.as_str() {
@@ -279,13 +283,17 @@ fn parse_binding(val: &Value, id: &str) -> Option<text_editor::Binding<Message>>
             if let Some(tag) = obj.get("custom").and_then(|v| v.as_str()) {
                 let event_id = id.to_string();
                 return Some(Binding::Custom(Message::Event {
+                    window_id: window_id.to_string(),
                     id: event_id,
                     data: serde_json::json!(tag),
                     family: "key_binding".to_string(),
                 }));
             }
             if let Some(seq) = obj.get("sequence").and_then(|v| v.as_array()) {
-                let bindings: Vec<_> = seq.iter().filter_map(|v| parse_binding(v, id)).collect();
+                let bindings: Vec<_> = seq
+                    .iter()
+                    .filter_map(|v| parse_binding(v, id, window_id))
+                    .collect();
                 if !bindings.is_empty() {
                     return Some(Binding::Sequence(bindings));
                 }
@@ -384,7 +392,9 @@ pub(crate) fn render_text_editor<'a, R: PlushieRenderer>(
 
     let editor_id = id;
     let mut te = text_editor::TextEditor::<'_, _, Message, iced::Theme, R>::new(content)
-        .on_action(move |action| Message::TextEditorAction(editor_id.clone(), action))
+        .on_action(move |action| {
+            Message::TextEditorAction(ctx.window_id.to_string(), editor_id.clone(), action)
+        })
         .height(height);
 
     if !placeholder.is_empty() {
@@ -507,7 +517,7 @@ pub(crate) fn render_text_editor<'a, R: PlushieRenderer>(
                     }
 
                     // Parse the specific binding
-                    return parse_binding(&rule.binding_val, &editor_id);
+                    return parse_binding(&rule.binding_val, &editor_id, ctx.window_id);
                 }
                 // No rule matched -- no binding
                 None
@@ -683,7 +693,7 @@ pub(crate) fn render_checkbox<'a, R: PlushieRenderer>(
     let mut cb = checkbox(checked).label(label).width(width);
 
     if !disabled {
-        cb = cb.on_toggle(move |v| Message::Toggle(id.clone(), v));
+        cb = cb.on_toggle(move |v| Message::Toggle(ctx.window_id.to_string(), id.clone(), v));
     }
 
     if let Some(s) = spacing {
@@ -844,7 +854,7 @@ pub(crate) fn render_toggler<'a, R: PlushieRenderer>(
     let mut t = toggler(is_toggled).width(width);
 
     if !disabled {
-        t = t.on_toggle(move |v| Message::Toggle(id.clone(), v));
+        t = t.on_toggle(move |v| Message::Toggle(ctx.window_id.to_string(), id.clone(), v));
     }
 
     if let Some(l) = label {
@@ -1000,7 +1010,11 @@ pub(crate) fn render_radio<'a, R: PlushieRenderer>(
     let select_value = value;
 
     let mut r = iced::widget::Radio::new(label, 0u8, is_selected, move |_| {
-        Message::Select(event_id.clone(), select_value.clone())
+        Message::Select(
+            ctx.window_id.to_string(),
+            event_id.clone(),
+            select_value.clone(),
+        )
     });
 
     if let Some(s) = prop_f32(props, "spacing") {
@@ -1099,10 +1113,14 @@ pub(crate) fn render_slider<'a, R: PlushieRenderer>(
     let width = prop_length(props, "width", Length::Fill);
     let id = node.id.clone();
     let release_id = node.id.clone();
+    let window_id = ctx.window_id.to_string();
+    let release_window_id = window_id.clone();
 
-    let mut s = slider(range, value, move |v| Message::Slide(id.clone(), v))
-        .on_release(Message::SlideRelease(release_id))
-        .width(width);
+    let mut s = slider(range, value, move |v| {
+        Message::Slide(window_id.clone(), id.clone(), v)
+    })
+    .on_release(Message::SlideRelease(release_window_id, release_id))
+    .width(width);
 
     if let Some(st) = step {
         // Clamp step to a small positive minimum to prevent division by
@@ -1202,10 +1220,14 @@ pub(crate) fn render_vertical_slider<'a, R: PlushieRenderer>(
     let height = prop_length(props, "height", Length::Fill);
     let id = node.id.clone();
     let release_id = node.id.clone();
+    let window_id = ctx.window_id.to_string();
+    let release_window_id = window_id.clone();
 
-    let mut s = vertical_slider(range, value, move |v| Message::Slide(id.clone(), v))
-        .on_release(Message::SlideRelease(release_id))
-        .height(height);
+    let mut s = vertical_slider(range, value, move |v| {
+        Message::Slide(window_id.clone(), id.clone(), v)
+    })
+    .on_release(Message::SlideRelease(release_window_id, release_id))
+    .height(height);
 
     if let Some(w) = width {
         s = s.width(w);
@@ -1303,9 +1325,10 @@ pub(crate) fn render_pick_list<'a, R: PlushieRenderer>(
     let width = prop_length(props, "width", Length::Shrink);
     let padding = parse_padding_value(props);
     let id = node.id.clone();
+    let window_id = ctx.window_id.to_string();
 
     let mut pl = pick_list(selected, options, |v: &String| v.clone())
-        .on_select(move |v: String| Message::Select(id.clone(), v))
+        .on_select(move |v: String| Message::Select(window_id.clone(), id.clone(), v))
         .width(width);
 
     if let Some(p) = padding {
@@ -1388,6 +1411,7 @@ pub(crate) fn render_pick_list<'a, R: PlushieRenderer>(
     if prop_bool_default(props, "on_open", false) {
         let open_id = node.id.clone();
         pl = pl.on_open(Message::Event {
+            window_id: ctx.window_id.to_string(),
             id: open_id,
             data: Value::Null,
             family: "open".into(),
@@ -1396,6 +1420,7 @@ pub(crate) fn render_pick_list<'a, R: PlushieRenderer>(
     if prop_bool_default(props, "on_close", false) {
         let close_id = node.id.clone();
         pl = pl.on_close(Message::Event {
+            window_id: ctx.window_id.to_string(),
             id: close_id,
             data: Value::Null,
             family: "close".into(),
@@ -1428,9 +1453,11 @@ pub(crate) fn render_combo_box<'a, R: PlushieRenderer>(
     let padding_val = parse_padding_value(props);
     let id = node.id.clone();
     let input_id = node.id.clone();
+    let window_id = ctx.window_id.to_string();
+    let input_window_id = window_id.clone();
 
     let mut cb = combo_box(state, &placeholder, selected.as_ref(), move |selected| {
-        Message::Select(id.clone(), selected)
+        Message::Select(window_id.clone(), id.clone(), selected)
     })
     .width(width);
 
@@ -1439,7 +1466,7 @@ pub(crate) fn render_combo_box<'a, R: PlushieRenderer>(
     }
 
     // on_input: emit Input events so the host can filter
-    cb = cb.on_input(move |v| Message::Input(input_id.clone(), v));
+    cb = cb.on_input(move |v| Message::Input(input_window_id.clone(), input_id.clone(), v));
 
     if let Some(sz) = prop_f32(props, "size").or(ctx.default_text_size) {
         cb = cb.size(sz);
@@ -1482,11 +1509,15 @@ pub(crate) fn render_combo_box<'a, R: PlushieRenderer>(
 
     if prop_bool_default(props, "on_option_hovered", false) {
         let hover_id = node.id.clone();
-        cb = cb.on_option_hovered(move |val| Message::OptionHovered(hover_id.clone(), val));
+        let hover_window_id = ctx.window_id.to_string();
+        cb = cb.on_option_hovered(move |val| {
+            Message::OptionHovered(hover_window_id.clone(), hover_id.clone(), val)
+        });
     }
     if prop_bool_default(props, "on_open", false) {
         let open_id = node.id.clone();
         cb = cb.on_open(Message::Event {
+            window_id: ctx.window_id.to_string(),
             id: open_id,
             data: Value::Null,
             family: "open".into(),
@@ -1495,6 +1526,7 @@ pub(crate) fn render_combo_box<'a, R: PlushieRenderer>(
     if prop_bool_default(props, "on_close", false) {
         let close_id = node.id.clone();
         cb = cb.on_close(Message::Event {
+            window_id: ctx.window_id.to_string(),
             id: close_id,
             data: Value::Null,
             family: "close".into(),

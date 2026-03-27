@@ -622,34 +622,34 @@ pub fn build_interact_response(
     selector: Value,
     payload: Value,
 ) -> InteractResponse {
-    let widget_id = resolve_widget_id(core, &selector);
+    let widget_target = resolve_widget_target(core, &selector);
 
-    let events: Vec<OutgoingEvent> = match (action.as_str(), widget_id) {
-        ("click", Some(wid)) => {
-            vec![OutgoingEvent::click(wid)]
+    let events: Vec<OutgoingEvent> = match (action.as_str(), widget_target) {
+        ("click", Some((window_id, wid))) => {
+            vec![OutgoingEvent::click(wid).with_window_id(window_id)]
         }
-        ("type_text", Some(wid)) => {
+        ("type_text", Some((window_id, wid))) => {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            vec![OutgoingEvent::input(wid, text.to_string())]
+            vec![OutgoingEvent::input(wid, text.to_string()).with_window_id(window_id)]
         }
-        ("submit", Some(wid)) => {
+        ("submit", Some((window_id, wid))) => {
             let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            vec![OutgoingEvent::submit(wid, value.to_string())]
+            vec![OutgoingEvent::submit(wid, value.to_string()).with_window_id(window_id)]
         }
-        ("toggle", Some(wid)) => {
+        ("toggle", Some((window_id, wid))) => {
             let value = payload
                 .get("value")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            vec![OutgoingEvent::toggle(wid, value)]
+            vec![OutgoingEvent::toggle(wid, value).with_window_id(window_id)]
         }
-        ("select", Some(wid)) => {
+        ("select", Some((window_id, wid))) => {
             let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            vec![OutgoingEvent::select(wid, value.to_string())]
+            vec![OutgoingEvent::select(wid, value.to_string()).with_window_id(window_id)]
         }
-        ("slide", Some(wid)) => {
+        ("slide", Some((window_id, wid))) => {
             let value = payload.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![OutgoingEvent::slide(wid, value)]
+            vec![OutgoingEvent::slide(wid, value).with_window_id(window_id)]
         }
         ("press", _) => {
             let payload_map = payload.as_object();
@@ -674,9 +674,9 @@ pub fn build_interact_response(
                 OutgoingEvent::scripting_key_release(key, modifiers),
             ]
         }
-        ("paste", Some(wid)) => {
+        ("paste", Some((window_id, wid))) => {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            vec![OutgoingEvent::paste(wid, text.to_string())]
+            vec![OutgoingEvent::paste(wid, text.to_string()).with_window_id(window_id)]
         }
         ("scroll", _) => {
             let delta_x = payload
@@ -689,18 +689,17 @@ pub fn build_interact_response(
                 .unwrap_or(0.0);
             vec![OutgoingEvent::scripting_scroll(delta_x, delta_y)]
         }
-        ("sort", Some(wid)) => {
+        ("sort", Some((window_id, wid))) => {
             let column = payload.get("column").and_then(|v| v.as_str()).unwrap_or("");
-            vec![OutgoingEvent::generic(
-                "sort",
-                wid,
-                Some(serde_json::json!({"column": column})),
-            )]
+            vec![
+                OutgoingEvent::generic("sort", wid, Some(serde_json::json!({"column": column})))
+                    .with_window_id(window_id),
+            ]
         }
-        ("pane_focus_cycle", Some(wid)) => {
-            vec![OutgoingEvent::generic("pane_focus_cycle", wid, None)]
+        ("pane_focus_cycle", Some((window_id, wid))) => {
+            vec![OutgoingEvent::generic("pane_focus_cycle", wid, None).with_window_id(window_id)]
         }
-        ("canvas_press", Some(wid)) => {
+        ("canvas_press", Some((window_id, wid))) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let button = payload
@@ -715,11 +714,12 @@ pub fn build_interact_response(
             if let Some(node) = core.tree.find_by_id(&wid) {
                 if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
                 {
-                    vec![OutgoingEvent::canvas_element_click(
-                        wid, element_id, x, y, button,
-                    )]
+                    vec![
+                        OutgoingEvent::canvas_element_click(wid, element_id, x, y, button)
+                            .with_window_id(window_id),
+                    ]
                 } else if plushie_ext::widgets::canvas::canvas_has_on_press(node) {
-                    vec![OutgoingEvent::canvas_press(wid, x, y, button)]
+                    vec![OutgoingEvent::canvas_press(wid, x, y, button).with_window_id(window_id)]
                 } else {
                     vec![]
                 }
@@ -727,7 +727,7 @@ pub fn build_interact_response(
                 vec![]
             }
         }
-        ("canvas_release", Some(wid)) => {
+        ("canvas_release", Some((window_id, wid))) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let button = payload
@@ -738,7 +738,7 @@ pub fn build_interact_response(
 
             if let Some(node) = core.tree.find_by_id(&wid) {
                 if plushie_ext::widgets::canvas::canvas_has_on_press(node) {
-                    vec![OutgoingEvent::canvas_release(wid, x, y, button)]
+                    vec![OutgoingEvent::canvas_release(wid, x, y, button).with_window_id(window_id)]
                 } else {
                     vec![]
                 }
@@ -746,7 +746,7 @@ pub fn build_interact_response(
                 vec![]
             }
         }
-        ("canvas_move", Some(wid)) => {
+        ("canvas_move", Some((window_id, wid))) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
 
@@ -755,14 +755,12 @@ pub fn build_interact_response(
                 let mut events = Vec::new();
                 if let Some(element_id) = plushie_ext::widgets::canvas::canvas_hit_test(node, x, y)
                 {
-                    events.push(OutgoingEvent::canvas_element_enter(
-                        wid.clone(),
-                        element_id,
-                        x,
-                        y,
-                    ));
+                    events.push(
+                        OutgoingEvent::canvas_element_enter(wid.clone(), element_id, x, y)
+                            .with_window_id(window_id.clone()),
+                    );
                 }
-                events.push(OutgoingEvent::canvas_move(wid, x, y));
+                events.push(OutgoingEvent::canvas_move(wid, x, y).with_window_id(window_id));
                 events
             } else {
                 vec![]
@@ -775,6 +773,35 @@ pub fn build_interact_response(
     };
 
     InteractResponse::new(id, events)
+}
+
+fn resolve_widget_target(
+    core: &Core<impl PlushieRenderer>,
+    selector: &Value,
+) -> Option<(String, String)> {
+    let widget_id = resolve_widget_id(core, selector)?;
+    let window_id = find_window_id_for_node(core.tree.root()?, &widget_id, None)?;
+    Some((window_id, widget_id))
+}
+
+fn find_window_id_for_node(
+    node: &plushie_ext::protocol::TreeNode,
+    target_id: &str,
+    current_window_id: Option<&str>,
+) -> Option<String> {
+    let current_window_id = if node.type_name == "window" {
+        Some(node.id.as_str())
+    } else {
+        current_window_id
+    };
+
+    if node.id == target_id {
+        return current_window_id.map(str::to_string);
+    }
+
+    node.children
+        .iter()
+        .find_map(|child| find_window_id_for_node(child, target_id, current_window_id))
 }
 
 /// Build and emit an InteractResponse to stdout.

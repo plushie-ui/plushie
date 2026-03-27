@@ -461,11 +461,19 @@ pub(crate) fn render_responsive<'a, R: PlushieRenderer>(
         .map(|c| ctx.render_child(c))
         .unwrap_or_else(|| Space::new().into());
 
+    let window_id = ctx.window_id.to_string();
     let resize_id = node.id.clone();
 
     sensor(container(child).width(width).height(height))
         .key(node.id.clone())
-        .on_resize(move |size| Message::SensorResize(resize_id.clone(), size.width, size.height))
+        .on_resize(move |size| {
+            Message::SensorResize(
+                window_id.clone(),
+                resize_id.clone(),
+                size.width,
+                size.height,
+            )
+        })
         .into()
 }
 
@@ -536,6 +544,7 @@ pub(crate) fn render_scrollable<'a, R: PlushieRenderer>(
 
     // on_scroll: emit viewport data when scroll position changes
     if prop_bool_default(props, "on_scroll", false) {
+        let window_id = ctx.window_id.to_string();
         let scroll_id = node.id.clone();
         s = s.on_scroll(move |viewport| {
             let abs = viewport.absolute_offset();
@@ -543,6 +552,7 @@ pub(crate) fn render_scrollable<'a, R: PlushieRenderer>(
             let bounds = viewport.bounds();
             let content_bounds = viewport.content_bounds();
             Message::ScrollEvent(
+                window_id.clone(),
                 scroll_id.clone(),
                 ScrollViewport {
                     absolute_x: abs.x,
@@ -631,6 +641,10 @@ pub(crate) fn render_pane_grid<'a, R: PlushieRenderer>(
     let node_id2 = node.id.clone();
     let node_id3 = node.id.clone();
     let node_id4 = node.id.clone();
+    let window_id = ctx.window_id.to_string();
+    let window_id2 = window_id.clone();
+    let window_id3 = window_id.clone();
+    let window_id4 = window_id.clone();
 
     let mut pg = pane_grid::PaneGrid::new(state, |_pane, pane_id, _is_maximized| {
         let child_element: Element<'a, Message, Theme, R> = child_map
@@ -652,12 +666,14 @@ pub(crate) fn render_pane_grid<'a, R: PlushieRenderer>(
     let min_size = prop_f32(props, "min_size").unwrap_or(10.0).max(1.0);
     let leeway = prop_f32(props, "leeway").unwrap_or(min_size);
 
-    pg = pg.on_click(move |pane| Message::PaneClicked(node_id3.clone(), pane));
+    pg = pg.on_click(move |pane| Message::PaneClicked(window_id3.clone(), node_id3.clone(), pane));
     pg = pg.on_resize(leeway, move |evt| {
-        Message::PaneResized(node_id.clone(), evt)
+        Message::PaneResized(window_id.clone(), node_id.clone(), evt)
     });
-    pg = pg.on_drag(move |evt| Message::PaneDragged(node_id2.clone(), evt));
-    pg = pg.on_focus_cycle(move |pane| Message::PaneFocusCycle(node_id4.clone(), pane));
+    pg = pg.on_drag(move |evt| Message::PaneDragged(window_id2.clone(), node_id2.clone(), evt));
+    pg = pg.on_focus_cycle(move |pane| {
+        Message::PaneFocusCycle(window_id4.clone(), node_id4.clone(), pane)
+    });
 
     // Divider styling
     let divider_color = prop_color(props, "divider_color");

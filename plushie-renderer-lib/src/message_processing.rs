@@ -46,7 +46,7 @@ pub fn process_widget_message<R: PlushieRenderer>(
 ) -> Vec<OutgoingEvent> {
     match msg {
         // Simple widget events -- stateless conversion.
-        ref m @ (Message::Click(_)
+        ref m @ (Message::Click(..)
         | Message::Input(..)
         | Message::Submit(..)
         | Message::Toggle(..)
@@ -77,38 +77,39 @@ pub fn process_widget_message<R: PlushieRenderer>(
 
         // Focus transition produces up to 2 events (blur old + focus new).
         Message::CanvasElementFocusChanged {
+            window_id,
             canvas_id,
             old_element_id,
             new_element_id,
         } => {
             let mut events = Vec::with_capacity(2);
             if let Some(old_id) = old_element_id {
-                events.push(OutgoingEvent::canvas_element_blurred(
-                    canvas_id.clone(),
-                    old_id.clone(),
-                ));
+                events.push(
+                    OutgoingEvent::canvas_element_blurred(canvas_id.clone(), old_id.clone())
+                        .with_window_id(window_id.clone()),
+                );
             }
             if let Some(new_id) = new_element_id {
-                events.push(OutgoingEvent::canvas_element_focused(
-                    canvas_id.clone(),
-                    new_id.clone(),
-                ));
+                events.push(
+                    OutgoingEvent::canvas_element_focused(canvas_id.clone(), new_id.clone())
+                        .with_window_id(window_id.clone()),
+                );
             }
             events
         }
 
         // Slider -- needs value tracking for SlideRelease.
-        Message::Slide(id, value) => {
+        Message::Slide(window_id, id, value) => {
             last_slide_values.insert(id.clone(), value);
-            vec![OutgoingEvent::slide(id, value)]
+            vec![OutgoingEvent::slide(id, value).with_window_id(window_id)]
         }
-        Message::SlideRelease(id) => {
+        Message::SlideRelease(window_id, id) => {
             let value = last_slide_values.remove(&id).unwrap_or(0.0);
-            vec![OutgoingEvent::slide_release(id, value)]
+            vec![OutgoingEvent::slide_release(id, value).with_window_id(window_id)]
         }
 
         // Text editor -- apply action to content, emit new text.
-        Message::TextEditorAction(id, action) => {
+        Message::TextEditorAction(window_id, id, action) => {
             if let Some(content) = caches.editor_content_mut(&id) {
                 let is_edit = action.is_edit();
                 content.perform(action);
@@ -119,7 +120,7 @@ pub fn process_widget_message<R: PlushieRenderer>(
                     // ensure_text_editor_cache doesn't reset on the host's
                     // lagging prop.
                     caches.update_editor_content_hash(&id, &new_text);
-                    return vec![OutgoingEvent::input(id, new_text)];
+                    return vec![OutgoingEvent::input(id, new_text).with_window_id(window_id)];
                 }
             }
             vec![]
@@ -127,6 +128,7 @@ pub fn process_widget_message<R: PlushieRenderer>(
 
         // Extension events -- route through dispatcher.
         Message::Event {
+            ref window_id,
             ref id,
             ref data,
             ref family,
@@ -138,43 +140,60 @@ pub fn process_widget_message<R: PlushieRenderer>(
                 Some(data.clone())
             };
             match result {
-                EventResult::PassThrough => {
-                    vec![OutgoingEvent::generic(family.clone(), id.clone(), data_opt)]
-                }
-                EventResult::Consumed(ext_events) => ext_events,
+                EventResult::PassThrough => vec![
+                    OutgoingEvent::generic(family.clone(), id.clone(), data_opt)
+                        .with_window_id(window_id.clone()),
+                ],
+                EventResult::Consumed(ext_events) => ext_events
+                    .into_iter()
+                    .map(|event| event.with_window_id(window_id.clone()))
+                    .collect(),
                 EventResult::Observed(ext_events) => {
-                    let mut events =
-                        vec![OutgoingEvent::generic(family.clone(), id.clone(), data_opt)];
-                    events.extend(ext_events);
+                    let mut events = vec![
+                        OutgoingEvent::generic(family.clone(), id.clone(), data_opt)
+                            .with_window_id(window_id.clone()),
+                    ];
+                    events.extend(
+                        ext_events
+                            .into_iter()
+                            .map(|event| event.with_window_id(window_id.clone())),
+                    );
                     events
                 }
             }
         }
 
         // Pane grid events -- need pane state lookup.
-        Message::PaneFocusCycle(ref grid_id, pane) => {
+        Message::PaneFocusCycle(ref window_id, ref grid_id, pane) => {
             if let Some(state) = caches.pane_grid_state(grid_id) {
                 let pane_id = state.get(pane).cloned().unwrap_or_default();
-                vec![OutgoingEvent::pane_focus_cycle(grid_id.clone(), pane_id)]
+                vec![
+                    OutgoingEvent::pane_focus_cycle(grid_id.clone(), pane_id)
+                        .with_window_id(window_id.clone()),
+                ]
             } else {
                 vec![]
             }
         }
-        Message::PaneResized(ref grid_id, ref evt) => {
+        Message::PaneResized(ref window_id, ref grid_id, ref evt) => {
             if let Some(state) = caches.pane_grid_state_mut(grid_id) {
                 state.resize(evt.split, evt.ratio);
             }
-            vec![OutgoingEvent::pane_resized(
-                grid_id.clone(),
-                format!("{:?}", evt.split),
-                evt.ratio,
-            )]
+            vec![
+                OutgoingEvent::pane_resized(grid_id.clone(), format!("{:?}", evt.split), evt.ratio)
+                    .with_window_id(window_id.clone()),
+            ]
         }
-        Message::PaneDragged(ref grid_id, ref evt) => process_pane_drag(grid_id, evt, caches),
-        Message::PaneClicked(ref grid_id, pane) => {
+        Message::PaneDragged(ref window_id, ref grid_id, ref evt) => {
+            process_pane_drag(window_id, grid_id, evt, caches)
+        }
+        Message::PaneClicked(ref window_id, ref grid_id, pane) => {
             if let Some(state) = caches.pane_grid_state(grid_id) {
                 let pane_id = state.get(pane).cloned().unwrap_or_default();
-                vec![OutgoingEvent::pane_clicked(grid_id.clone(), pane_id)]
+                vec![
+                    OutgoingEvent::pane_clicked(grid_id.clone(), pane_id)
+                        .with_window_id(window_id.clone()),
+                ]
             } else {
                 vec![]
             }
@@ -188,6 +207,7 @@ pub fn process_widget_message<R: PlushieRenderer>(
 
 /// Process a pane grid drag event into outgoing events.
 fn process_pane_drag<R: PlushieRenderer>(
+    window_id: &str,
     grid_id: &str,
     evt: &pane_grid::DragEvent,
     caches: &mut WidgetCaches<R>,
@@ -196,14 +216,17 @@ fn process_pane_drag<R: PlushieRenderer>(
         pane_grid::DragEvent::Picked { pane } => {
             if let Some(state) = caches.pane_grid_state(grid_id) {
                 let pane_id = state.get(*pane).cloned().unwrap_or_default();
-                vec![OutgoingEvent::pane_dragged(
-                    grid_id.to_string(),
-                    "picked",
-                    pane_id,
-                    None,
-                    None,
-                    None,
-                )]
+                vec![
+                    OutgoingEvent::pane_dragged(
+                        grid_id.to_string(),
+                        "picked",
+                        pane_id,
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_window_id(window_id.to_string()),
+                ]
             } else {
                 vec![]
             }
@@ -234,14 +257,17 @@ fn process_pane_drag<R: PlushieRenderer>(
                     }
                 };
                 state.drop(*pane, *target);
-                vec![OutgoingEvent::pane_dragged(
-                    grid_id.to_string(),
-                    "dropped",
-                    pane_id,
-                    target_pane,
-                    region,
-                    edge,
-                )]
+                vec![
+                    OutgoingEvent::pane_dragged(
+                        grid_id.to_string(),
+                        "dropped",
+                        pane_id,
+                        target_pane,
+                        region,
+                        edge,
+                    )
+                    .with_window_id(window_id.to_string()),
+                ]
             } else {
                 vec![]
             }
@@ -249,14 +275,17 @@ fn process_pane_drag<R: PlushieRenderer>(
         pane_grid::DragEvent::Canceled { pane } => {
             if let Some(state) = caches.pane_grid_state(grid_id) {
                 let pane_id = state.get(*pane).cloned().unwrap_or_default();
-                vec![OutgoingEvent::pane_dragged(
-                    grid_id.to_string(),
-                    "canceled",
-                    pane_id,
-                    None,
-                    None,
-                    None,
-                )]
+                vec![
+                    OutgoingEvent::pane_dragged(
+                        grid_id.to_string(),
+                        "canceled",
+                        pane_id,
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_window_id(window_id.to_string()),
+                ]
             } else {
                 vec![]
             }

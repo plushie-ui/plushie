@@ -179,28 +179,46 @@ pub fn emit_screenshot_response(
 /// Convert a widget [`Message`] to an [`OutgoingEvent`], if applicable.
 pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
     match msg {
-        Message::Click(id) => Some(OutgoingEvent::click(id.clone())),
-        Message::Input(id, value) => Some(OutgoingEvent::input(id.clone(), value.clone())),
-        Message::Submit(id, value) => Some(OutgoingEvent::submit(id.clone(), value.clone())),
-        Message::Toggle(id, value) => Some(OutgoingEvent::toggle(id.clone(), *value)),
-        Message::Select(id, value) => Some(OutgoingEvent::select(id.clone(), value.clone())),
-        Message::Paste(id, text) => Some(OutgoingEvent::paste(id.clone(), text.clone())),
-        Message::OptionHovered(id, value) => {
-            Some(OutgoingEvent::option_hovered(id.clone(), value.clone()))
+        Message::Click(window_id, id) => {
+            Some(OutgoingEvent::click(id.clone()).with_window_id(window_id.clone()))
         }
-        Message::SensorResize(id, w, h) => Some(OutgoingEvent::sensor_resize(id.clone(), *w, *h)),
-        Message::ScrollEvent(id, viewport) => Some(OutgoingEvent::scroll(
-            id.clone(),
-            viewport.absolute_x,
-            viewport.absolute_y,
-            viewport.relative_x,
-            viewport.relative_y,
-            viewport.viewport_width,
-            viewport.viewport_height,
-            viewport.content_width,
-            viewport.content_height,
-        )),
-        Message::MouseAreaEvent(id, kind) => match kind.as_str() {
+        Message::Input(window_id, id, value) => {
+            Some(OutgoingEvent::input(id.clone(), value.clone()).with_window_id(window_id.clone()))
+        }
+        Message::Submit(window_id, id, value) => {
+            Some(OutgoingEvent::submit(id.clone(), value.clone()).with_window_id(window_id.clone()))
+        }
+        Message::Toggle(window_id, id, value) => {
+            Some(OutgoingEvent::toggle(id.clone(), *value).with_window_id(window_id.clone()))
+        }
+        Message::Select(window_id, id, value) => {
+            Some(OutgoingEvent::select(id.clone(), value.clone()).with_window_id(window_id.clone()))
+        }
+        Message::Paste(window_id, id, text) => {
+            Some(OutgoingEvent::paste(id.clone(), text.clone()).with_window_id(window_id.clone()))
+        }
+        Message::OptionHovered(window_id, id, value) => Some(
+            OutgoingEvent::option_hovered(id.clone(), value.clone())
+                .with_window_id(window_id.clone()),
+        ),
+        Message::SensorResize(window_id, id, w, h) => {
+            Some(OutgoingEvent::sensor_resize(id.clone(), *w, *h).with_window_id(window_id.clone()))
+        }
+        Message::ScrollEvent(window_id, id, viewport) => Some(
+            OutgoingEvent::scroll(
+                id.clone(),
+                viewport.absolute_x,
+                viewport.absolute_y,
+                viewport.relative_x,
+                viewport.relative_y,
+                viewport.viewport_width,
+                viewport.viewport_height,
+                viewport.content_width,
+                viewport.content_height,
+            )
+            .with_window_id(window_id.clone()),
+        ),
+        Message::MouseAreaEvent(window_id, id, kind) => match kind.as_str() {
             "right_press" => Some(OutgoingEvent::mouse_right_press(id.clone())),
             "right_release" => Some(OutgoingEvent::mouse_right_release(id.clone())),
             "middle_press" => Some(OutgoingEvent::mouse_middle_press(id.clone())),
@@ -209,14 +227,17 @@ pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             "enter" => Some(OutgoingEvent::mouse_enter(id.clone())),
             "exit" => Some(OutgoingEvent::mouse_exit(id.clone())),
             _ => None,
-        },
-        Message::MouseAreaMove(id, x, y) => {
-            Some(OutgoingEvent::mouse_area_move(id.clone(), *x, *y))
         }
-        Message::MouseAreaScroll(id, dx, dy) => {
-            Some(OutgoingEvent::mouse_area_scroll(id.clone(), *dx, *dy))
-        }
+        .map(|event| event.with_window_id(window_id.clone())),
+        Message::MouseAreaMove(window_id, id, x, y) => Some(
+            OutgoingEvent::mouse_area_move(id.clone(), *x, *y).with_window_id(window_id.clone()),
+        ),
+        Message::MouseAreaScroll(window_id, id, dx, dy) => Some(
+            OutgoingEvent::mouse_area_scroll(id.clone(), *dx, *dy)
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasEvent {
+            window_id,
             id,
             kind,
             x,
@@ -237,146 +258,168 @@ pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             )),
             "move" => Some(OutgoingEvent::canvas_move(id.clone(), *x, *y)),
             _ => None,
-        },
+        }
+        .map(|event| event.with_window_id(window_id.clone())),
         Message::CanvasScroll {
+            window_id,
             id,
             x,
             y,
             delta_x,
             delta_y,
-        } => Some(OutgoingEvent::canvas_scroll(
-            id.clone(),
-            *x,
-            *y,
-            *delta_x,
-            *delta_y,
-        )),
+        } => Some(
+            OutgoingEvent::canvas_scroll(id.clone(), *x, *y, *delta_x, *delta_y)
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementEnter {
+            window_id,
             canvas_id,
             element_id,
             x,
             y,
-        } => Some(OutgoingEvent::canvas_element_enter(
-            canvas_id.clone(),
-            element_id.clone(),
-            *x,
-            *y,
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_enter(canvas_id.clone(), element_id.clone(), *x, *y)
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementLeave {
+            window_id,
             canvas_id,
             element_id,
-        } => Some(OutgoingEvent::canvas_element_leave(
-            canvas_id.clone(),
-            element_id.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_leave(canvas_id.clone(), element_id.clone())
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementKeyPress {
+            window_id,
             canvas_id,
             element_id,
             key,
             modifiers,
-        } => Some(OutgoingEvent::canvas_element_key_press(
-            canvas_id.clone(),
-            element_id.clone(),
-            key.clone(),
-            modifiers.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_key_press(
+                canvas_id.clone(),
+                element_id.clone(),
+                key.clone(),
+                modifiers.clone(),
+            )
+            .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementKeyRelease {
+            window_id,
             canvas_id,
             element_id,
             key,
             modifiers,
-        } => Some(OutgoingEvent::canvas_element_key_release(
-            canvas_id.clone(),
-            element_id.clone(),
-            key.clone(),
-            modifiers.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_key_release(
+                canvas_id.clone(),
+                element_id.clone(),
+                key.clone(),
+                modifiers.clone(),
+            )
+            .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementClick {
+            window_id,
             canvas_id,
             element_id,
             x,
             y,
             button,
-        } => Some(OutgoingEvent::canvas_element_click(
-            canvas_id.clone(),
-            element_id.clone(),
-            *x,
-            *y,
-            button.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_click(
+                canvas_id.clone(),
+                element_id.clone(),
+                *x,
+                *y,
+                button.clone(),
+            )
+            .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementDrag {
+            window_id,
             canvas_id,
             element_id,
             x,
             y,
             delta_x,
             delta_y,
-        } => Some(OutgoingEvent::canvas_element_drag(
-            canvas_id.clone(),
-            element_id.clone(),
-            *x,
-            *y,
-            *delta_x,
-            *delta_y,
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_drag(
+                canvas_id.clone(),
+                element_id.clone(),
+                *x,
+                *y,
+                *delta_x,
+                *delta_y,
+            )
+            .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementDragEnd {
+            window_id,
             canvas_id,
             element_id,
             x,
             y,
-        } => Some(OutgoingEvent::canvas_element_drag_end(
-            canvas_id.clone(),
-            element_id.clone(),
-            *x,
-            *y,
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_drag_end(canvas_id.clone(), element_id.clone(), *x, *y)
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementFocused {
+            window_id,
             canvas_id,
             element_id,
-        } => Some(OutgoingEvent::canvas_element_focused(
-            canvas_id.clone(),
-            element_id.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_element_focused(canvas_id.clone(), element_id.clone())
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasElementBlurred {
+            window_id,
             canvas_id,
             element_id,
-        } => Some(OutgoingEvent::canvas_element_blurred(
-            canvas_id.clone(),
-            element_id.clone(),
-        )),
-        Message::CanvasFocused { canvas_id } => {
-            Some(OutgoingEvent::canvas_focused(canvas_id.clone()))
+        } => Some(
+            OutgoingEvent::canvas_element_blurred(canvas_id.clone(), element_id.clone())
+                .with_window_id(window_id.clone()),
+        ),
+        Message::CanvasFocused {
+            window_id,
+            canvas_id,
+        } => {
+            Some(OutgoingEvent::canvas_focused(canvas_id.clone()).with_window_id(window_id.clone()))
         }
-        Message::CanvasBlurred { canvas_id } => {
-            Some(OutgoingEvent::canvas_blurred(canvas_id.clone()))
+        Message::CanvasBlurred {
+            window_id,
+            canvas_id,
+        } => {
+            Some(OutgoingEvent::canvas_blurred(canvas_id.clone()).with_window_id(window_id.clone()))
         }
         Message::CanvasGroupFocused {
+            window_id,
             canvas_id,
             group_id,
-        } => Some(OutgoingEvent::canvas_group_focused(
-            canvas_id.clone(),
-            group_id.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_group_focused(canvas_id.clone(), group_id.clone())
+                .with_window_id(window_id.clone()),
+        ),
         Message::CanvasGroupBlurred {
+            window_id,
             canvas_id,
             group_id,
-        } => Some(OutgoingEvent::canvas_group_blurred(
-            canvas_id.clone(),
-            group_id.clone(),
-        )),
+        } => Some(
+            OutgoingEvent::canvas_group_blurred(canvas_id.clone(), group_id.clone())
+                .with_window_id(window_id.clone()),
+        ),
         Message::Diagnostic {
+            window_id,
             canvas_id,
             element_id,
             level,
             code,
             message,
-        } => Some(OutgoingEvent::diagnostic(
-            canvas_id.clone(),
-            element_id.clone(),
-            level,
-            code,
-            message,
-        )),
+        } => Some(
+            OutgoingEvent::diagnostic(canvas_id.clone(), element_id.clone(), level, code, message)
+                .with_window_id(window_id.clone()),
+        ),
         _ => None,
     }
 }
@@ -387,50 +430,52 @@ mod tests {
 
     #[test]
     fn message_to_event_click() {
-        let msg = Message::Click("btn1".into());
+        let msg = Message::Click("main".into(), "btn1".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "click");
         assert_eq!(event.id, "btn1");
+        assert_eq!(event.window_id.as_deref(), Some("main"));
     }
 
     #[test]
     fn message_to_event_input() {
-        let msg = Message::Input("field1".into(), "hello".into());
+        let msg = Message::Input("main".into(), "field1".into(), "hello".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "input");
         assert_eq!(event.id, "field1");
+        assert_eq!(event.window_id.as_deref(), Some("main"));
     }
 
     #[test]
     fn message_to_event_submit() {
-        let msg = Message::Submit("form1".into(), "data".into());
+        let msg = Message::Submit("main".into(), "form1".into(), "data".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "submit");
     }
 
     #[test]
     fn message_to_event_toggle() {
-        let msg = Message::Toggle("cb1".into(), true);
+        let msg = Message::Toggle("main".into(), "cb1".into(), true);
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "toggle");
     }
 
     #[test]
     fn message_to_event_select() {
-        let msg = Message::Select("pick1".into(), "option_a".into());
+        let msg = Message::Select("main".into(), "pick1".into(), "option_a".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "select");
     }
 
     #[test]
     fn message_to_event_slide_returns_none() {
-        let msg = Message::Slide("sl1".into(), 0.5);
+        let msg = Message::Slide("main".into(), "sl1".into(), 0.5);
         assert!(message_to_event(&msg).is_none());
     }
 
     #[test]
     fn message_to_event_slide_release_returns_none() {
-        let msg = Message::SlideRelease("sl1".into());
+        let msg = Message::SlideRelease("main".into(), "sl1".into());
         assert!(message_to_event(&msg).is_none());
     }
 
@@ -451,33 +496,33 @@ mod tests {
             "enter",
             "exit",
         ] {
-            let msg = Message::MouseAreaEvent("ma1".into(), kind.to_string());
+            let msg = Message::MouseAreaEvent("main".into(), "ma1".into(), kind.to_string());
             assert!(
                 message_to_event(&msg).is_some(),
                 "mouse area event `{kind}` should map"
             );
         }
-        let msg = Message::MouseAreaEvent("ma1".into(), "unknown".into());
+        let msg = Message::MouseAreaEvent("main".into(), "ma1".into(), "unknown".into());
         assert!(message_to_event(&msg).is_none());
     }
 
     #[test]
     fn message_to_event_sensor_resize() {
-        let msg = Message::SensorResize("s1".into(), 100.0, 200.0);
+        let msg = Message::SensorResize("main".into(), "s1".into(), 100.0, 200.0);
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "sensor_resize");
     }
 
     #[test]
     fn message_to_event_paste() {
-        let msg = Message::Paste("f1".into(), "pasted text".into());
+        let msg = Message::Paste("main".into(), "f1".into(), "pasted text".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "paste");
     }
 
     #[test]
     fn message_to_event_option_hovered() {
-        let msg = Message::OptionHovered("pick1".into(), "opt_a".into());
+        let msg = Message::OptionHovered("main".into(), "pick1".into(), "opt_a".into());
         let event = message_to_event(&msg).unwrap();
         assert_eq!(event.family, "option_hovered");
     }
@@ -486,6 +531,7 @@ mod tests {
     fn message_to_event_canvas_events() {
         for kind in &["press", "release", "move"] {
             let msg = Message::CanvasEvent {
+                window_id: "main".into(),
                 id: "c1".into(),
                 kind: kind.to_string(),
                 x: 10.0,
@@ -498,6 +544,7 @@ mod tests {
             );
         }
         let msg = Message::CanvasEvent {
+            window_id: "main".into(),
             id: "c1".into(),
             kind: "unknown".into(),
             x: 0.0,
@@ -510,6 +557,7 @@ mod tests {
     #[test]
     fn message_to_event_canvas_scroll() {
         let msg = Message::CanvasScroll {
+            window_id: "main".into(),
             id: "c1".into(),
             x: 10.0,
             y: 20.0,
@@ -523,6 +571,7 @@ mod tests {
     #[test]
     fn message_to_event_extension_event_returns_none() {
         let msg = Message::Event {
+            window_id: "main".into(),
             id: "node1".into(),
             data: serde_json::json!({"key": "value"}),
             family: "custom_family".into(),

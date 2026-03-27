@@ -63,6 +63,9 @@ pub struct OutgoingEvent {
     pub family: String,
     /// Source widget node ID (widget events) or empty (subscription events).
     pub id: String,
+    /// Source window ID for widget-level events, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
     /// Primary value payload (e.g. input text, slider value, selected option).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
@@ -123,6 +126,20 @@ impl OutgoingEvent {
         self.value = Some(value);
         self
     }
+
+    /// Set the source window for this event.
+    ///
+    /// Widget-like events must always carry a real window id on the wire.
+    /// Empty ids are a renderer bug and should be fixed at the call site.
+    pub fn with_window_id(mut self, window_id: impl Into<String>) -> Self {
+        let window_id = window_id.into();
+        assert!(
+            !window_id.is_empty(),
+            "widget-like events must include a non-empty window_id"
+        );
+        self.window_id = Some(window_id);
+        self
+    }
 }
 
 /// Serializable representation of keyboard modifiers.
@@ -155,6 +172,7 @@ impl OutgoingEvent {
             session: String::new(),
             family: family.into(),
             id: id.into(),
+            window_id: None,
             value: None,
             tag: None,
             modifiers: None,
@@ -171,6 +189,7 @@ impl OutgoingEvent {
             session: String::new(),
             family: family.into(),
             id: String::new(),
+            window_id: None,
             value: None,
             tag: Some(tag),
             modifiers: None,
@@ -1933,6 +1952,12 @@ mod tests {
         assert!(!serialized.contains("\"tag\""));
         assert!(!serialized.contains("\"modifiers\""));
         assert!(!serialized.contains("\"captured\""));
+    }
+
+    #[test]
+    #[should_panic(expected = "widget-like events must include a non-empty window_id")]
+    fn outgoing_event_empty_window_id_panics() {
+        let _ = OutgoingEvent::click("b".to_string()).with_window_id(String::new());
     }
 
     #[test]

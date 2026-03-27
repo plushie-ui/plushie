@@ -402,7 +402,12 @@ impl WidgetExtension for DocRating {
             let star_text = text(label).size(size).color(star_color);
 
             let star_button = button(star_text)
-                .on_press(Message::widget_event(&id, "select", json!({"value": i})))
+                .on_press(Message::widget_event(
+                    "",
+                    &id,
+                    "select",
+                    json!({"value": i}),
+                ))
                 .padding(0)
                 .style(button::text);
 

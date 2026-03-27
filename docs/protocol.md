@@ -998,7 +998,8 @@ User interaction or subscription event.
   "type": "event",
   "session": "s1",
   "family": "click",
-  "id": "btn-1"
+  "id": "btn-1",
+  "window_id": "main"
 }
 ```
 
@@ -1010,11 +1011,16 @@ User interaction or subscription event.
 | `id` | string | Node ID that produced the event |
 | `value` | any | Event value (optional) |
 | `tag` | string | Subscription tag (optional, for subscription events) |
+| `window_id` | string | Window that produced the event (required on widget-like events) |
 | `modifiers` | object | Keyboard modifiers (optional) |
 | `data` | object | Additional event data (optional) |
 | `captured` | bool | Whether a widget consumed this event (optional, subscription events only) |
 
 Fields that are null or absent are omitted from the serialized output.
+
+`window_id` is required on widget-like events. Applications declare
+windows explicitly, and widget-like events always identify which window
+produced them. Subscription events omit this field.
 
 **Event capture status.** All keyboard, mouse, touch, and IME subscription
 events include an optional `captured` boolean. When `true`, an iced widget
@@ -1024,7 +1030,8 @@ When `false` or absent, no widget handled the event. Widget-level events
 
 #### Widget events
 
-Produced by widget interactions. The `id` field is the node ID.
+Produced by widget interactions. The `id` field is the node ID and
+`window_id` identifies the window that produced the event.
 
 | Family | Fields | Description |
 |--------|--------|-------------|
