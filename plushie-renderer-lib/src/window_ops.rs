@@ -66,10 +66,12 @@ impl App {
 
                 let win_settings = parse_window_settings(settings);
                 let initial_decorations = win_settings.decorations;
+                let scale_factor = parse_scale_factor(settings);
                 let (iced_id, open_task) = window::open(win_settings);
 
                 self.windows.insert(window_id.to_string(), iced_id);
                 self.windows.set_decorated(window_id, initial_decorations);
+                self.windows.set_scale_factor(window_id, scale_factor);
 
                 let wid = window_id.to_string();
                 open_task.map(move |id| Message::WindowOpened(id, wid.clone()))
@@ -152,6 +154,10 @@ impl App {
                                 self.windows.set_decorated(window_id, desired);
                                 tasks.push(window::toggle_decorations(iced_id));
                             }
+                        }
+                        if obj.contains_key("scale_factor") {
+                            let sf = parse_scale_factor(&serde_json::Value::Object(obj.clone()));
+                            self.windows.set_scale_factor(window_id, sf);
                         }
                     }
 
@@ -757,11 +763,17 @@ impl App {
         // Open windows that exist in the tree but are not yet open.
         for win_id in &tree_windows {
             if !open_windows.contains(win_id) {
+                let scale_factor = self
+                    .core
+                    .tree
+                    .find_window(win_id)
+                    .and_then(|n| parse_scale_factor(&n.props));
                 let settings = self.window_settings_for(win_id);
                 let initial_decorations = settings.decorations;
                 let (iced_id, open_task) = window::open(settings);
                 self.windows.insert(win_id.clone(), iced_id);
                 self.windows.set_decorated(win_id, initial_decorations);
+                self.windows.set_scale_factor(win_id, scale_factor);
 
                 let wid = win_id.clone();
                 tasks.push(open_task.map(move |id| Message::WindowOpened(id, wid.clone())));
@@ -889,6 +901,15 @@ pub fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
         exit_on_close_request,
         ..window::Settings::default()
     }
+}
+
+/// Extract an optional per-window scale_factor from a JSON value.
+/// Returns `None` when absent (meaning "use global default"), or
+/// `Some(validated)` when present.
+fn parse_scale_factor(v: &serde_json::Value) -> Option<f32> {
+    v.get("scale_factor")
+        .and_then(|v| v.as_f64())
+        .map(|v| crate::app::validate_scale_factor(v as f32))
 }
 
 fn parse_optional_size(v: &serde_json::Value) -> Option<Size> {

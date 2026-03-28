@@ -114,9 +114,15 @@ impl App {
     }
 
     pub fn scale_factor_for_window(&self, iced_id: window::Id) -> f32 {
-        let sf = self
-            .windows
-            .get_window_id(&iced_id)
+        let window_id = self.windows.get_window_id(&iced_id);
+
+        // Per-window override from WindowState (set via window open/update ops).
+        if let Some(sf) = window_id.and_then(|jid| self.windows.scale_factor(jid)) {
+            return validate_scale_factor(sf);
+        }
+
+        // Fall back to the tree node's scale_factor prop.
+        let sf = window_id
             .and_then(|jid| self.core.tree.find_window(jid))
             .and_then(|node| node.props.get("scale_factor"))
             .and_then(|v| v.as_f64())

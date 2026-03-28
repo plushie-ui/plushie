@@ -16,6 +16,8 @@ struct WindowState {
     /// Resolved theme for this window, if set via the tree's theme prop.
     /// None means "use app theme" (system or global).
     theme: Option<Theme>,
+    /// Per-window scale factor override. None means "use global default".
+    scale_factor: Option<f32>,
 }
 
 impl Default for WindowState {
@@ -23,6 +25,7 @@ impl Default for WindowState {
         Self {
             decorated: true,
             theme: None,
+            scale_factor: None,
         }
     }
 }
@@ -150,6 +153,20 @@ impl WindowMap {
     pub fn clear_theme_cache(&mut self) {
         for (_, state) in self.forward.values_mut() {
             state.theme = None;
+        }
+    }
+
+    // -- Per-window scale factor --
+
+    pub fn scale_factor(&self, window_id: &str) -> Option<f32> {
+        self.forward
+            .get(window_id)
+            .and_then(|(_, s)| s.scale_factor)
+    }
+
+    pub fn set_scale_factor(&mut self, window_id: &str, scale_factor: Option<f32>) {
+        if let Some((_, state)) = self.forward.get_mut(window_id) {
+            state.scale_factor = scale_factor;
         }
     }
 }
