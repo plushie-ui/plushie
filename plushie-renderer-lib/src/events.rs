@@ -60,14 +60,16 @@ impl App {
 
     pub fn handle_key_pressed(&self, data: KeyEventData, iced_id: window::Id) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_KEY_PRESS, data.captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_KEY_PRESS, wid, data.captured, |tag| {
             maybe_with_window_id(OutgoingEvent::key_press(tag, &data), &window_id)
         })
     }
 
     pub fn handle_key_released(&self, data: KeyEventData, iced_id: window::Id) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_KEY_RELEASE, data.captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_KEY_RELEASE, wid, data.captured, |tag| {
             maybe_with_window_id(OutgoingEvent::key_release(tag, &data), &window_id)
         })
     }
@@ -79,7 +81,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.coalesce_subscription(SUB_MODIFIERS_CHANGED, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.coalesce_subscription_for_window(SUB_MODIFIERS_CHANGED, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods)),
                 &window_id,
@@ -94,21 +97,24 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.coalesce_subscription(SUB_MOUSE_MOVE, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.coalesce_subscription_for_window(SUB_MOUSE_MOVE, wid, captured, |tag| {
             maybe_with_window_id(OutgoingEvent::cursor_moved(tag, pos.x, pos.y), &window_id)
         })
     }
 
     pub fn handle_cursor_entered(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_MOUSE_MOVE, wid, captured, |tag| {
             maybe_with_window_id(OutgoingEvent::cursor_entered(tag), &window_id)
         })
     }
 
     pub fn handle_cursor_left(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_MOUSE_MOVE, wid, captured, |tag| {
             maybe_with_window_id(OutgoingEvent::cursor_left(tag), &window_id)
         })
     }
@@ -120,7 +126,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_MOUSE_BUTTON, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::button_pressed(tag, serialize_mouse_button(&button)),
                 &window_id,
@@ -135,7 +142,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_MOUSE_BUTTON, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::button_released(tag, serialize_mouse_button(&button)),
                 &window_id,
@@ -150,7 +158,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.coalesce_subscription(SUB_MOUSE_SCROLL, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.coalesce_subscription_for_window(SUB_MOUSE_SCROLL, wid, captured, |tag| {
             let (dx, dy, unit) = serialize_scroll_delta(&delta);
             maybe_with_window_id(OutgoingEvent::wheel_scrolled(tag, dx, dy, unit), &window_id)
         })
@@ -164,7 +173,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_TOUCH, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_TOUCH, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::finger_pressed(tag, finger.0, pos.x, pos.y),
                 &window_id,
@@ -180,7 +190,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.coalesce_subscription(SUB_TOUCH, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.coalesce_subscription_for_window(SUB_TOUCH, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y),
                 &window_id,
@@ -196,7 +207,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_TOUCH, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_TOUCH, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::finger_lifted(tag, finger.0, pos.x, pos.y),
                 &window_id,
@@ -212,7 +224,8 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_TOUCH, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_TOUCH, wid, captured, |tag| {
             maybe_with_window_id(
                 OutgoingEvent::finger_lost(tag, finger.0, pos.x, pos.y),
                 &window_id,
@@ -228,7 +241,8 @@ impl App {
     // cursor range may be None on some older X11 IME implementations.
     pub fn handle_ime_opened(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_IME, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_IME, wid, captured, |tag| {
             maybe_with_window_id(OutgoingEvent::ime_opened(tag), &window_id)
         })
     }
@@ -241,8 +255,9 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_IME, captured, |tag| {
-            maybe_with_window_id(OutgoingEvent::ime_preedit(tag, text, cursor), &window_id)
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_IME, wid, captured, |tag| {
+            maybe_with_window_id(OutgoingEvent::ime_preedit(tag, text.clone(), cursor.clone()), &window_id)
         })
     }
 
@@ -253,33 +268,39 @@ impl App {
         captured: bool,
     ) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_IME, captured, |tag| {
-            maybe_with_window_id(OutgoingEvent::ime_commit(tag, text), &window_id)
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_IME, wid, captured, |tag| {
+            maybe_with_window_id(OutgoingEvent::ime_commit(tag, text.clone()), &window_id)
         })
     }
 
     pub fn handle_ime_closed(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
         let window_id = self.resolve_window_id(&iced_id);
-        self.emit_subscription(SUB_IME, captured, |tag| {
+        let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+        self.emit_subscription_for_window(SUB_IME, wid, captured, |tag| {
             maybe_with_window_id(OutgoingEvent::ime_closed(tag), &window_id)
         })
     }
 
-    /// Emit a window event to both the catch-all window subscription and
-    /// the event-specific subscription (if registered).
+    /// Emit a window event to all matching entries across the catch-all
+    /// window subscription and the event-specific subscription (if registered),
+    /// filtered by window_id scope.
     fn emit_window_event(
         &self,
         specific_key: Option<&str>,
         event_fn: impl Fn(String, String) -> OutgoingEvent,
         window_id: String,
     ) -> io::Result<()> {
-        if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
-            emit_event(event_fn(tag.clone(), window_id.clone()))?;
+        let wid = Some(window_id.as_str());
+        // Emit for catch-all SUB_WINDOW_EVENT entries
+        for entry in self.core.matching_entries(SUB_WINDOW_EVENT, wid) {
+            emit_event(event_fn(entry.tag.clone(), window_id.clone()))?;
         }
-        if let Some(key) = specific_key
-            && let Some(tag) = self.core.active_subscriptions.get(key)
-        {
-            emit_event(event_fn(tag.clone(), window_id))?;
+        // Emit for specific key entries (e.g. SUB_WINDOW_MOVE)
+        if let Some(key) = specific_key {
+            for entry in self.core.matching_entries(key, wid) {
+                emit_event(event_fn(entry.tag.clone(), window_id.clone()))?;
+            }
         }
         Ok(())
     }
@@ -301,10 +322,11 @@ impl App {
                     size,
                     scale_factor,
                 } => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
-                        let pos = position.map(|p| (p.x, p.y));
+                    let wid = Some(window_id.as_str());
+                    let pos = position.map(|p| (p.x, p.y));
+                    for entry in self.core.matching_entries(SUB_WINDOW_EVENT, wid) {
                         emit_event(OutgoingEvent::window_opened(
-                            tag.clone(),
+                            entry.tag.clone(),
                             window_id.clone(),
                             pos,
                             size.width,
@@ -312,11 +334,10 @@ impl App {
                             scale_factor,
                         ))?;
                     }
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_OPEN) {
-                        let pos = position.map(|p| (p.x, p.y));
+                    for entry in self.core.matching_entries(SUB_WINDOW_OPEN, wid) {
                         emit_event(OutgoingEvent::window_opened(
-                            tag.clone(),
-                            window_id,
+                            entry.tag.clone(),
+                            window_id.clone(),
                             pos,
                             size.width,
                             size.height,
@@ -325,8 +346,12 @@ impl App {
                     }
                 }
                 window::Event::Closed => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
-                        emit_event(OutgoingEvent::window_closed(tag.clone(), window_id))?;
+                    let wid = Some(window_id.as_str());
+                    for entry in self.core.matching_entries(SUB_WINDOW_EVENT, wid) {
+                        emit_event(OutgoingEvent::window_closed(
+                            entry.tag.clone(),
+                            window_id.clone(),
+                        ))?;
                     }
                 }
                 window::Event::Moved(point) => {
@@ -344,10 +369,11 @@ impl App {
                     )?;
                 }
                 window::Event::Rescaled(factor) => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
+                    let wid = Some(window_id.as_str());
+                    for entry in self.core.matching_entries(SUB_WINDOW_EVENT, wid) {
                         emit_event(OutgoingEvent::window_rescaled(
-                            tag.clone(),
-                            window_id,
+                            entry.tag.clone(),
+                            window_id.clone(),
                             factor,
                         ))?;
                     }
@@ -367,28 +393,34 @@ impl App {
                     )?;
                 }
                 window::Event::FileHovered(path) => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
-                        let path_str = path_to_string(path);
+                    let wid = Some(window_id.as_str());
+                    let path_str = path_to_string(path);
+                    for entry in self.core.matching_entries(SUB_FILE_DROP, wid) {
                         emit_event(OutgoingEvent::file_hovered(
-                            tag.clone(),
-                            window_id,
-                            path_str,
+                            entry.tag.clone(),
+                            window_id.clone(),
+                            path_str.clone(),
                         ))?;
                     }
                 }
                 window::Event::FileDropped(path) => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
-                        let path_str = path_to_string(path);
+                    let wid = Some(window_id.as_str());
+                    let path_str = path_to_string(path);
+                    for entry in self.core.matching_entries(SUB_FILE_DROP, wid) {
                         emit_event(OutgoingEvent::file_dropped(
-                            tag.clone(),
-                            window_id,
-                            path_str,
+                            entry.tag.clone(),
+                            window_id.clone(),
+                            path_str.clone(),
                         ))?;
                     }
                 }
                 window::Event::FilesHoveredLeft => {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
-                        emit_event(OutgoingEvent::files_hovered_left(tag.clone(), window_id))?;
+                    let wid = Some(window_id.as_str());
+                    for entry in self.core.matching_entries(SUB_FILE_DROP, wid) {
+                        emit_event(OutgoingEvent::files_hovered_left(
+                            entry.tag.clone(),
+                            window_id.clone(),
+                        ))?;
                     }
                 }
                 window::Event::CloseRequested => {

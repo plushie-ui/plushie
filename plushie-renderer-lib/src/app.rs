@@ -125,22 +125,39 @@ impl App {
         validate_scale_factor(sf)
     }
 
+    /// Emit a subscription event to all matching entries (specific kind +
+    /// catch-all SUB_EVENT), filtered by window_id. The event_fn is called
+    /// once per matching entry with the entry's tag.
     pub fn emit_subscription(
         &self,
         key: &str,
         captured: bool,
-        event_fn: impl FnOnce(String) -> OutgoingEvent,
+        event_fn: impl Fn(String) -> OutgoingEvent,
     ) -> Task<Message> {
-        let tag = self
+        self.emit_subscription_for_window(key, None, captured, event_fn)
+    }
+
+    /// Emit a subscription event scoped to a specific window.
+    pub fn emit_subscription_for_window(
+        &self,
+        key: &str,
+        window_id: Option<&str>,
+        captured: bool,
+        event_fn: impl Fn(String) -> OutgoingEvent,
+    ) -> Task<Message> {
+        let entries = self
             .core
-            .active_subscriptions
-            .get(key)
-            .or_else(|| self.core.active_subscriptions.get(SUB_EVENT));
-        if let Some(tag) = tag {
-            emitters::emit_or_exit(event_fn(tag.clone()).with_captured(captured))
-        } else {
-            Task::none()
+            .matching_entries_with_catchall(key, SUB_EVENT, window_id);
+        if entries.is_empty() {
+            return Task::none();
         }
+        let tasks: Vec<_> = entries
+            .into_iter()
+            .map(|entry| {
+                emitters::emit_or_exit(event_fn(entry.tag.clone()).with_captured(captured))
+            })
+            .collect();
+        Task::batch(tasks)
     }
 
     pub fn lookup_widget_event_rate(&self, widget_id: &str) -> Option<u32> {
@@ -151,19 +168,38 @@ impl App {
             .map(|v| v as u32)
     }
 
+    /// Coalesce a subscription event, emitting to the first matching entry.
+    /// Coalescing operates per-kind, so we pick the first matching tag and
+    /// use that for the coalesced event. All matching entries receive the
+    /// event when the coalesced buffer is flushed.
     pub fn coalesce_subscription(
         &mut self,
         key: &str,
         captured: bool,
-        event_fn: impl FnOnce(String) -> OutgoingEvent,
+        event_fn: impl Fn(String) -> OutgoingEvent,
     ) -> Task<Message> {
-        let tag = if let Some(tag) = self.core.active_subscriptions.get(key) {
-            tag.clone()
-        } else if let Some(tag) = self.core.active_subscriptions.get(SUB_EVENT) {
-            tag.clone()
-        } else {
+        self.coalesce_subscription_for_window(key, None, captured, event_fn)
+    }
+
+    /// Coalesce a subscription event scoped to a specific window.
+    pub fn coalesce_subscription_for_window(
+        &mut self,
+        key: &str,
+        window_id: Option<&str>,
+        captured: bool,
+        event_fn: impl Fn(String) -> OutgoingEvent,
+    ) -> Task<Message> {
+        let entries = self
+            .core
+            .matching_entries_with_catchall(key, SUB_EVENT, window_id);
+        if entries.is_empty() {
             return Task::none();
-        };
+        }
+        // Coalesce using the first matching entry's tag. When flushed,
+        // the emitter emits a single coalesced event. For window-scoped
+        // subscriptions with multiple entries, the first match wins for
+        // coalescing purposes (rate limiting is per-kind, not per-entry).
+        let tag = entries[0].tag.clone();
         let event = event_fn(tag).with_captured(captured);
         self.emitter
             .coalesce(CoalesceKey::Subscription(key.to_string()), event)

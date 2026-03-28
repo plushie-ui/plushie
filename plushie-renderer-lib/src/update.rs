@@ -154,26 +154,35 @@ impl App {
                 // decides whether to close by sending a close_window command
                 // or removing the window from the tree. Closing immediately
                 // would bypass app-level confirmation dialogs.
-                if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_CLOSE) {
-                    let window_id = self.windows.window_id_for(&iced_id);
-                    emitters::emit_or_exit(OutgoingEvent::window_close_requested(
-                        tag.clone(),
-                        window_id,
-                    ))
+                let window_id = self.windows.window_id_for(&iced_id);
+                let wid = Some(window_id.as_str()).filter(|s| !s.is_empty());
+                let entries = self.core.matching_entries(SUB_WINDOW_CLOSE, wid);
+                if !entries.is_empty() {
+                    let tasks: Vec<_> = entries
+                        .into_iter()
+                        .map(|entry| {
+                            emitters::emit_or_exit(OutgoingEvent::window_close_requested(
+                                entry.tag.clone(),
+                                window_id.clone(),
+                            ))
+                        })
+                        .collect();
+                    Task::batch(tasks)
                 } else {
                     Task::none()
                 }
             }
             Message::WindowClosed(iced_id) => {
                 if let Some(window_id) = self.windows.remove_by_iced(&iced_id) {
-                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT)
-                        && let Err(e) = emit_event(OutgoingEvent::window_closed(
-                            tag.clone(),
+                    let wid = Some(window_id.as_str());
+                    for entry in self.core.matching_entries(SUB_WINDOW_EVENT, wid) {
+                        if let Err(e) = emit_event(OutgoingEvent::window_closed(
+                            entry.tag.clone(),
                             window_id.clone(),
-                        ))
-                    {
-                        log::error!("write error: {e}");
-                        return iced::exit();
+                        )) {
+                            log::error!("write error: {e}");
+                            return iced::exit();
+                        }
                     }
                     log::info!("window closed: {window_id}");
                 }
@@ -200,10 +209,12 @@ impl App {
 
             // -- System / animation --
             Message::AnimationFrame(instant) => {
-                if let Some(tag) = self.core.active_subscriptions.get(SUB_ANIMATION_FRAME) {
+                // Animation frames are global (not window-scoped), use first entry
+                let entries = self.core.matching_entries(SUB_ANIMATION_FRAME, None);
+                if let Some(entry) = entries.first() {
                     let epoch = *self.animation_epoch.get_or_insert(instant);
                     let millis = instant.duration_since(epoch).as_millis();
-                    let event = OutgoingEvent::animation_frame(tag.clone(), millis);
+                    let event = OutgoingEvent::animation_frame(entry.tag.clone(), millis);
                     self.emitter.coalesce(
                         CoalesceKey::Subscription(SUB_ANIMATION_FRAME.to_string()),
                         event,
@@ -219,13 +230,16 @@ impl App {
                     iced::theme::Mode::Dark => Theme::Dark,
                     _ => Theme::Dark,
                 };
-                if let Some(tag) = self.core.active_subscriptions.get(SUB_THEME_CHANGE) {
+                // Theme changes are global (not window-scoped), use first entry
+                let entries = self.core.matching_entries(SUB_THEME_CHANGE, None);
+                if let Some(entry) = entries.first() {
                     let mode_str = match mode {
                         iced::theme::Mode::Light => "light",
                         iced::theme::Mode::Dark => "dark",
                         _ => "system",
                     };
-                    let event = OutgoingEvent::theme_changed(tag.clone(), mode_str.to_string());
+                    let event =
+                        OutgoingEvent::theme_changed(entry.tag.clone(), mode_str.to_string());
                     self.emitter.coalesce(
                         CoalesceKey::Subscription(SUB_THEME_CHANGE.to_string()),
                         event,

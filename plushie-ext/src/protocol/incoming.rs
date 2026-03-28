@@ -29,6 +29,11 @@ pub enum IncomingMessage {
     Subscribe {
         kind: String,
         tag: String,
+        /// Optional window ID to scope this subscription to a specific window.
+        /// When set, only events from this window are delivered. When absent,
+        /// events from all windows are delivered.
+        #[serde(default)]
+        window_id: Option<String>,
         /// Maximum events per second for this subscription. Omit for
         /// unlimited (immediate delivery). Zero means "subscribe but
         /// never emit."
@@ -36,7 +41,13 @@ pub enum IncomingMessage {
         max_rate: Option<u32>,
     },
     /// Unsubscribe from a runtime event source.
-    Unsubscribe { kind: String },
+    Unsubscribe {
+        kind: String,
+        /// If present, only remove the subscription with this specific tag.
+        /// If absent, remove all subscriptions for the kind (backwards compat).
+        #[serde(default)]
+        tag: Option<String>,
+    },
     /// Perform a window operation (resize, move, close, etc.).
     WindowOp {
         op: String,
@@ -354,10 +365,12 @@ mod tests {
             IncomingMessage::Subscribe {
                 kind,
                 tag,
+                window_id,
                 max_rate,
             } => {
                 assert_eq!(kind, "on_key_press");
                 assert_eq!(tag, "keys");
+                assert_eq!(window_id, None);
                 assert_eq!(max_rate, None);
             }
             _ => panic!("expected Subscribe"),
@@ -372,11 +385,38 @@ mod tests {
             IncomingMessage::Subscribe {
                 kind,
                 tag,
+                window_id,
                 max_rate,
             } => {
                 assert_eq!(kind, "on_mouse_move");
                 assert_eq!(tag, "mouse");
+                assert_eq!(window_id, None);
                 assert_eq!(max_rate, Some(30));
+            }
+            _ => panic!("expected Subscribe"),
+        }
+    }
+
+    #[test]
+    fn deserialize_subscribe_with_window_id() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "subscribe",
+            "kind": "on_key_press",
+            "tag": "main_keys",
+            "window_id": "main"
+        }))
+        .unwrap();
+        match msg {
+            IncomingMessage::Subscribe {
+                kind,
+                tag,
+                window_id,
+                max_rate,
+            } => {
+                assert_eq!(kind, "on_key_press");
+                assert_eq!(tag, "main_keys");
+                assert_eq!(window_id, Some("main".to_string()));
+                assert_eq!(max_rate, None);
             }
             _ => panic!("expected Subscribe"),
         }
@@ -387,8 +427,26 @@ mod tests {
         let json = r#"{"type":"unsubscribe","kind":"on_key_press"}"#;
         let msg: IncomingMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IncomingMessage::Unsubscribe { kind } => {
+            IncomingMessage::Unsubscribe { kind, tag } => {
                 assert_eq!(kind, "on_key_press");
+                assert_eq!(tag, None);
+            }
+            _ => panic!("expected Unsubscribe"),
+        }
+    }
+
+    #[test]
+    fn deserialize_unsubscribe_with_tag() {
+        let msg: IncomingMessage = serde_json::from_value(json!({
+            "type": "unsubscribe",
+            "kind": "on_key_press",
+            "tag": "main_keys"
+        }))
+        .unwrap();
+        match msg {
+            IncomingMessage::Unsubscribe { kind, tag } => {
+                assert_eq!(kind, "on_key_press");
+                assert_eq!(tag, Some("main_keys".to_string()));
             }
             _ => panic!("expected Unsubscribe"),
         }

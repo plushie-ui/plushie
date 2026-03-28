@@ -550,14 +550,13 @@ fn handle_message<R: PlushieRenderer>(
                         };
                         // Emit theme_changed subscription event if active,
                         // matching windowed mode behavior.
-                        if let Some(tag) = s
-                            .core
-                            .active_subscriptions
-                            .get(plushie_renderer_lib::constants::SUB_THEME_CHANGE)
-                        {
+                        for entry in s.core.matching_entries(
+                            plushie_renderer_lib::constants::SUB_THEME_CHANGE,
+                            None,
+                        ) {
                             let _ = s.writer.emit(
                                 &plushie_ext::protocol::OutgoingEvent::theme_changed(
-                                    tag.clone(),
+                                    entry.tag.clone(),
                                     mode_str.to_string(),
                                 )
                                 .with_session(session_id),
@@ -862,14 +861,13 @@ fn handle_message<R: PlushieRenderer>(
             }
         }
         IncomingMessage::AdvanceFrame { timestamp } => {
-            if let Some(tag) = s
-                .core
-                .active_subscriptions
-                .get(plushie_renderer_lib::constants::SUB_ANIMATION_FRAME)
-            {
+            for entry in s.core.matching_entries(
+                plushie_renderer_lib::constants::SUB_ANIMATION_FRAME,
+                None,
+            ) {
                 s.writer.emit(
                     &plushie_ext::protocol::OutgoingEvent::animation_frame(
-                        tag.clone(),
+                        entry.tag.clone(),
                         timestamp as u128,
                     )
                     .with_session(session_id),

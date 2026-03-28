@@ -143,6 +143,16 @@ pub enum CoreEffect {
     ExtensionConfig(Value),
 }
 
+/// A single subscription entry within a kind. Multiple entries per kind
+/// allow window-scoped subscriptions alongside global ones.
+#[derive(Debug, Clone)]
+pub struct SubscriptionEntry {
+    pub tag: String,
+    /// When set, only events from this window match. None = all windows.
+    pub window_id: Option<String>,
+    pub max_rate: Option<u32>,
+}
+
 /// Pure state core, decoupled from the iced runtime.
 ///
 /// Owns the retained UI tree, widget caches, active subscriptions, and
@@ -158,10 +168,10 @@ pub struct Core<R: PlushieRenderer = iced::Renderer> {
     pub tree: Tree,
     /// Caches for stateful widgets (text_editor content, markdown items, etc.).
     pub caches: WidgetCaches<R>,
-    /// Active event subscriptions: kind -> tag.
-    pub active_subscriptions: HashMap<String, String>,
-    /// Per-subscription max_rate values from Subscribe messages.
-    pub subscription_rates: HashMap<String, Option<u32>>,
+    /// Active event subscriptions: kind -> list of entries.
+    /// Each kind can have multiple entries with different tags and
+    /// optional window scoping.
+    pub active_subscriptions: HashMap<String, Vec<SubscriptionEntry>>,
     /// Global default event rate from Settings (events per second).
     /// None = no limit (full speed).
     pub default_event_rate: Option<u32>,
@@ -198,7 +208,6 @@ impl<R: PlushieRenderer> Core<R> {
             tree: Tree::new(),
             caches: WidgetCaches::new(),
             active_subscriptions: HashMap::new(),
-            subscription_rates: HashMap::new(),
             default_event_rate: None,
             default_text_size: None,
             default_font: None,
@@ -207,6 +216,68 @@ impl<R: PlushieRenderer> Core<R> {
             settings_applied: false,
             effect_stubs: HashMap::new(),
         }
+    }
+
+    /// Check whether at least one entry is registered for the given kind.
+    pub fn has_subscription(&self, kind: &str) -> bool {
+        self.active_subscriptions
+            .get(kind)
+            .is_some_and(|entries| !entries.is_empty())
+    }
+
+    /// Return all entries matching a kind, filtered by window_id.
+    /// An entry matches if its window_id is None (global) or equals
+    /// the event's window_id.
+    pub fn matching_entries(&self, kind: &str, window_id: Option<&str>) -> Vec<&SubscriptionEntry> {
+        match self.active_subscriptions.get(kind) {
+            Some(entries) => entries
+                .iter()
+                .filter(|e| match (&e.window_id, window_id) {
+                    (None, _) => true,
+                    (Some(sub_wid), Some(evt_wid)) => sub_wid == evt_wid,
+                    (Some(_), None) => false,
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Return all entries matching a specific kind plus the catch-all
+    /// SUB_EVENT kind, filtered by window_id. Useful for event emission
+    /// where both specific and catch-all subscriptions should fire.
+    pub fn matching_entries_with_catchall(
+        &self,
+        kind: &str,
+        catchall_kind: &str,
+        window_id: Option<&str>,
+    ) -> Vec<&SubscriptionEntry> {
+        let mut entries = self.matching_entries(kind, window_id);
+        if kind != catchall_kind {
+            entries.extend(self.matching_entries(catchall_kind, window_id));
+        }
+        entries
+    }
+
+    /// Collect all max_rate values from subscription entries, keyed by kind.
+    /// Returns (kind, max_rate) pairs for entries that have a max_rate set.
+    /// Used by the emitter rate sync logic.
+    pub fn subscription_rates(&self) -> impl Iterator<Item = (&str, u32)> {
+        self.active_subscriptions.iter().flat_map(|(kind, entries)| {
+            entries
+                .iter()
+                .filter_map(|e| e.max_rate.map(|r| (kind.as_str(), r)))
+        })
+    }
+
+    /// Collect all kinds that have at least one entry with a max_rate.
+    pub fn subscription_rate_kinds(&self) -> impl Iterator<Item = &str> {
+        self.active_subscriptions.iter().filter_map(|(kind, entries)| {
+            if entries.iter().any(|e| e.max_rate.is_some()) {
+                Some(kind.as_str())
+            } else {
+                None
+            }
+        })
     }
 
     /// Compute a SHA-256 hash of the current tree (serialized as JSON).
@@ -334,33 +405,36 @@ impl<R: PlushieRenderer> Core<R> {
             IncomingMessage::Subscribe {
                 kind,
                 tag,
+                window_id,
                 max_rate,
             } => {
-                log::debug!("subscription register: {kind} -> {tag}");
-                if let Some(old_tag) = self.active_subscriptions.insert(kind.clone(), tag.clone())
-                    && old_tag != tag
-                {
-                    log::warn!(
-                        "subscription `{kind}` re-registered with tag `{tag}` \
-                         (was `{old_tag}`); previous handler replaced"
-                    );
-                }
-                match max_rate {
-                    Some(rate) => {
-                        log::debug!("subscription `{kind}` max_rate: {rate}");
-                        self.subscription_rates.insert(kind, Some(rate));
-                    }
-                    None => {
-                        // Re-subscribing without max_rate clears any
-                        // previously-set rate for this subscription.
-                        self.subscription_rates.remove(&kind);
-                    }
+                log::debug!("subscription register: {kind} -> {tag} (window: {window_id:?})");
+                let entries = self.active_subscriptions.entry(kind.clone()).or_default();
+                // Update existing entry with same tag, or add a new one.
+                if let Some(existing) = entries.iter_mut().find(|e| e.tag == tag) {
+                    existing.window_id = window_id;
+                    existing.max_rate = max_rate;
+                } else {
+                    entries.push(SubscriptionEntry {
+                        tag,
+                        window_id,
+                        max_rate,
+                    });
                 }
             }
-            IncomingMessage::Unsubscribe { kind } => {
-                log::debug!("subscription unregister: {kind}");
-                self.active_subscriptions.remove(&kind);
-                self.subscription_rates.remove(&kind);
+            IncomingMessage::Unsubscribe { kind, tag } => {
+                if let Some(tag) = tag {
+                    log::debug!("subscription unregister: {kind} tag={tag}");
+                    if let Some(entries) = self.active_subscriptions.get_mut(&kind) {
+                        entries.retain(|e| e.tag != tag);
+                        if entries.is_empty() {
+                            self.active_subscriptions.remove(&kind);
+                        }
+                    }
+                } else {
+                    log::debug!("subscription unregister: {kind} (all)");
+                    self.active_subscriptions.remove(&kind);
+                }
             }
             IncomingMessage::WindowOp {
                 op,
@@ -679,44 +753,110 @@ mod tests {
     }
 
     #[test]
-    fn subscribe_with_max_rate_stores_rate() {
+    fn subscribe_with_max_rate_stores_rate_in_entry() {
         let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "on_mouse_move".to_string(),
             tag: "mouse".to_string(),
+            window_id: None,
             max_rate: Some(30),
         };
         core.apply(msg);
-        assert_eq!(
-            core.subscription_rates.get("on_mouse_move"),
-            Some(&Some(30))
-        );
+        let entries = &core.active_subscriptions["on_mouse_move"];
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].max_rate, Some(30));
     }
 
     #[test]
-    fn subscribe_without_max_rate_does_not_store_rate() {
+    fn subscribe_without_max_rate_has_none_rate() {
         let mut core: Core = Core::new();
         let msg = IncomingMessage::Subscribe {
             kind: "on_key_press".to_string(),
             tag: "keys".to_string(),
+            window_id: None,
             max_rate: None,
         };
         core.apply(msg);
-        assert!(!core.subscription_rates.contains_key("on_key_press"));
+        let entries = &core.active_subscriptions["on_key_press"];
+        assert_eq!(entries[0].max_rate, None);
     }
 
     #[test]
-    fn unsubscribe_removes_subscription_rate() {
+    fn unsubscribe_removes_all_entries_for_kind() {
         let mut core: Core = Core::new();
         core.apply(IncomingMessage::Subscribe {
             kind: "on_mouse_move".to_string(),
             tag: "mouse".to_string(),
+            window_id: None,
             max_rate: Some(30),
         });
         core.apply(IncomingMessage::Unsubscribe {
             kind: "on_mouse_move".to_string(),
+            tag: None,
         });
-        assert!(!core.subscription_rates.contains_key("on_mouse_move"));
+        assert!(!core.active_subscriptions.contains_key("on_mouse_move"));
+    }
+
+    #[test]
+    fn unsubscribe_by_tag_removes_specific_entry() {
+        let mut core: Core = Core::new();
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "global".to_string(),
+            window_id: None,
+            max_rate: None,
+        });
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "main_keys".to_string(),
+            window_id: Some("main".to_string()),
+            max_rate: None,
+        });
+        assert_eq!(core.active_subscriptions["on_key_press"].len(), 2);
+        core.apply(IncomingMessage::Unsubscribe {
+            kind: "on_key_press".to_string(),
+            tag: Some("main_keys".to_string()),
+        });
+        let entries = &core.active_subscriptions["on_key_press"];
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tag, "global");
+    }
+
+    #[test]
+    fn subscribe_with_window_id_stores_scope() {
+        let mut core: Core = Core::new();
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "main_keys".to_string(),
+            window_id: Some("main".to_string()),
+            max_rate: None,
+        });
+        let entries = &core.active_subscriptions["on_key_press"];
+        assert_eq!(entries[0].window_id, Some("main".to_string()));
+    }
+
+    #[test]
+    fn matching_entries_filters_by_window_id() {
+        let mut core: Core = Core::new();
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "global".to_string(),
+            window_id: None,
+            max_rate: None,
+        });
+        core.apply(IncomingMessage::Subscribe {
+            kind: "on_key_press".to_string(),
+            tag: "main_keys".to_string(),
+            window_id: Some("main".to_string()),
+            max_rate: None,
+        });
+        // Event from "main" window matches both global and main-scoped
+        let main_entries = core.matching_entries("on_key_press", Some("main"));
+        assert_eq!(main_entries.len(), 2);
+        // Event from "popup" window matches only global
+        let popup_entries = core.matching_entries("on_key_press", Some("popup"));
+        assert_eq!(popup_entries.len(), 1);
+        assert_eq!(popup_entries[0].tag, "global");
     }
 
     #[test]
@@ -775,13 +915,13 @@ mod tests {
         let msg = IncomingMessage::Subscribe {
             kind: "time".to_string(),
             tag: "tick".to_string(),
+            window_id: None,
             max_rate: None,
         };
         core.apply(msg);
-        assert_eq!(
-            core.active_subscriptions.get("time").map(|s| s.as_str()),
-            Some("tick")
-        );
+        let entries = &core.active_subscriptions["time"];
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tag, "tick");
     }
 
     #[test]
@@ -790,6 +930,7 @@ mod tests {
         let msg = IncomingMessage::Subscribe {
             kind: "keyboard".to_string(),
             tag: "key".to_string(),
+            window_id: None,
             max_rate: None,
         };
         let effects = core.apply(msg);
@@ -800,9 +941,16 @@ mod tests {
     fn subscription_unregister_removes_from_active_subscriptions() {
         let mut core: Core = Core::new();
         core.active_subscriptions
-            .insert("time".to_string(), "tick".to_string());
+            .entry("time".to_string())
+            .or_default()
+            .push(SubscriptionEntry {
+                tag: "tick".to_string(),
+                window_id: None,
+                max_rate: None,
+            });
         let msg = IncomingMessage::Unsubscribe {
             kind: "time".to_string(),
+            tag: None,
         };
         core.apply(msg);
         assert!(!core.active_subscriptions.contains_key("time"));
@@ -813,6 +961,7 @@ mod tests {
         let mut core: Core = Core::new();
         let msg = IncomingMessage::Unsubscribe {
             kind: "time".to_string(),
+            tag: None,
         };
         let effects = core.apply(msg);
         assert!(effects.is_empty());

@@ -64,20 +64,24 @@ impl App {
 
         if is_subscribe || is_settings {
             self.emitter.set_default_rate(self.core.default_event_rate);
-            for (kind, rate_opt) in &self.core.subscription_rates {
-                if let Some(rate) = rate_opt {
-                    self.emitter.set_subscription_rate(kind, *rate);
-                }
+            for (kind, rate) in self.core.subscription_rates() {
+                self.emitter.set_subscription_rate(kind, rate);
             }
         }
         if is_subscribe || is_unsubscribe {
+            // Collect kinds that still have rates
+            let active_rate_kinds: std::collections::HashSet<String> = self
+                .core
+                .subscription_rate_kinds()
+                .map(|s| s.to_string())
+                .collect();
             let emitter_keys: Vec<String> = self
                 .emitter
                 .subscription_rate_keys()
                 .map(|s| s.to_string())
                 .collect();
             for key in emitter_keys {
-                if !self.core.subscription_rates.contains_key(&key) {
+                if !active_rate_kinds.contains(&key) {
                     self.emitter.remove_subscription_rate(&key);
                     self.emitter
                         .flush_key(&crate::emitter::CoalesceKey::Subscription(key));
