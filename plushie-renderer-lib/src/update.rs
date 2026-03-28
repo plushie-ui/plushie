@@ -94,47 +94,59 @@ impl App {
             }
 
             // -- Keyboard events --
-            Message::KeyPressed(data) => self.handle_key_pressed(data),
-            Message::KeyReleased(data) => self.handle_key_released(data),
-            Message::ModifiersChanged(mods, captured) => {
-                self.handle_modifiers_changed(mods, captured)
+            Message::KeyPressed(data, iced_id) => self.handle_key_pressed(data, iced_id),
+            Message::KeyReleased(data, iced_id) => self.handle_key_released(data, iced_id),
+            Message::ModifiersChanged(mods, iced_id, captured) => {
+                self.handle_modifiers_changed(mods, iced_id, captured)
             }
 
             // -- Mouse events --
-            Message::CursorMoved(pos, _win, captured) => self.handle_cursor_moved(pos, captured),
-            Message::CursorEntered(_win, captured) => self.handle_cursor_entered(captured),
-            Message::CursorLeft(_win, captured) => self.handle_cursor_left(captured),
-            Message::MouseButtonPressed(button, _win, captured) => {
-                self.handle_mouse_button_pressed(button, captured)
+            Message::CursorMoved(pos, iced_id, captured) => {
+                self.handle_cursor_moved(pos, iced_id, captured)
             }
-            Message::MouseButtonReleased(button, _win, captured) => {
-                self.handle_mouse_button_released(button, captured)
+            Message::CursorEntered(iced_id, captured) => {
+                self.handle_cursor_entered(iced_id, captured)
             }
-            Message::WheelScrolled(delta, _win, captured) => {
-                self.handle_wheel_scrolled(delta, captured)
+            Message::CursorLeft(iced_id, captured) => {
+                self.handle_cursor_left(iced_id, captured)
+            }
+            Message::MouseButtonPressed(button, iced_id, captured) => {
+                self.handle_mouse_button_pressed(button, iced_id, captured)
+            }
+            Message::MouseButtonReleased(button, iced_id, captured) => {
+                self.handle_mouse_button_released(button, iced_id, captured)
+            }
+            Message::WheelScrolled(delta, iced_id, captured) => {
+                self.handle_wheel_scrolled(delta, iced_id, captured)
             }
 
             // -- Touch events --
-            Message::FingerPressed(finger, pos, _win, captured) => {
-                self.handle_finger_pressed(finger, pos, captured)
+            Message::FingerPressed(finger, pos, iced_id, captured) => {
+                self.handle_finger_pressed(finger, pos, iced_id, captured)
             }
-            Message::FingerMoved(finger, pos, _win, captured) => {
-                self.handle_finger_moved(finger, pos, captured)
+            Message::FingerMoved(finger, pos, iced_id, captured) => {
+                self.handle_finger_moved(finger, pos, iced_id, captured)
             }
-            Message::FingerLifted(finger, pos, _win, captured) => {
-                self.handle_finger_lifted(finger, pos, captured)
+            Message::FingerLifted(finger, pos, iced_id, captured) => {
+                self.handle_finger_lifted(finger, pos, iced_id, captured)
             }
-            Message::FingerLost(finger, pos, _win, captured) => {
-                self.handle_finger_lost(finger, pos, captured)
+            Message::FingerLost(finger, pos, iced_id, captured) => {
+                self.handle_finger_lost(finger, pos, iced_id, captured)
             }
 
             // -- IME events --
-            Message::ImeOpened(captured) => self.handle_ime_opened(captured),
-            Message::ImePreedit(text, cursor, captured) => {
-                self.handle_ime_preedit(text, cursor, captured)
+            Message::ImeOpened(iced_id, captured) => {
+                self.handle_ime_opened(iced_id, captured)
             }
-            Message::ImeCommit(text, captured) => self.handle_ime_commit(text, captured),
-            Message::ImeClosed(captured) => self.handle_ime_closed(captured),
+            Message::ImePreedit(text, cursor, iced_id, captured) => {
+                self.handle_ime_preedit(text, cursor, iced_id, captured)
+            }
+            Message::ImeCommit(text, iced_id, captured) => {
+                self.handle_ime_commit(text, iced_id, captured)
+            }
+            Message::ImeClosed(iced_id, captured) => {
+                self.handle_ime_closed(iced_id, captured)
+            }
 
             // -- Window lifecycle events --
             Message::WindowCloseRequested(iced_id) => {

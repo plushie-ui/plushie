@@ -84,21 +84,21 @@ pub enum Message {
     Stdin(StdinEvent),
     /// No-op: used as return value for fire-and-forget tasks (font loads, etc.)
     NoOp,
-    /// A keyboard key was pressed (full event data).
-    KeyPressed(KeyEventData),
-    /// A keyboard key was released (full event data).
-    KeyReleased(KeyEventData),
-    /// Keyboard modifiers changed (modifiers, captured).
-    ModifiersChanged(iced::keyboard::Modifiers, bool),
+    /// A keyboard key was pressed (full event data, window, captured).
+    KeyPressed(KeyEventData, window::Id),
+    /// A keyboard key was released (full event data, window, captured).
+    KeyReleased(KeyEventData, window::Id),
+    /// Keyboard modifiers changed (modifiers, window, captured).
+    ModifiersChanged(iced::keyboard::Modifiers, window::Id, bool),
     // -- IME events --
-    /// IME session opened (captured).
-    ImeOpened(bool),
-    /// IME preedit text updated (composing text, optional cursor range, captured).
-    ImePreedit(String, Option<std::ops::Range<usize>>, bool),
-    /// IME committed final text (text, captured).
-    ImeCommit(String, bool),
-    /// IME session closed (captured).
-    ImeClosed(bool),
+    /// IME session opened (window, captured).
+    ImeOpened(window::Id, bool),
+    /// IME preedit text updated (composing text, optional cursor range, window, captured).
+    ImePreedit(String, Option<std::ops::Range<usize>>, window::Id, bool),
+    /// IME committed final text (text, window, captured).
+    ImeCommit(String, window::Id, bool),
+    /// IME session closed (window, captured).
+    ImeClosed(window::Id, bool),
     /// A window close was requested by the user (WM close button).
     WindowCloseRequested(window::Id),
     /// A window was actually closed by iced.

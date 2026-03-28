@@ -58,7 +58,7 @@ impl App {
                         text: text.map(|s| s.to_string()),
                         repeat,
                         captured,
-                    })),
+                    }, window)),
                     iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
                         key,
                         modified_key,
@@ -74,9 +74,9 @@ impl App {
                         text: None,
                         repeat: false,
                         captured,
-                    })),
+                    }, window)),
                     iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) => {
-                        Some(Message::ModifiersChanged(mods, captured))
+                        Some(Message::ModifiersChanged(mods, window, captured))
                     }
                     // Mouse
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
@@ -112,17 +112,17 @@ impl App {
                     }
                     // IME
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
-                        Some(Message::ImeOpened(captured))
+                        Some(Message::ImeOpened(window, captured))
                     }
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
                         text,
                         cursor,
-                    )) => Some(Message::ImePreedit(text, cursor, captured)),
+                    )) => Some(Message::ImePreedit(text, cursor, window, captured)),
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
-                        Some(Message::ImeCommit(text, captured))
+                        Some(Message::ImeCommit(text, window, captured))
                     }
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
-                        Some(Message::ImeClosed(captured))
+                        Some(Message::ImeClosed(window, captured))
                     }
                     // Window events handled by on_window_event
                     _ => None,
@@ -138,7 +138,7 @@ impl App {
         // mouse, touch, and IME events. Skip specific subscriptions to avoid
         // duplicate event delivery.
         if !has_on_event && self.core.active_subscriptions.contains_key(SUB_KEY_PRESS) {
-            subs.push(event::listen_with(|evt, status, _window| {
+            subs.push(event::listen_with(|evt, status, window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key,
                     modified_key,
@@ -158,7 +158,7 @@ impl App {
                         text: text.map(|s| s.to_string()),
                         repeat,
                         captured: status == iced::event::Status::Captured,
-                    }))
+                    }, window))
                 } else {
                     None
                 }
@@ -166,7 +166,7 @@ impl App {
         }
 
         if !has_on_event && self.core.active_subscriptions.contains_key(SUB_KEY_RELEASE) {
-            subs.push(event::listen_with(|evt, status, _window| {
+            subs.push(event::listen_with(|evt, status, window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
                     key,
                     modified_key,
@@ -184,7 +184,7 @@ impl App {
                         text: None,
                         repeat: false,
                         captured: status == iced::event::Status::Captured,
-                    }))
+                    }, window))
                 } else {
                     None
                 }
@@ -197,10 +197,11 @@ impl App {
                 .active_subscriptions
                 .contains_key(SUB_MODIFIERS_CHANGED)
         {
-            subs.push(event::listen_with(|evt, status, _window| {
+            subs.push(event::listen_with(|evt, status, window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) = evt {
                     Some(Message::ModifiersChanged(
                         mods,
+                        window,
                         status == iced::event::Status::Captured,
                     ))
                 } else {
@@ -294,21 +295,21 @@ impl App {
 
     fn ime_subscriptions(&self, has_on_event: bool, subs: &mut Vec<Subscription<Message>>) {
         if !has_on_event && self.core.active_subscriptions.contains_key(SUB_IME) {
-            subs.push(event::listen_with(|evt, status, _window| {
+            subs.push(event::listen_with(|evt, status, window| {
                 let captured = status == iced::event::Status::Captured;
                 match evt {
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
-                        Some(Message::ImeOpened(captured))
+                        Some(Message::ImeOpened(window, captured))
                     }
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Preedit(
                         text,
                         cursor,
-                    )) => Some(Message::ImePreedit(text, cursor, captured)),
+                    )) => Some(Message::ImePreedit(text, cursor, window, captured)),
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Commit(text)) => {
-                        Some(Message::ImeCommit(text, captured))
+                        Some(Message::ImeCommit(text, window, captured))
                     }
                     iced::Event::InputMethod(iced::advanced::input_method::Event::Closed) => {
-                        Some(Message::ImeClosed(captured))
+                        Some(Message::ImeClosed(window, captured))
                     }
                     _ => None,
                 }

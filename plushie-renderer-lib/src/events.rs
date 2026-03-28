@@ -31,75 +31,128 @@ fn path_to_string(path: std::path::PathBuf) -> String {
     }
 }
 
+/// Attach window_id to an outgoing event if the id is non-empty.
+/// When the iced window::Id can't be resolved (shouldn't happen for
+/// known windows), the event is emitted without a window_id and a
+/// warning is logged.
+fn maybe_with_window_id(event: OutgoingEvent, window_id: &str) -> OutgoingEvent {
+    if window_id.is_empty() {
+        event
+    } else {
+        event.with_window_id(window_id)
+    }
+}
+
 impl App {
-    pub fn handle_key_pressed(&self, data: KeyEventData) -> Task<Message> {
+    /// Resolve an iced window::Id to a string window_id, logging a
+    /// warning if the window is unknown. Returns an empty string for
+    /// unresolved windows so handlers can proceed without panicking.
+    fn resolve_window_id(&self, iced_id: &window::Id) -> String {
+        let id = self.windows.window_id_for(iced_id);
+        if id.is_empty() {
+            log::warn!(
+                "subscription event for unknown iced window {:?}, emitting without window_id",
+                iced_id
+            );
+        }
+        id
+    }
+
+    pub fn handle_key_pressed(&self, data: KeyEventData, iced_id: window::Id) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_KEY_PRESS, data.captured, |tag| {
-            OutgoingEvent::key_press(tag, &data)
+            maybe_with_window_id(OutgoingEvent::key_press(tag, &data), &window_id)
         })
     }
 
-    pub fn handle_key_released(&self, data: KeyEventData) -> Task<Message> {
+    pub fn handle_key_released(&self, data: KeyEventData, iced_id: window::Id) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_KEY_RELEASE, data.captured, |tag| {
-            OutgoingEvent::key_release(tag, &data)
+            maybe_with_window_id(OutgoingEvent::key_release(tag, &data), &window_id)
         })
     }
 
     pub fn handle_modifiers_changed(
         &mut self,
         mods: iced::keyboard::Modifiers,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.coalesce_subscription(SUB_MODIFIERS_CHANGED, captured, |tag| {
-            OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods))
+            maybe_with_window_id(
+                OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods)),
+                &window_id,
+            )
         })
     }
 
-    pub fn handle_cursor_moved(&mut self, pos: Point, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_moved(
+        &mut self,
+        pos: Point,
+        iced_id: window::Id,
+        captured: bool,
+    ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.coalesce_subscription(SUB_MOUSE_MOVE, captured, |tag| {
-            OutgoingEvent::cursor_moved(tag, pos.x, pos.y)
+            maybe_with_window_id(OutgoingEvent::cursor_moved(tag, pos.x, pos.y), &window_id)
         })
     }
 
-    pub fn handle_cursor_entered(&self, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_entered(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
-            OutgoingEvent::cursor_entered(tag)
+            maybe_with_window_id(OutgoingEvent::cursor_entered(tag), &window_id)
         })
     }
 
-    pub fn handle_cursor_left(&self, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_left(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
-            OutgoingEvent::cursor_left(tag)
+            maybe_with_window_id(OutgoingEvent::cursor_left(tag), &window_id)
         })
     }
 
     pub fn handle_mouse_button_pressed(
         &self,
         button: iced::mouse::Button,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
-            OutgoingEvent::button_pressed(tag, serialize_mouse_button(&button))
+            maybe_with_window_id(
+                OutgoingEvent::button_pressed(tag, serialize_mouse_button(&button)),
+                &window_id,
+            )
         })
     }
 
     pub fn handle_mouse_button_released(
         &self,
         button: iced::mouse::Button,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
-            OutgoingEvent::button_released(tag, serialize_mouse_button(&button))
+            maybe_with_window_id(
+                OutgoingEvent::button_released(tag, serialize_mouse_button(&button)),
+                &window_id,
+            )
         })
     }
 
     pub fn handle_wheel_scrolled(
         &mut self,
         delta: iced::mouse::ScrollDelta,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.coalesce_subscription(SUB_MOUSE_SCROLL, captured, |tag| {
             let (dx, dy, unit) = serialize_scroll_delta(&delta);
-            OutgoingEvent::wheel_scrolled(tag, dx, dy, unit)
+            maybe_with_window_id(OutgoingEvent::wheel_scrolled(tag, dx, dy, unit), &window_id)
         })
     }
 
@@ -107,10 +160,15 @@ impl App {
         &self,
         finger: iced::touch::Finger,
         pos: Point,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_TOUCH, captured, |tag| {
-            OutgoingEvent::finger_pressed(tag, finger.0, pos.x, pos.y)
+            maybe_with_window_id(
+                OutgoingEvent::finger_pressed(tag, finger.0, pos.x, pos.y),
+                &window_id,
+            )
         })
     }
 
@@ -118,10 +176,15 @@ impl App {
         &mut self,
         finger: iced::touch::Finger,
         pos: Point,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.coalesce_subscription(SUB_TOUCH, captured, |tag| {
-            OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y)
+            maybe_with_window_id(
+                OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y),
+                &window_id,
+            )
         })
     }
 
@@ -129,10 +192,15 @@ impl App {
         &self,
         finger: iced::touch::Finger,
         pos: Point,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_TOUCH, captured, |tag| {
-            OutgoingEvent::finger_lifted(tag, finger.0, pos.x, pos.y)
+            maybe_with_window_id(
+                OutgoingEvent::finger_lifted(tag, finger.0, pos.x, pos.y),
+                &window_id,
+            )
         })
     }
 
@@ -140,10 +208,15 @@ impl App {
         &self,
         finger: iced::touch::Finger,
         pos: Point,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_TOUCH, captured, |tag| {
-            OutgoingEvent::finger_lost(tag, finger.0, pos.x, pos.y)
+            maybe_with_window_id(
+                OutgoingEvent::finger_lost(tag, finger.0, pos.x, pos.y),
+                &window_id,
+            )
         })
     }
 
@@ -153,29 +226,43 @@ impl App {
     // macOS (built-in input methods), Linux/X11 (XIM/IBus), Linux/Wayland
     // (text-input-v3 protocol -- compositor support varies). The preedit
     // cursor range may be None on some older X11 IME implementations.
-    pub fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_opened)
+    pub fn handle_ime_opened(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
+        self.emit_subscription(SUB_IME, captured, |tag| {
+            maybe_with_window_id(OutgoingEvent::ime_opened(tag), &window_id)
+        })
     }
 
     pub fn handle_ime_preedit(
         &self,
         text: String,
         cursor: Option<std::ops::Range<usize>>,
+        iced_id: window::Id,
         captured: bool,
     ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_IME, captured, |tag| {
-            OutgoingEvent::ime_preedit(tag, text, cursor)
+            maybe_with_window_id(OutgoingEvent::ime_preedit(tag, text, cursor), &window_id)
         })
     }
 
-    pub fn handle_ime_commit(&self, text: String, captured: bool) -> Task<Message> {
+    pub fn handle_ime_commit(
+        &self,
+        text: String,
+        iced_id: window::Id,
+        captured: bool,
+    ) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
         self.emit_subscription(SUB_IME, captured, |tag| {
-            OutgoingEvent::ime_commit(tag, text)
+            maybe_with_window_id(OutgoingEvent::ime_commit(tag, text), &window_id)
         })
     }
 
-    pub fn handle_ime_closed(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_closed)
+    pub fn handle_ime_closed(&self, iced_id: window::Id, captured: bool) -> Task<Message> {
+        let window_id = self.resolve_window_id(&iced_id);
+        self.emit_subscription(SUB_IME, captured, |tag| {
+            maybe_with_window_id(OutgoingEvent::ime_closed(tag), &window_id)
+        })
     }
 
     /// Emit a window event to both the catch-all window subscription and
