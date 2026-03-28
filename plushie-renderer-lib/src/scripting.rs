@@ -714,7 +714,27 @@ pub fn build_interact_response(
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
             vec![OutgoingEvent::paste(wid, text.to_string()).with_window_id(window_id)]
         }
-        ("scroll", _) => {
+        // Widget-targeted scroll: scroll a specific scrollable widget.
+        ("scroll", Some((window_id, wid))) => {
+            let delta_x = payload
+                .get("delta_x")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let delta_y = payload
+                .get("delta_y")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            vec![
+                OutgoingEvent::generic(
+                    "scroll",
+                    wid,
+                    Some(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y})),
+                )
+                .with_window_id(window_id),
+            ]
+        }
+        // Input simulation: wheel event at current cursor position.
+        ("scroll", None) => {
             let delta_x = payload
                 .get("delta_x")
                 .and_then(|v| v.as_f64())
