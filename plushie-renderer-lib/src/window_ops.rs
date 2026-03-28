@@ -59,7 +59,7 @@ impl App {
     ) -> Task<Message> {
         match op {
             "open" => {
-                if self.windows.contains_plushie(window_id) {
+                if self.windows.contains_window(window_id) {
                     log::warn!("window_op open: {window_id} already open, skipping");
                     return Task::none();
                 }
@@ -71,11 +71,11 @@ impl App {
                 self.windows.insert(window_id.to_string(), iced_id);
                 self.windows.set_decorated(window_id, initial_decorations);
 
-                let plushie_id = window_id.to_string();
-                open_task.map(move |id| Message::WindowOpened(id, plushie_id.clone()))
+                let wid = window_id.to_string();
+                open_task.map(move |id| Message::WindowOpened(id, wid.clone()))
             }
             "close" => {
-                if let Some(iced_id) = self.windows.remove_by_plushie(window_id) {
+                if let Some(iced_id) = self.windows.remove_by_window(window_id) {
                     window::close(iced_id)
                 } else {
                     log::warn!("window_op close: unknown window_id: {window_id}");
@@ -750,7 +750,7 @@ impl App {
     /// windows and open/close as needed.
     pub fn sync_windows(&mut self) -> Task<Message> {
         let tree_windows: HashSet<String> = self.core.tree.window_ids().into_iter().collect();
-        let open_windows: HashSet<String> = self.windows.plushie_ids().cloned().collect();
+        let open_windows: HashSet<String> = self.windows.window_ids().cloned().collect();
 
         let mut tasks = Vec::new();
 
@@ -763,15 +763,15 @@ impl App {
                 self.windows.insert(win_id.clone(), iced_id);
                 self.windows.set_decorated(win_id, initial_decorations);
 
-                let plushie_id = win_id.clone();
-                tasks.push(open_task.map(move |id| Message::WindowOpened(id, plushie_id.clone())));
+                let wid = win_id.clone();
+                tasks.push(open_task.map(move |id| Message::WindowOpened(id, wid.clone())));
             }
         }
 
         // Close windows that are open but no longer in the tree.
         for win_id in &open_windows {
             if !tree_windows.contains(win_id)
-                && let Some(iced_id) = self.windows.remove_by_plushie(win_id)
+                && let Some(iced_id) = self.windows.remove_by_window(win_id)
             {
                 tasks.push(window::close(iced_id));
             }
@@ -781,8 +781,8 @@ impl App {
     }
 
     /// Build window::Settings from a window node's props.
-    pub fn window_settings_for(&self, plushie_id: &str) -> window::Settings {
-        if let Some(node) = self.core.tree.find_window(plushie_id) {
+    pub fn window_settings_for(&self, window_id: &str) -> window::Settings {
+        if let Some(node) = self.core.tree.find_window(window_id) {
             parse_window_settings(&node.props)
         } else {
             window::Settings {

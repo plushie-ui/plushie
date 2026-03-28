@@ -184,22 +184,22 @@ impl App {
         &self,
         specific_key: Option<&str>,
         event_fn: impl Fn(String, String) -> OutgoingEvent,
-        plushie_id: String,
+        window_id: String,
     ) -> io::Result<()> {
         if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
-            emit_event(event_fn(tag.clone(), plushie_id.clone()))?;
+            emit_event(event_fn(tag.clone(), window_id.clone()))?;
         }
         if let Some(key) = specific_key
             && let Some(tag) = self.core.active_subscriptions.get(key)
         {
-            emit_event(event_fn(tag.clone(), plushie_id))?;
+            emit_event(event_fn(tag.clone(), window_id))?;
         }
         Ok(())
     }
 
     pub fn handle_window_event(&self, iced_id: window::Id, evt: window::Event) -> Task<Message> {
-        let plushie_id = self.windows.plushie_id_for(&iced_id);
-        if plushie_id.is_empty() {
+        let window_id = self.windows.window_id_for(&iced_id);
+        if window_id.is_empty() {
             log::warn!(
                 "received window event for unknown iced window {:?}, skipping emission",
                 iced_id
@@ -218,7 +218,7 @@ impl App {
                         let pos = position.map(|p| (p.x, p.y));
                         emit_event(OutgoingEvent::window_opened(
                             tag.clone(),
-                            plushie_id.clone(),
+                            window_id.clone(),
                             pos,
                             size.width,
                             size.height,
@@ -229,7 +229,7 @@ impl App {
                         let pos = position.map(|p| (p.x, p.y));
                         emit_event(OutgoingEvent::window_opened(
                             tag.clone(),
-                            plushie_id,
+                            window_id,
                             pos,
                             size.width,
                             size.height,
@@ -239,28 +239,28 @@ impl App {
                 }
                 window::Event::Closed => {
                     if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
-                        emit_event(OutgoingEvent::window_closed(tag.clone(), plushie_id))?;
+                        emit_event(OutgoingEvent::window_closed(tag.clone(), window_id))?;
                     }
                 }
                 window::Event::Moved(point) => {
                     self.emit_window_event(
                         Some(SUB_WINDOW_MOVE),
                         |tag, jid| OutgoingEvent::window_moved(tag, jid, point.x, point.y),
-                        plushie_id,
+                        window_id,
                     )?;
                 }
                 window::Event::Resized(size) => {
                     self.emit_window_event(
                         Some(SUB_WINDOW_RESIZE),
                         |tag, jid| OutgoingEvent::window_resized(tag, jid, size.width, size.height),
-                        plushie_id,
+                        window_id,
                     )?;
                 }
                 window::Event::Rescaled(factor) => {
                     if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
                         emit_event(OutgoingEvent::window_rescaled(
                             tag.clone(),
-                            plushie_id,
+                            window_id,
                             factor,
                         ))?;
                     }
@@ -269,14 +269,14 @@ impl App {
                     self.emit_window_event(
                         Some(SUB_WINDOW_FOCUS),
                         OutgoingEvent::window_focused,
-                        plushie_id,
+                        window_id,
                     )?;
                 }
                 window::Event::Unfocused => {
                     self.emit_window_event(
                         Some(SUB_WINDOW_UNFOCUS),
                         OutgoingEvent::window_unfocused,
-                        plushie_id,
+                        window_id,
                     )?;
                 }
                 window::Event::FileHovered(path) => {
@@ -284,7 +284,7 @@ impl App {
                         let path_str = path_to_string(path);
                         emit_event(OutgoingEvent::file_hovered(
                             tag.clone(),
-                            plushie_id,
+                            window_id,
                             path_str,
                         ))?;
                     }
@@ -294,14 +294,14 @@ impl App {
                         let path_str = path_to_string(path);
                         emit_event(OutgoingEvent::file_dropped(
                             tag.clone(),
-                            plushie_id,
+                            window_id,
                             path_str,
                         ))?;
                     }
                 }
                 window::Event::FilesHoveredLeft => {
                     if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
-                        emit_event(OutgoingEvent::files_hovered_left(tag.clone(), plushie_id))?;
+                        emit_event(OutgoingEvent::files_hovered_left(tag.clone(), window_id))?;
                     }
                 }
                 window::Event::CloseRequested => {

@@ -45,10 +45,10 @@ impl Tree {
         self.root.as_ref()
     }
 
-    /// Find a window node by its plushie ID, searching the entire tree recursively.
-    pub fn find_window(&self, plushie_id: &str) -> Option<&TreeNode> {
+    /// Find a window node by its window ID, searching the entire tree recursively.
+    pub fn find_window(&self, window_id: &str) -> Option<&TreeNode> {
         let root = self.root.as_ref()?;
-        find_window_recursive(root, plushie_id, 0)
+        find_window_recursive(root, window_id, 0)
     }
 
     /// Collect the IDs of all window nodes in the tree (recursive search).
@@ -212,18 +212,18 @@ fn find_by_id_recursive<'a>(
 
 fn find_window_recursive<'a>(
     node: &'a TreeNode,
-    plushie_id: &str,
+    window_id: &str,
     depth: usize,
 ) -> Option<&'a TreeNode> {
     if depth > MAX_TREE_DEPTH {
         log::warn!("find_window_recursive: depth exceeds {MAX_TREE_DEPTH}, stopping search");
         return None;
     }
-    if node.type_name == "window" && node.id == plushie_id {
+    if node.type_name == "window" && node.id == window_id {
         return Some(node);
     }
     for child in &node.children {
-        if let Some(found) = find_window_recursive(child, plushie_id, depth + 1) {
+        if let Some(found) = find_window_recursive(child, window_id, depth + 1) {
             return Some(found);
         }
     }

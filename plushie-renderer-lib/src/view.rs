@@ -11,8 +11,8 @@ use crate::App;
 impl App {
     /// Render a single window's UI tree into iced `Element`s.
     /// Called by the iced daemon for each open window on every frame.
-    pub fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
-        let plushie_id = match self.windows.get_plushie(&window_id) {
+    pub fn view_window(&self, iced_id: window::Id) -> Element<'_, Message> {
+        let window_id = match self.windows.get_window_id(&iced_id) {
             Some(id) => id,
             None => {
                 return container(text("unknown window"))
@@ -23,9 +23,9 @@ impl App {
             }
         };
 
-        let resolved_theme = self.theme_ref_for_window(window_id);
+        let resolved_theme = self.theme_ref_for_window(iced_id);
 
-        match self.core.tree.find_window(plushie_id) {
+        match self.core.tree.find_window(window_id) {
             Some(window_node) => {
                 let ctx = plushie_ext::extensions::RenderCtx {
                     caches: &self.core.caches,
@@ -34,8 +34,8 @@ impl App {
                     extensions: &self.dispatcher,
                     default_text_size: self.core.default_text_size,
                     default_font: self.core.default_font,
-                    window_id: plushie_id,
-                    scale_factor: self.scale_factor_for_window(window_id),
+                    window_id,
+                    scale_factor: self.scale_factor_for_window(iced_id),
                 };
                 plushie_ext::widgets::render(window_node, ctx)
             }

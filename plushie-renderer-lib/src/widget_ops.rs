@@ -158,7 +158,7 @@ impl App {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
                 if !win_id.is_empty() {
-                    if let Some(iced_id) = self.windows.remove_by_plushie(win_id) {
+                    if let Some(iced_id) = self.windows.remove_by_window(win_id) {
                         window::close(iced_id)
                     } else {
                         log::warn!("close_window: unknown window_id: {win_id}");
@@ -201,7 +201,7 @@ impl App {
                 };
 
                 if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
-                    && let Some(pane) = find_pane_by_plushie_id(state, &pane_id)
+                    && let Some(pane) = find_pane_by_id(state, &pane_id)
                 {
                     let _ = state.split(axis, pane, new_pane_id);
                 }
@@ -216,7 +216,7 @@ impl App {
                     .to_string();
 
                 if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
-                    && let Some(pane) = find_pane_by_plushie_id(state, &pane_id)
+                    && let Some(pane) = find_pane_by_id(state, &pane_id)
                 {
                     let _ = state.close(pane);
                 }
@@ -237,8 +237,8 @@ impl App {
 
                 if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
                     && let (Some(a), Some(b)) = (
-                        find_pane_by_plushie_id(state, &a_id),
-                        find_pane_by_plushie_id(state, &b_id),
+                        find_pane_by_id(state, &a_id),
+                        find_pane_by_id(state, &b_id),
                     )
                 {
                     state.swap(a, b);
@@ -254,7 +254,7 @@ impl App {
                     .to_string();
 
                 if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
-                    && let Some(pane) = find_pane_by_plushie_id(state, &pane_id)
+                    && let Some(pane) = find_pane_by_id(state, &pane_id)
                 {
                     state.maximize(pane);
                 }
@@ -404,14 +404,14 @@ impl App {
 // PaneGrid helpers
 // ---------------------------------------------------------------------------
 
-/// Find a pane_grid::Pane by its plushie ID string.
-pub fn find_pane_by_plushie_id(
+/// Find a pane_grid::Pane by its ID string.
+pub fn find_pane_by_id(
     state: &pane_grid::State<String>,
-    plushie_id: &str,
+    pane_id: &str,
 ) -> Option<pane_grid::Pane> {
     state
         .panes
         .iter()
-        .find(|(_, id)| id.as_str() == plushie_id)
+        .find(|(_, id)| id.as_str() == pane_id)
         .map(|(pane, _)| *pane)
 }

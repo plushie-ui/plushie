@@ -137,33 +137,33 @@ impl App {
             Message::ImeClosed(captured) => self.handle_ime_closed(captured),
 
             // -- Window lifecycle events --
-            Message::WindowCloseRequested(window_id) => {
+            Message::WindowCloseRequested(iced_id) => {
                 // Do NOT close the window or remove from maps here. The host
                 // decides whether to close by sending a close_window command
                 // or removing the window from the tree. Closing immediately
                 // would bypass app-level confirmation dialogs.
                 if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_CLOSE) {
-                    let plushie_id = self.windows.plushie_id_for(&window_id);
+                    let window_id = self.windows.window_id_for(&iced_id);
                     emitters::emit_or_exit(OutgoingEvent::window_close_requested(
                         tag.clone(),
-                        plushie_id,
+                        window_id,
                     ))
                 } else {
                     Task::none()
                 }
             }
-            Message::WindowClosed(window_id) => {
-                if let Some(plushie_id) = self.windows.remove_by_iced(&window_id) {
+            Message::WindowClosed(iced_id) => {
+                if let Some(window_id) = self.windows.remove_by_iced(&iced_id) {
                     if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT)
                         && let Err(e) = emit_event(OutgoingEvent::window_closed(
                             tag.clone(),
-                            plushie_id.clone(),
+                            window_id.clone(),
                         ))
                     {
                         log::error!("write error: {e}");
                         return iced::exit();
                     }
-                    log::info!("window closed: {plushie_id}");
+                    log::info!("window closed: {window_id}");
                 }
                 // All managed windows gone -- notify the host.
                 // The host can choose to exit, send a new Snapshot, or take other action.
@@ -179,9 +179,9 @@ impl App {
                 }
                 Task::none()
             }
-            Message::WindowOpened(iced_id, plushie_id) => {
-                log::info!("window opened: {plushie_id} -> {iced_id:?}");
-                self.windows.insert(plushie_id, iced_id);
+            Message::WindowOpened(iced_id, window_id) => {
+                log::info!("window opened: {window_id} -> {iced_id:?}");
+                self.windows.insert(window_id, iced_id);
                 Task::none()
             }
             Message::WindowEvent(iced_id, evt) => self.handle_window_event(iced_id, evt),

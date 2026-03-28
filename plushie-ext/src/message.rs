@@ -103,7 +103,7 @@ pub enum Message {
     WindowCloseRequested(window::Id),
     /// A window was actually closed by iced.
     WindowClosed(window::Id),
-    /// A new window was opened (iced_id, plushie_id).
+    /// A new window was opened (iced_id, window_id).
     WindowOpened(window::Id, String),
     // -- Mouse events --
     /// Cursor moved to (x, y) in a window (position, window_id, captured).
